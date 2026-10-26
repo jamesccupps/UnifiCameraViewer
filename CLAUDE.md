@@ -109,7 +109,7 @@ The owner's PC has the real config. To try a change live:
 2. Run `PANES_DEVTOOLS=1 npm start`.
 3. Check `%APPDATA%\Protect Panes\protect-panes.log` for connection errors.
 
-To experiment without disturbing the saved layout, copy `config.json` into a scratch folder and run with `PANES_USER_DATA` pointing at it. The DPAPI-encrypted passwords still decrypt for the same Windows user.
+To experiment without disturbing the saved layout, copy `config.json` **and `Local State`** into a scratch folder and run with `PANES_USER_DATA` pointing at it. `safeStorage` encrypts with an AES key stored in `Local State` (`os_crypt.encrypted_key`, itself DPAPI-wrapped), so with `config.json` alone every console fails with "Error while decrypting the ciphertext provided to safeStorage.decryptString". With both files the passwords decrypt for the same Windows user. Adding `PANES_SELFTEST_DIR` to that run gives `result.json` plus screenshots of the real cameras, then the app exits.
 
 When adding a test, extend `test/run.mjs`. `PANES_SELFTEST_ACTIONS` (JSON) drives windows with real input:
 
@@ -133,6 +133,8 @@ When adding a test, extend `test/run.mjs`. `PANES_SELFTEST_ACTIONS` (JSON) drive
 The exe is unsigned, so SmartScreen shows "Run anyway" on first launch.
 
 ## Known limitations / not built
+
+Owner-requested features, with findings and open questions, are in `ROADMAP.md`.
 
 - Live view only: no playback, timeline, events, audio or two-way talk.
 - PTZ cameras can't be steered; only the 360° virtual PTZ exists.
