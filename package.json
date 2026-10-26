@@ -1,0 +1,26 @@
+{
+  "name": "protect-panes",
+  "productName": "Protect Panes",
+  "version": "1.1.0",
+  "description": "Free-floating UniFi Protect live-view windows, one per camera, across multiple consoles.",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "mock": "electron . --mock",
+    "build:win": "node scripts/build-win.js",
+    "test": "node test/run.mjs all",
+    "test:mock": "node test/run.mjs mock",
+    "test:e2e": "node test/run.mjs e2e"
+  },
+  "dependencies": {
+    "unifi-protect": "5.3.1"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "45.0.0",
+    "ffmpeg-static": "5.3.0",
+    "ws": "8.22.0"
+  }
+}

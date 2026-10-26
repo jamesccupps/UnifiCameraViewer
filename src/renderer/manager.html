@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+  <title>Protect Panes</title>
+  <link rel="stylesheet" href="manager.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" class="logo" aria-hidden="true">
+        <rect x="2" y="3" width="7" height="5" rx="1"/><rect x="2" y="9.5" width="7" height="5" rx="1"/><rect x="2" y="16" width="7" height="5" rx="1"/><rect x="12" y="3" width="10" height="7" rx="1"/>
+      </svg>
+      <h1>Protect Panes</h1>
+      <span id="mock-badge" class="badge hidden">mock mode</span>
+    </div>
+    <div class="actions">
+      <button id="btn-front" class="ghost">Bring cameras to front</button>
+      <button id="btn-add" class="primary">Add console</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="consoles" aria-label="Consoles"></section>
+
+    <section class="panel settings" aria-label="Settings">
+      <h2>Settings</h2>
+      <div class="grid">
+        <label class="check"><input type="checkbox" data-setting="lockLayout"><span><b>Lock layout</b><small>Camera windows can't be moved or resized; hover bar hidden.</small></span></label>
+        <label class="check"><input type="checkbox" data-setting="showNames"><span><b>Show camera names</b><small>Name label in the corner of each window.</small></span></label>
+        <label class="check"><input type="checkbox" data-setting="lockAspect"><span><b>Keep video shape</b><small>Windows resize to the camera's aspect ratio, no black bars.</small></span></label>
+        <label class="check"><input type="checkbox" data-setting="hideFromTaskbar"><span><b>Hide cameras from taskbar</b><small>Only the tray icon shows. Alt-Tab still works.</small></span></label>
+        <label class="check"><input type="checkbox" data-setting="startHidden"><span><b>Start with this list hidden</b><small>Opens straight to your cameras when any are set up.</small></span></label>
+        <label class="check"><input type="checkbox" data-setting="launchAtLogin"><span><b>Start with Windows</b><small>Launch at sign-in and restore the layout.</small></span></label>
+      </div>
+    </section>
+
+    <p class="hint">Move a camera by dragging the bar that appears when you hover over it. Resize from any edge. Right-click a camera for quality, always-on-top and lock. Positions are saved automatically.</p>
+  </main>
+
+  <footer class="bottom">
+    <button id="btn-reset" class="ghost">Reset window positions</button>
+    <span class="spacer"></span>
+    <span class="muted">Closing this list keeps cameras running. Use the tray icon to reopen it.</span>
+    <button id="btn-quit" class="danger">Quit</button>
+  </footer>
+
+  <dialog id="console-dialog">
+    <form id="console-form" method="dialog">
+      <h2 id="dialog-title">Add console</h2>
+      <p class="muted small">Sign in with a <b>local-only</b> UniFi OS account (not your UI.com login). Protect "View Only" access is enough.</p>
+      <label>Name<input name="name" placeholder="Building" maxlength="60" autocomplete="off"></label>
+      <label>IP address or hostname<input name="host" placeholder="192.168.1.1" required autocomplete="off"></label>
+      <label>Username<input name="username" required autocomplete="off"></label>
+      <label>Password<input name="password" type="password" autocomplete="new-password"></label>
+      <p id="dialog-error" class="error-text" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" id="dialog-cancel" class="ghost">Cancel</button>
+        <button type="submit" id="dialog-save" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="manager.js"></script>
+</body>
+</html>

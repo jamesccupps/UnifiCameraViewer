@@ -1,0 +1,356 @@
+"use strict";
+
+/*
+ * Plays the Protect fMP4 livestream through Media Source Extensions and keeps it pinned to the
+ * live edge. The main process sends an init segment (with its RFC 6381 codec string), then ~100 ms
+ * fragments. Anything unrecoverable asks the main process to restart the stream ("cam:reset").
+ */
+
+const video = document.getElementById("video");
+const statusEl = document.getElementById("status");
+const statusText = document.getElementById("status-text");
+const labelText = document.getElementById("label-text");
+const dot = document.getElementById("dot");
+const barTitle = document.getElementById("bar-title");
+const barConsole = document.getElementById("bar-console");
+const btnTop = document.getElementById("btn-top");
+const highlightEl = document.getElementById("highlight");
+const noticeEl = document.getElementById("notice");
+
+const MAX_QUEUE = 150;        // ~15 s of fragments waiting to append => we're not keeping up
+const MAX_LAG_S = 1.5;        // jump to live if further behind than this
+const CATCHUP_LAG_S = 0.5;    // play slightly fast above this
+const KEEP_BEHIND_S = 12;     // seconds of decoded history to keep before trimming
+
+let mediaSource = null;
+let sourceBuffer = null;
+let mime = "";
+let queue = [];
+let lastTrim = 0;
+let lastResetRequest = 0;
+let lastAspect = "";
+let streamState = "connecting";
+let codecError = "";          // sticky: a live stream we can't decode stays an error
+let meta = { title: "", consoleName: "" };
+
+// Exposed for the self-test harness only.
+const stats = { appended: 0, rebuilds: 0, jumps: 0, resetRequests: 0, errors: [] };
+window.__panesStats = () => {
+  const b = video.buffered;
+  const end = b.length ? b.end(b.length - 1) : 0;
+  const q = video.getVideoPlaybackQuality?.();
+  return {
+    ...stats,
+    queue: queue.length,
+    currentTime: video.currentTime,
+    bufferedEnd: end,
+    lag: end - video.currentTime,
+    paused: video.paused,
+    videoWidth: video.videoWidth,
+    videoHeight: video.videoHeight,
+    decodedFrames: q?.totalVideoFrames ?? null,
+    droppedFrames: q?.droppedVideoFrames ?? null,
+    mime,
+    status: streamState,
+    dewarp: dewarper.stats(),
+  };
+};
+
+// 360° cameras: the Dewarper paints quad/panorama views from the same decoded video.
+const dewarper = new Dewarper(video, document.getElementById("dewarp"), {
+  onChange: (patch) => panes.send("cam:dewarp", patch),
+  onError: (msg) => notice(msg, 10_000),
+});
+
+// ---------------------------------------------------------------------------------------------
+// MSE pipeline
+
+// The console sends an RFC 6381 codec string; if Chromium rejects it (format drift between
+// Protect versions), derive one from the init segment's sample entries instead.
+function codecFromInit(init) {
+  const bytes = init instanceof Uint8Array ? init : new Uint8Array(init);
+  const find = (tag) => {
+    const t = [...tag].map((c) => c.charCodeAt(0));
+    outer: for (let i = 0; i + 4 <= bytes.length; i++) {
+      for (let j = 0; j < 4; j++) if (bytes[i + j] !== t[j]) continue outer;
+      return i;
+    }
+    return -1;
+  };
+  const hex = (n, w = 2) => n.toString(16).toUpperCase().padStart(w, "0");
+  const parts = [];
+
+  let i;
+  if ((i = find("avcC")) >= 0) {
+    const entry = find("avc3") >= 0 ? "avc3" : "avc1";
+    parts.push(`${entry}.${hex(bytes[i + 5])}${hex(bytes[i + 6])}${hex(bytes[i + 7])}`.toLowerCase());
+  } else if ((i = find("hvcC")) >= 0) {
+    const entry = find("hev1") >= 0 ? "hev1" : "hvc1";
+    const b = (k) => bytes[i + 4 + k];
+    const space = ["", "A", "B", "C"][b(1) >> 6];
+    const tier = (b(1) >> 5) & 1 ? "H" : "L";
+    const profile = b(1) & 0x1f;
+    let compat = ((b(2) << 24) | (b(3) << 16) | (b(4) << 8) | b(5)) >>> 0;
+    let rev = 0;
+    for (let k = 0; k < 32; k++) { rev = (rev << 1) | (compat & 1); compat >>>= 1; }
+    const constraints = [6, 7, 8, 9, 10, 11].map(b);
+    while (constraints.length > 1 && constraints[constraints.length - 1] === 0) constraints.pop();
+    parts.push(`${entry}.${space}${profile}.${(rev >>> 0).toString(16).toUpperCase()}.${tier}${b(12)}.${constraints.map((c) => hex(c)).join(".")}`);
+  } else if ((i = find("av1C")) >= 0) {
+    const b1 = bytes[i + 5];
+    const b2 = bytes[i + 6];
+    const depth = (b2 & 0x40) ? ((b2 & 0x20) ? 12 : 10) : 8;
+    parts.push(`av01.${b1 >> 5}.${String(b1 & 0x1f).padStart(2, "0")}${(b2 & 0x80) ? "H" : "M"}.${String(depth).padStart(2, "0")}`);
+  }
+  if (find("mp4a") >= 0) parts.push("mp4a.40.2");
+  return parts.join(", ");
+}
+
+function pickMime(codec, initData) {
+  const candidates = [];
+  if (codec) candidates.push(String(codec).replace(/\s+/g, "").replace(/,/g, ", "));
+  const derived = codecFromInit(initData);
+  if (derived) candidates.push(derived);
+  // Last resort: video only, in case the audio entry is what's being rejected.
+  if (derived.includes(",")) candidates.push(derived.split(",")[0]);
+  if (!window.MediaSource) return { mime: "", tried: candidates };
+  for (const c of candidates) {
+    const m = `video/mp4; codecs="${c}"`;
+    if (MediaSource.isTypeSupported(m)) return { mime: m, tried: candidates };
+  }
+  return { mime: "", tried: candidates };
+}
+
+function rebuild(codec, initData) {
+  teardown();
+  const pick = pickMime(codec, initData);
+  mime = pick.mime;
+  if (!mime) {
+    const hevc = pick.tried.some((c) => /^(hvc1|hev1)/i.test(c));
+    codec = pick.tried.join(" / ") || codec;
+    codecError = hevc
+      ? "This PC can't decode H.265 in this app. In Protect, set this camera to Standard (H.264) encoding, or pick another quality from the right-click menu."
+      : `This stream's codec isn't supported (${codec}).`;
+    showStatus("error", codecError);
+    updateDot();
+    return;
+  }
+  codecError = "";
+  stats.rebuilds++;
+  queue = [initData];
+  const ms = new MediaSource();
+  mediaSource = ms;
+  const url = URL.createObjectURL(ms);
+  video.src = url;
+  ms.addEventListener("sourceopen", () => {
+    URL.revokeObjectURL(url);
+    if (ms !== mediaSource) return;
+    try {
+      const sb = ms.addSourceBuffer(mime);
+      sb.mode = "segments";
+      sb.addEventListener("updateend", onUpdateEnd);
+      sb.addEventListener("error", () => requestReset("sourcebuffer error"));
+      sourceBuffer = sb;
+    } catch (err) {
+      requestReset(`addSourceBuffer: ${err.name}`);
+      return;
+    }
+    pump();
+  }, { once: true });
+}
+
+function teardown() {
+  if (sourceBuffer) sourceBuffer.removeEventListener("updateend", onUpdateEnd);
+  sourceBuffer = null;
+  if (mediaSource && mediaSource.readyState === "open") {
+    try { mediaSource.endOfStream(); } catch { /* ignore */ }
+  }
+  mediaSource = null;
+  queue = [];
+  video.removeAttribute("src");
+  video.load();
+}
+
+function pump() {
+  const sb = sourceBuffer;
+  if (!sb || sb.updating || !queue.length || mediaSource?.readyState !== "open") return;
+  const chunk = queue.shift();
+  try {
+    sb.appendBuffer(chunk);
+    stats.appended++;
+  } catch (err) {
+    if (err.name === "QuotaExceededError") {
+      queue.unshift(chunk);
+      trim(true);
+      return;
+    }
+    requestReset(`append: ${err.name}`);
+  }
+}
+
+function onUpdateEnd() {
+  keepLive();
+  if (trim(false)) return; // remove() fires another updateend, which resumes pumping
+  pump();
+}
+
+function keepLive() {
+  const b = video.buffered;
+  if (!b.length) return;
+  const start = b.start(b.length - 1);
+  const end = b.end(b.length - 1);
+
+  if (video.currentTime < start || end - video.currentTime > MAX_LAG_S) {
+    video.currentTime = Math.max(start, end - 0.25);
+    stats.jumps++;
+  }
+  const lag = end - video.currentTime;
+  if (lag > CATCHUP_LAG_S) video.playbackRate = 1.15;
+  else if (lag < 0.25) video.playbackRate = 1.0;
+
+  if (video.paused) video.play().catch(() => { /* retried on next fragment */ });
+}
+
+function trim(force) {
+  const sb = sourceBuffer;
+  const now = performance.now();
+  if (!sb || sb.updating || (!force && now - lastTrim < 10_000)) return false;
+  lastTrim = now;
+  const b = video.buffered;
+  if (!b.length) return false;
+  const removeEnd = video.currentTime - KEEP_BEHIND_S;
+  if (removeEnd <= b.start(0) + 1) return false;
+  try {
+    sb.remove(b.start(0), removeEnd);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function requestReset(reason) {
+  stats.errors.push(String(reason));
+  if (stats.errors.length > 20) stats.errors.shift();
+  const now = performance.now();
+  if (now - lastResetRequest < 3_000) return;
+  lastResetRequest = now;
+  stats.resetRequests++;
+  teardown();
+  showStatus("reconnecting", "Reconnecting…");
+  panes.send("cam:reset", reason);
+}
+
+video.addEventListener("error", () => requestReset(`video error ${video.error?.code ?? ""}`));
+video.addEventListener("resize", reportAspect);
+
+// Dewarped layouts are 16:9 whatever the fisheye's own shape; otherwise follow the video.
+function reportAspect() {
+  const pref = dewarper.preferredAspect();
+  let size = null;
+  if (pref) size = { width: 16, height: 9 };
+  else if (video.videoWidth && video.videoHeight) size = { width: video.videoWidth, height: video.videoHeight };
+  if (!size) return;
+  const key = `${size.width}x${size.height}`;
+  if (key === lastAspect) return;
+  lastAspect = key;
+  panes.send("cam:aspect", size);
+}
+// Coming back from being covered or a sleeping display can leave us far behind.
+document.addEventListener("visibilitychange", () => { if (!document.hidden) keepLive(); });
+
+// ---------------------------------------------------------------------------------------------
+// Messages from the main process
+
+panes.on("cam:init", ({ codec, data, reset }) => {
+  if (reset || !sourceBuffer || !mime.includes(codec)) rebuild(codec, data);
+  else { queue.push(data); pump(); }
+});
+
+panes.on("cam:media", (data) => {
+  if (!mediaSource) return; // waiting for an init segment
+  queue.push(data);
+  if (queue.length > MAX_QUEUE) {
+    requestReset("decoder falling behind");
+    return;
+  }
+  pump();
+});
+
+panes.on("cam:status", ({ state, text }) => {
+  streamState = state;
+  if (state === "live" && codecError) showStatus("error", codecError);
+  else if (state === "live") hideStatus();
+  else showStatus(state, text);
+  updateDot();
+});
+
+panes.on("cam:meta", (m) => {
+  meta = m;
+  document.title = m.title;
+  labelText.textContent = m.consoleName ? `${m.title} · ${m.consoleName}` : m.title;
+  barTitle.textContent = m.title;
+  barConsole.textContent = m.consoleName || "";
+  document.body.classList.toggle("no-names", !m.showNames);
+  document.body.classList.toggle("locked", !!m.locked);
+  btnTop.classList.toggle("active", !!m.onTop);
+  dewarper.setConfig(m.dewarp);
+  dewarper.setInteractive(!m.locked);
+  reportAspect();
+});
+
+panes.on("cam:command", ({ cmd }) => {
+  if (cmd === "calibrate") {
+    dewarper.startCalibration(document.getElementById("calib"), document.getElementById("calib-hint"));
+  } else if (cmd === "autodetect") {
+    notice(dewarper.autoDetect() ? "Image circle detected." : "Couldn't find the image circle - use Adjust image circle instead.", 4_000);
+  }
+});
+
+panes.on("cam:highlight", () => {
+  highlightEl.classList.remove("on");
+  void highlightEl.offsetWidth; // restart the animation
+  highlightEl.classList.add("on");
+});
+
+// ---------------------------------------------------------------------------------------------
+// UI
+
+function showStatus(state, text) {
+  statusEl.classList.remove("hidden");
+  statusEl.classList.toggle("error", state === "error" || state === "offline" || state === "paused");
+  // Keep the last frame visible underneath while reconnecting.
+  statusEl.classList.toggle("dim", state === "reconnecting");
+  statusText.textContent = text || "";
+}
+
+function hideStatus() {
+  statusEl.classList.add("hidden");
+}
+
+let noticeTimer = null;
+function notice(text, ms) {
+  noticeEl.textContent = text;
+  noticeEl.classList.remove("hidden");
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => noticeEl.classList.add("hidden"), ms);
+}
+
+function updateDot() {
+  dot.className = "dot";
+  if (codecError) dot.classList.add("bad");
+  else if (streamState === "live") dot.classList.add("live");
+  else if (streamState === "error" || streamState === "offline") dot.classList.add("bad");
+  else dot.classList.add("warn");
+}
+
+document.getElementById("btn-close").addEventListener("click", () => panes.send("cam:close"));
+document.getElementById("btn-top").addEventListener("click", () => panes.send("cam:toggle-top"));
+document.getElementById("btn-menu").addEventListener("click", () => panes.send("cam:context-menu"));
+window.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  panes.send("cam:context-menu");
+});
+
+showStatus("connecting", "Connecting…");
+updateDot();
+panes.send("cam:ready");
