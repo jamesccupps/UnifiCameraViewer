@@ -244,7 +244,8 @@ function cameraMeta(cw) {
   return {
     title: cameraTitle(cw.key),
     consoleName: multi ? consoleName(cw.consoleId) : "",
-    showNames: !!store.settings.showNames,
+    // The global setting is the master switch; hideName turns the label off for one window.
+    showNames: !!store.settings.showNames && !entry.hideName,
     locked: !!store.settings.lockLayout,
     onTop: !!entry.onTop,
     channel: cw.stream?.channel ?? entry.channel ?? null,
@@ -408,6 +409,13 @@ function toggleOnTop(cw) {
   notifyManager();
 }
 
+function toggleName(cw) {
+  const entry = store.data.windows[cw.key];
+  entry.hideName = !entry.hideName;
+  store.save();
+  refreshCameraMeta(cw);
+}
+
 function applyAspect(cw) {
   if (cw.win.isDestroyed()) return;
   if (!store.settings.lockAspect || !cw.aspect) {
@@ -481,6 +489,7 @@ function cameraContextMenuTemplate(cw) {
     { label: meta.fisheye ? "360° view" : "360° view (fisheye lens)", submenu: dewarpMenu(cw) },
     { type: "separator" },
     { label: "Always on top", type: "checkbox", checked: !!entry.onTop, click: () => toggleOnTop(cw) },
+    { label: "Show name", type: "checkbox", checked: meta.showNames, enabled: !!store.settings.showNames, click: () => toggleName(cw) },
     { label: "Lock layout", type: "checkbox", checked: !!store.settings.lockLayout, click: () => setSetting("lockLayout", !store.settings.lockLayout) },
     { label: "Reconnect stream", click: () => cw.stream.restart() },
     { type: "separator" },

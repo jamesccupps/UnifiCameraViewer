@@ -152,6 +152,9 @@ body.locked .bar { display: none; }
   pointer-events: none;
 }
 body.no-names .label { display: none; }
+/* Small window: just the status dot (see fitLabel in camera.js). */
+.label.compact { padding: 5px; border-radius: 999px; }
+.label.compact #label-text { display: none; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
 .dot.live { background: var(--live); }
 .dot.warn { background: var(--warn); }

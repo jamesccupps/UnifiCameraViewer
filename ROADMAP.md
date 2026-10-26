@@ -23,12 +23,12 @@ Possible app-side fix if (1) points at us: a per-window brightness/contrast adju
 
 ## 2. Hide the status dot + camera name, and collapse it on small windows
 
-**Status:** partly exists.
+**Status:** built, unreleased. Mock-suite tests cover it. Not yet tried on the real consoles.
 
-- A global switch already exists: camera list → **Show camera names** (`settings.showNames`). Turning it off hides the dot and the label in every window. It's currently **on** in the real config.
-- Missing: a **per-window** toggle, i.e. a right-click menu item that stores `windows[key].showName` and overrides the global setting.
-- Requested: when the label is shown and the window is made small, **collapse it to just the dot**. Approach: a `ResizeObserver` in camera.js collapses the label to the dot when the label is wider than ~50% of the window. Measuring is better than a fixed CSS breakpoint because names range from "Dock" to "North Parking Level 2 Stairwell · Garage".
-- Open: the exact threshold, and whether the dot alone should also hide when the window is very small.
+- Global: camera list → **Show camera names** (`settings.showNames`) hides the dot and label in every window. It's the master switch.
+- Per window: right-click → **Show name** (`windows[key].hideName`). It's greyed out while the global switch is off.
+- Small windows: when the full label would be wider than 50% of the window (`LABEL_MAX_SHARE` in camera.js), only the dot is shown. The full label comes back when the window is widened. It's measured on every resize, so long and short names each collapse at their own width.
+- Open: whether 50% feels right on the real windows. A 353 px window with a 27-character label sits just under the line, at about 47%. Also open: whether the dot alone should hide on very small windows.
 
 ## 3. Time on 360° dewarp views
 

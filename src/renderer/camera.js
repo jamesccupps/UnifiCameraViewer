@@ -9,6 +9,7 @@
 const video = document.getElementById("video");
 const statusEl = document.getElementById("status");
 const statusText = document.getElementById("status-text");
+const labelEl = document.getElementById("label");
 const labelText = document.getElementById("label-text");
 const dot = document.getElementById("dot");
 const barTitle = document.getElementById("bar-title");
@@ -21,6 +22,7 @@ const MAX_QUEUE = 150;        // ~15 s of fragments waiting to append => we're n
 const MAX_LAG_S = 1.5;        // jump to live if further behind than this
 const CATCHUP_LAG_S = 0.5;    // play slightly fast above this
 const KEEP_BEHIND_S = 12;     // seconds of decoded history to keep before trimming
+const LABEL_MAX_SHARE = 0.5;  // a name label wider than this share of the window shrinks to just the dot
 
 let mediaSource = null;
 let sourceBuffer = null;
@@ -52,6 +54,7 @@ window.__panesStats = () => {
     droppedFrames: q?.droppedVideoFrames ?? null,
     mime,
     status: streamState,
+    label: { shown: !document.body.classList.contains("no-names"), compact: labelEl.classList.contains("compact") },
     dewarp: dewarper.stats(),
   };
 };
@@ -293,6 +296,7 @@ panes.on("cam:meta", (m) => {
   document.body.classList.toggle("no-names", !m.showNames);
   document.body.classList.toggle("locked", !!m.locked);
   btnTop.classList.toggle("active", !!m.onTop);
+  fitLabel();
   dewarper.setConfig(m.dewarp);
   dewarper.setInteractive(!m.locked);
   reportAspect();
@@ -334,6 +338,14 @@ function notice(text, ms) {
   clearTimeout(noticeTimer);
   noticeTimer = setTimeout(() => noticeEl.classList.add("hidden"), ms);
 }
+
+// The full label is measured on every resize and name change: names run from "Dock" to
+// "North Parking Level 2 Stairwell · Garage", so a fixed breakpoint would be wrong for most of them.
+function fitLabel() {
+  labelEl.classList.remove("compact");
+  labelEl.classList.toggle("compact", labelEl.scrollWidth > window.innerWidth * LABEL_MAX_SHARE);
+}
+window.addEventListener("resize", fitLabel);
 
 function updateDot() {
   dot.className = "dot";

@@ -69,8 +69,25 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
             wc.sendInputEvent({ type: "keyDown", keyCode: act.key });
             wc.sendInputEvent({ type: "keyUp", keyCode: act.key });
             break;
+          case "resize":
+            cw.win.setSize(act.size[0], act.size[1]);
+            break;
+          case "menu-click": {
+            const find = (items) => {
+              for (const i of items) {
+                if (i.label === act.label) return i;
+                const sub = i.submenu && find(i.submenu);
+                if (sub) return sub;
+              }
+              return null;
+            };
+            const item = find(hooks.cameraContextMenuTemplate(cw));
+            if (!item?.click) throw new Error(`no menu item "${act.label}"`);
+            item.click();
+            break;
+          }
         }
-        results.push({ act, ok: true });
+        results.push({ act, ok: true, t: Date.now() });
       } catch (err) {
         results.push({ act, error: String(err) });
       }

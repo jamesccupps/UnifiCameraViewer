@@ -86,6 +86,7 @@ async function mockSuite() {
     dock: `${A}/aaaaaaaa-cam1`,
     quad: `${A}/aaaaaaaa-cam360`,
     pano: `${B}/bbbbbbbb-cam360`,
+    ramp: `${B}/bbbbbbbb-cam0`,
   };
   fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
     version: 1,
@@ -101,6 +102,7 @@ async function mockSuite() {
         open: true, bounds: { x: 500, y: 560, width: 960, height: 540 }, channel: 1,
         dewarp: { mode: "panorama", mount: "ceiling", lensFov: 180, circle: null, views: [0, 90, -90, 180].map((pan) => ({ pan, tilt: -35, fov: 62 })), focus: -1, pano: { pan: 0, tilt: -35 } },
       },
+      [keys.ramp]: { open: true, bounds: { x: 0, y: 580, width: 200, height: 113 }, channel: 2 },
     },
     settings: { startHidden: true },
   }, null, 2));
@@ -109,6 +111,9 @@ async function mockSuite() {
     { at: 4000, do: "drag", win: 2, from: [240, 135], to: [340, 175] },
     { at: 5500, do: "dblclick", win: 2, pos: [720, 405] },
     { at: 6500, do: "menu", win: 3 },
+    { at: 8000, do: "resize", win: 1, size: [200, 113] },
+    { at: 8000, do: "resize", win: 4, size: [480, 270] },
+    { at: 9000, do: "menu-click", win: 3, label: "Show name" },
   ];
   const { result, config } = await runApp({
     userData, results, seconds: 14, extraArgs: ["--mock"],
@@ -132,6 +137,17 @@ async function mockSuite() {
   check("double-click enlarged view 4 and it was saved", qd?.focus === 3, `focus=${qd?.focus}`);
   const menu = result.actions.find((a) => a.act.do === "menu");
   check("context menu builds with 360° submenu", !!menu?.menu?.some((i) => typeof i === "object" && i["360° view"]), menu?.error);
+  const resizedAt = result.actions.find((a) => a.act.do === "resize")?.t ?? 0;
+  const before = result.samples.filter((s) => s.t < resizedAt).at(-1)?.cams ?? {};
+  const label = (c) => c && JSON.stringify(c.label);
+  check("small window shows only the status dot", before[keys.ramp]?.label?.compact === true, label(before[keys.ramp]));
+  check("normal-size window shows the full name label", cams[keys.lobby]?.label?.compact === false, label(cams[keys.lobby]));
+  check("shrinking a window collapses its label to the dot", before[keys.dock]?.label?.compact === false && cams[keys.dock]?.label?.compact === true, `${label(before[keys.dock])} -> ${label(cams[keys.dock])}`);
+  check("enlarging a window brings the full label back", cams[keys.ramp]?.label?.compact === false, label(cams[keys.ramp]));
+  const hideClick = result.actions.find((a) => a.act.do === "menu-click");
+  check("context menu has a checked Show name item", !!menu?.menu?.includes("[x] Show name"), JSON.stringify(menu?.menu));
+  check("Show name in the menu hides that window's label and saves it", hideClick?.ok && cams[keys.pano]?.label?.shown === false && config.windows[keys.pano]?.hideName === true, hideClick?.error ?? `${label(cams[keys.pano])} hideName=${config.windows[keys.pano]?.hideName}`);
+  check("other windows keep their labels", [keys.lobby, keys.dock, keys.quad, keys.ramp].every((k) => cams[k]?.label?.shown === true));
   console.log(`  results: ${results}`);
 }
 

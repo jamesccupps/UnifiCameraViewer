@@ -75,7 +75,7 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
 
 - `config.json`:
   - `consoles[]`: `{id, name, host, username, password: {enc: "safe" | "plain", data}}`
-  - `windows["<consoleId>/<cameraId>"]`: `{open, bounds, channel, onTop, name, dewarp}`
+  - `windows["<consoleId>/<cameraId>"]`: `{open, bounds, channel, onTop, name, hideName, dewarp}`. `hideName` hides one window's label; `settings.showNames` off hides all of them.
   - `settings`: `{lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin}`
 - `protect-panes.log`: connection log. Rolls to `.log.1` at 2 MB.
 
@@ -95,6 +95,7 @@ Passwords are DPAPI-encrypted (`safeStorage`) and tied to the Windows user. `enc
 - **WebGL fallback.** `app.commandLine.appendSwitch("enable-unsafe-swiftshader")` lets Chromium render WebGL on the CPU when there's no usable GPU driver. Without it, current Chromium disables WebGL and 360° silently degrades to raw fisheye. `Dewarper` detects a software renderer and draws at half resolution. The GL context is created lazily, only for windows in a dewarp mode.
 - **Fisheye model is equidistant** (r ∝ θ), 180° lens default. Mount → lens frames live in `LENS` in dewarp.js. Pan 0 = top of the fisheye image for ceiling mounts. This was verified with synthetic frames only, not a real AI 360 lens; real lenses may need a lens-profile curve.
 - **Circle auto-detect.** It scans 120 rays for the point where the picture goes dark for good, then fits with RANSAC + a Kasa least-squares fit. The test fixture deliberately includes an OSD timestamp and black boxes inside the circle. Keep both passing if you touch it.
+- **Name label auto-collapse.** `fitLabel()` in camera.js measures the full label on every resize and title change. When the label is wider than `LABEL_MAX_SHARE` (50%) of the window, only the status dot is shown. Measuring is deliberate, because a fixed breakpoint fits short names or long ones, never both.
 - **Aspect lock.** The renderer reports the aspect it wants: the video size normally, 16:9 in dewarp modes. Main calls `setAspectRatio` and snaps the window height. Calibration deliberately doesn't change aspect.
 - **Windows never steal focus.** Use `showInactive()`, never `show()`/`focus()` for camera windows: exacqVision is in use on the same screen.
 - **Moving vs aiming.** The window drag region is only the hover bar (`-webkit-app-region: drag`). The picture itself takes right-click (context menu) and, in 360° views, drag/scroll for PTZ. Lock layout disables both window moves and PTZ.
@@ -120,6 +121,10 @@ When adding a test, extend `test/run.mjs`. `PANES_SELFTEST_ACTIONS` (JSON) drive
 - `dewarp` `{win, changes}`
 - `command` `{win, cmd}`
 - `key` `{win, key}`
+- `resize` `{win, size: [w, h]}`
+- `menu-click` `{win, label}`: runs that context-menu item's click handler (searches submenus too)
+
+Action results carry `t` (epoch ms), so a check can compare against the samples taken before an action.
 
 `win` is the index in window-open order. That's config order.
 
