@@ -22,6 +22,9 @@ const dewarpCanvas = document.getElementById("dewarp");
 const pictureEl = document.getElementById("picture");
 const picInputs = { brightness: document.getElementById("pic-brightness"), contrast: document.getElementById("pic-contrast") };
 
+// camera.html?tile=1 is a tile in a grid window: the grid's frame moves, sizes and closes it.
+if (new URLSearchParams(location.search).has("tile")) document.body.classList.add("tile");
+
 const MAX_QUEUE = 150;        // ~15 s of fragments waiting to append => we're not keeping up
 const MAX_LAG_S = 1.5;        // jump to live if further behind than this
 const CATCHUP_LAG_S = 0.5;    // play slightly fast above this

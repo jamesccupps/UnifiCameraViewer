@@ -263,6 +263,7 @@ main { flex: 1; overflow: auto; padding: 14px 18px 18px; }
 }
 .layout-list li:last-child { border-bottom: 0; }
 .layout-list b { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.layout-list .grid-row small { color: var(--accent); }
 .layout-list small { color: var(--muted); }
 .layout-list .empty { display: block; color: var(--muted); padding: 10px 2px; }
 
@@ -292,9 +293,9 @@ dialog.editor { width: min(1040px, 96vw); max-height: 94vh; padding: 16px 18px; 
 .editor-head input { flex: 1; }
 .editor-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .editor-controls label { flex-direction: row; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
-.editor-body { display: grid; grid-template-columns: 230px 1fr; gap: 14px; min-height: 360px; }
+.editor-body { display: grid; grid-template-columns: 230px 1fr; gap: 14px; min-height: 300px; }
 .palette { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
-.palette ul { list-style: none; margin: 0; padding: 0; overflow: auto; max-height: 52vh; border: 1px solid var(--line); border-radius: 8px; }
+.palette ul { list-style: none; margin: 0; padding: 0; overflow: auto; max-height: 46vh; border: 1px solid var(--line); border-radius: 8px; }
 .palette li.group { padding: 6px 10px 3px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; cursor: default; }
 .palette li.cam {
   display: flex; align-items: center; gap: 8px;
@@ -306,7 +307,7 @@ dialog.editor { width: min(1040px, 96vw); max-height: 94vh; padding: 16px 18px; 
 .palette li.cam.placed::after { content: "✓"; margin-left: auto; color: var(--live); }
 .palette li.cam small { color: var(--muted); }
 .stage { display: grid; place-items: center; background: #0c0e10; border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
-.preview { position: relative; width: 100%; max-height: 54vh; background: #050607; outline: 1px solid var(--line-2); border-radius: 4px; }
+.preview { position: relative; width: 100%; max-height: 48vh; background: #050607; outline: 1px solid var(--line-2); border-radius: 4px; }
 .cell {
   position: absolute;
   display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px;

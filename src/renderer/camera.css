@@ -130,7 +130,7 @@ video {
   transition: opacity 120ms ease;
 }
 body:hover .bar { opacity: 1; }
-body.locked .bar { display: none; }
+body.locked .bar, body.tile .bar { display: none; }
 
 .drag {
   -webkit-app-region: drag;

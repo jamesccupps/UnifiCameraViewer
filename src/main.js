@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { CameraStream } from "./camera-stream.js";
 import { ConsoleConnection, channelList, fisheyeInfo, resolveChannel } from "./console-connection.js";
 import { autoGrid, cellRects, channelForTile, fitAspect, readingOrder, templateById, TEMPLATES } from "./grid.js";
+import { GridWindow } from "./grid-window.js";
 import { createLogger } from "./log.js";
 import { Previews } from "./previews.js";
 import { decryptPassword, DEFAULT_SETTINGS, encryptPassword, newId, Store } from "./store.js";
@@ -38,11 +39,12 @@ const connections = new Map(); // consoleId -> ConsoleConnection
 const camWins = new Map();     // key "<consoleId>/<cameraId>" -> player of that camera's window
 const senders = new Map();     // webContents.id -> player
 
-// A player is one camera page and its stream: { key, consoleId, cameraId, win, wc, stream, aspect }.
-// Per-camera settings (quality, 360° view, picture...) live in store.data.windows[key]; entryOf()
-// is the one place that knows where a player's settings are.
-const entryOf = (cw) => store.data.windows[cw.key];
-const players = () => [...camWins.values()];
+// A player is one camera page and its stream: { key, consoleId, cameraId, win, wc, stream, aspect }:
+// a camera window, or a grid tile, which also has { gw, tile, index, autoChannel }. A window's
+// settings (quality, 360° view, picture...) live in store.data.windows[key], a tile's in the tile
+// itself, so the same camera can look different in a grid; entryOf() is the one place that knows.
+const entryOf = (cw) => cw.tile ?? store.data.windows[cw.key];
+const players = () => [...camWins.values(), ...gridPlayers()];
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -70,11 +72,12 @@ async function init() {
     store.flush();
   }
 
-  // Drop window entries whose console no longer exists.
+  // Drop window entries and grid tiles whose console no longer exists.
   const consoleIds = new Set(store.data.consoles.map((c) => c.id));
   for (const key of Object.keys(store.data.windows)) {
     if (!consoleIds.has(key.split("/")[0])) delete store.data.windows[key];
   }
+  for (const g of store.data.grids) g.tiles = g.tiles.map((t) => (t && consoleIds.has(t.key.split("/")[0]) ? t : null));
 
   updater = new Updater({
     currentVersion: app.getVersion(),
@@ -104,11 +107,26 @@ async function init() {
   // Hidden windows ("Hide cameras") stay part of the layout but aren't created until shown.
   const openKeys = Object.entries(store.data.windows).filter(([, w]) => w.open && !w.hidden).map(([k]) => k);
   for (const key of openKeys) openCameraWindow(key);
+  const openGrids = store.data.grids.filter((g) => g.open && !g.hidden);
+  for (const g of openGrids) gridWindow(g).open();
 
-  if (!store.data.consoles.length || !openKeys.length || !store.settings.startHidden) showManager();
+  if (!store.data.consoles.length || !(openKeys.length || openGrids.length) || !store.settings.startHidden) showManager();
 
   if (process.env.PANES_SELFTEST_DIR) {
-    (await import("./selftest.js")).runSelfTest({ camWins, log, connections, store, hooks: { cameraContextMenuTemplate, trayMenuTemplate, updateDewarp, sendCommand } });
+    const openGridWins = () => [...gridWins.values()].filter((g) => g.isOpen);
+    (await import("./selftest.js")).runSelfTest({
+      camWins, log, connections, store,
+      hooks: {
+        cameraContextMenuTemplate, trayMenuTemplate, updateDewarp, sendCommand,
+        // Grid tiles are named "grid:<grid name>#<tile index>" in samples and actions.
+        gridTiles: () => openGridWins().flatMap((gw) => gw.players.map((cw) => ({ id: `grid:${gw.grid.name}#${cw.index}`, cw, bounds: gw.tileBounds(cw.index), visible: gw.win.isVisible() }))),
+        gridPageMenuTemplate: (name, index) => {
+          const gw = openGridWins().find((g) => g.grid.name === name);
+          if (!gw) throw new Error(`no open grid "${name}"`);
+          return gridPageMenuTemplate(gw, index);
+        },
+      },
+    });
   }
 }
 
@@ -170,6 +188,10 @@ async function saveConsole(input) {
 async function removeConsole(id) {
   for (const cw of [...camWins.values()]) if (cw.consoleId === id) cw.win.close();
   for (const key of Object.keys(store.data.windows)) if (key.startsWith(`${id}/`)) delete store.data.windows[key];
+  for (const g of store.data.grids) {
+    g.tiles = g.tiles.map((t) => (t?.key.startsWith(`${id}/`) ? null : t));
+    gridWins.get(g.id)?.sync();
+  }
   store.data.consoles = store.data.consoles.filter((c) => c.id !== id);
   store.flush();
   const conn = connections.get(id);
@@ -304,6 +326,9 @@ function closeCamera(key) {
 const hiddenKeys = (consoleId = null) => Object.entries(store.data.windows)
   .filter(([key, w]) => w.open && w.hidden && (!consoleId || key.startsWith(`${consoleId}/`)))
   .map(([key]) => key);
+// Grid windows hold cameras from any console, so only the global Hide / Show cameras touch them.
+const hiddenGrids = () => store.data.grids.filter((g) => g.open && g.hidden);
+const hiddenCount = () => hiddenKeys().length + hiddenGrids().length;
 
 function hideCameras(consoleId = null) {
   for (const cw of camWins.values()) {
@@ -315,6 +340,13 @@ function hideCameras(consoleId = null) {
     cw.stream.pause();
     cw.win.hide();
   }
+  if (!consoleId) {
+    for (const gw of gridWins.values()) {
+      if (!gw.isOpen || gw.grid.hidden || gw.win.isMinimized()) continue;
+      gw.grid.hidden = true;
+      gw.hide();
+    }
+  }
   store.save();
   updateTrayMenu();
   notifyManager();
@@ -322,6 +354,15 @@ function hideCameras(consoleId = null) {
 
 function showHiddenCameras(consoleId = null) {
   for (const key of hiddenKeys(consoleId)) openCameraWindow(key, { flash: false });
+  if (!consoleId) {
+    for (const g of hiddenGrids()) {
+      delete g.hidden;
+      const gw = gridWindow(g);
+      if (gw.isOpen) gw.show();
+      else gw.open();
+    }
+    store.save();
+  }
   updateTrayMenu();
   notifyManager();
 }
@@ -545,32 +586,51 @@ function screensForEditor() {
     }));
 }
 
-/** Validate an editor submission and turn it into layout windows; returns the layout id. */
+/** The editor's cells, checked: [{ key, mode } | null], one per tile of tpl, each camera once. */
+function editorCells(input, tpl) {
+  const consoleIds = new Set(store.data.consoles.map((c) => c.id));
+  const seen = new Set();
+  return (Array.isArray(input?.cells) ? input.cells : []).slice(0, tpl.cells.length).map((c) => {
+    const key = typeof c?.key === "string" ? c.key : "";
+    if (!consoleIds.has(key.split("/")[0]) || !key.split("/")[1] || seen.has(key)) return null;
+    seen.add(key);
+    return { key, mode: VIEW_MODES.includes(c.mode) ? c.mode : "quad" };
+  });
+}
+
+/** A 360° camera's dewarp settings for an editor view choice, starting from `base`; null for a normal camera. */
+function dewarpForView(key, mode, base) {
+  const cam = connections.get(key.split("/")[0])?.camera(key.split("/")[1]);
+  const fisheye = cam ? fisheyeInfo(cam).fisheye : !!base;
+  if (!fisheye) return null;
+  const b = base ?? defaultDewarp(cam ? fisheyeInfo(cam).mount : "ceiling");
+  return { ...structuredClone(b), mode: mode === "single" ? "quad" : mode, focus: mode === "single" ? Math.max(0, b.focus ?? 0) : -1 };
+}
+
+/** The editor's name for a saved dewarp state (Single view is quad with one view enlarged). */
+const viewOf = (d) => (d?.mode === "quad" && (d.focus ?? -1) >= 0 ? "single" : d?.mode ?? "quad");
+
+/**
+ * Validate an editor submission. "Open as: separate windows" turns it into a layout of windows;
+ * "one grid window" into a grid (saveEditorGrid). Returns the layout's or grid's id.
+ */
 function saveEditorLayout(input) {
   const tpl = templateById(String(input?.templateId ?? ""));
   if (!tpl?.cells) throw new Error("Pick a layout.");
   const display = screen.getAllDisplays().find((d) => d.id === Number(input?.displayId)) ?? screen.getPrimaryDisplay();
-  const consoleIds = new Set(store.data.consoles.map((c) => c.id));
+  const cells = editorCells(input, tpl);
+  if (input?.as === "grid") return saveEditorGrid(input, tpl, display, cells);
   const rects = cellRects(tpl, display.workArea);
-  const cells = (Array.isArray(input?.cells) ? input.cells : []).slice(0, tpl.cells.length).map((c) => {
-    const key = typeof c?.key === "string" ? c.key : "";
-    if (!consoleIds.has(key.split("/")[0]) || !key.split("/")[1]) return null;
-    return { key, mode: VIEW_MODES.includes(c.mode) ? c.mode : "quad" };
-  });
   const windows = {};
   cells.forEach((c, i) => {
-    if (!c || windows[c.key]) return; // a camera goes in one cell only
+    if (!c) return;
     const entry = layoutEntry(c.key);
     const cw = camWins.get(c.key);
     const bounds = fitAspect(rects[i], cw?.aspect ?? 16 / 9);
     const out = { ...entry, bounds };
     if (store.settings.arrangeQuality) out.channel = channelForTile(bounds.width * display.scaleFactor);
-    const cam = connections.get(c.key.split("/")[0])?.camera(c.key.split("/")[1]);
-    const fisheye = cam ? fisheyeInfo(cam).fisheye : !!entry.dewarp;
-    if (fisheye) {
-      const base = entry.dewarp ?? defaultDewarp(cam ? fisheyeInfo(cam).mount : "ceiling");
-      out.dewarp = { ...structuredClone(base), mode: c.mode === "single" ? "quad" : c.mode, focus: c.mode === "single" ? Math.max(0, base.focus ?? 0) : -1 };
-    }
+    const dewarp = dewarpForView(c.key, c.mode, entry.dewarp);
+    if (dewarp) out.dewarp = dewarp;
     windows[c.key] = out;
   });
   if (!Object.keys(windows).length) throw new Error("Drag at least one camera into the layout.");
@@ -580,6 +640,261 @@ function saveEditorLayout(input) {
   });
   if (input?.apply) applyLayout(id);
   return id;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Grid windows (src/grid-window.js): several cameras in one window's tiles, like a Protect liveview.
+// The layout editor makes them ("Open as: one grid window"); the tile's right-click menu and the
+// Layouts tab manage them.
+
+const gridWins = new Map(); // grid id -> GridWindow (created on first open, dropped when closed)
+const gridPlayers = () => [...gridWins.values()].flatMap((gw) => gw.players);
+const TILE_FIELDS = ["range", "picture", "hideName", "clock"]; // what a new tile copies from the camera's window
+let pendingEditor = null; // grid id the camera list should open in the editor (tile menu → Edit grid…)
+
+function saveEditorGrid(input, tpl, display, cells) {
+  const name = String(input?.name ?? "").trim().slice(0, 60);
+  if (!name) throw new Error("Give the grid a name.");
+  if (!cells.some(Boolean)) throw new Error("Drag at least one camera into the grid.");
+  const existing = store.data.grids.find((g) => g.id === input?.id);
+  const tiles = cells.map((c) => {
+    if (!c) return null;
+    // The same camera already in this grid keeps its tile settings; a new tile starts from its window's.
+    const kept = existing?.tiles.find((t) => t?.key === c.key);
+    const tile = kept ? { ...kept } : { key: c.key };
+    if (!kept) for (const f of TILE_FIELDS) if (store.data.windows[c.key]?.[f] !== undefined) tile[f] = structuredClone(store.data.windows[c.key][f]);
+    const dewarp = dewarpForView(c.key, c.mode, kept?.dewarp ?? store.data.windows[c.key]?.dewarp);
+    if (dewarp) tile.dewarp = dewarp;
+    else delete tile.dewarp;
+    return tile;
+  });
+  let grid = existing;
+  if (grid) {
+    Object.assign(grid, { name, templateId: tpl.id, tiles, editor: { displayId: display.id } });
+  } else {
+    grid = { id: newId(), name, templateId: tpl.id, tiles, bounds: { ...display.workArea }, open: false, editor: { displayId: display.id } };
+    store.data.grids.push(grid);
+  }
+  store.save();
+  gridWins.get(grid.id)?.sync();
+  if (input?.apply) openGrid(grid.id);
+  updateTrayMenu();
+  notifyManager();
+  return grid.id;
+}
+
+function gridWindow(grid) {
+  let gw = gridWins.get(grid.id);
+  if (gw) return gw;
+  gw = new GridWindow(grid, {
+    settings: () => store.settings,
+    save: () => store.save(),
+    fitBounds,
+    defaultBounds: () => {
+      const a = screen.getPrimaryDisplay().workArea;
+      return { x: a.x + 40, y: a.y + 40, width: Math.round(a.width * 0.7), height: Math.round(a.height * 0.7) };
+    },
+    icon: path.join(ASSETS, "icon.png"),
+    gridPage: path.join(__dirname, "renderer", "grid-window.html"),
+    gridPreload: path.join(__dirname, "preload-grid.cjs"),
+    cameraPage: path.join(__dirname, "renderer", "camera.html"),
+    cameraPreload: path.join(__dirname, "preload-camera.cjs"),
+    makePlayer: makeTilePlayer,
+    dropPlayer: (cw) => { cw.stream.stop(); senders.delete(cw.wcId); },
+    tilesResized: (g, rects) => {
+      // A drag-resize sends a stream of these; only restart streams once it settles.
+      clearTimeout(g.qualityTimer);
+      g.qualityTimer = setTimeout(() => tileQuality(g, rects), g.players.some((p) => p.stream.channel !== null) ? 600 : 0);
+    },
+    closed: (g) => {
+      clearTimeout(g.qualityTimer);
+      gridWins.delete(g.id);
+      if (quitting) return;
+      g.grid.open = false;
+      delete g.grid.hidden;
+      store.save();
+      updateTrayMenu();
+      notifyManager();
+    },
+  });
+  gridWins.set(grid.id, gw);
+  return gw;
+}
+
+function makeTilePlayer({ gw, index, tile, wc }) {
+  const [consoleId, cameraId] = tile.key.split("/");
+  const cw = { key: tile.key, consoleId, cameraId, win: gw.win, wc, wcId: wc.id, gw, tile, index, stream: null, aspect: null, autoChannel: null };
+  cw.stream = new CameraStream({
+    getConnection: () => connections.get(consoleId),
+    cameraId,
+    resolveChannel: (cam) => resolveChannel(cam, tile.channel ?? cw.autoChannel ?? undefined),
+    getRange: () => tile.range ?? "auto",
+    send: (channel, payload) => { if (!wc.isDestroyed()) wc.send(channel, payload); },
+    log: log.child(`grid ${cameraId.slice(-6)}`),
+  });
+  senders.set(wc.id, cw);
+  return cw;
+}
+
+/** Each tile's stream follows its size (like Arrange's "Match quality"), unless the tile picked one. */
+function tileQuality(gw, rects) {
+  if (!gw.isOpen) return;
+  const scale = screen.getDisplayMatching(gw.win.getBounds()).scaleFactor;
+  for (const cw of gw.players) {
+    const r = rects[cw.index];
+    const auto = store.settings.arrangeQuality && r ? channelForTile(r.width * scale) : null;
+    if (cw.autoChannel === auto) continue;
+    cw.autoChannel = auto;
+    if (cw.tile.channel == null && cw.stream.channel !== null) {
+      cw.stream.restart();
+      setTimeout(() => refreshCameraMeta(cw), 50);
+    }
+  }
+}
+
+function openGrid(id) {
+  const grid = store.data.grids.find((g) => g.id === id);
+  if (!grid) return;
+  grid.open = true;
+  delete grid.hidden;
+  store.save();
+  const gw = gridWindow(grid);
+  if (gw.isOpen) gw.show();
+  else gw.open();
+  updateTrayMenu();
+  notifyManager();
+}
+
+function closeGrid(id) {
+  gridWins.get(id)?.close();
+}
+
+function deleteGrid(id) {
+  closeGrid(id);
+  store.data.grids = store.data.grids.filter((g) => g.id !== id);
+  store.save();
+  updateTrayMenu();
+  notifyManager();
+}
+
+function setGridTile(grid, index, tile) {
+  const n = templateById(grid.templateId)?.cells?.length ?? grid.tiles.length;
+  grid.tiles = Array.from({ length: n }, (_, i) => (i === index ? tile : grid.tiles[i] ?? null));
+  store.save();
+  gridWins.get(grid.id)?.sync();
+  notifyManager();
+}
+
+/** Switch a grid's layout; cameras keep their order, and ones past the last tile come out. */
+function setGridTemplate(grid, templateId) {
+  const tpl = templateById(templateId);
+  if (!tpl?.cells) return;
+  const placed = grid.tiles.filter(Boolean);
+  grid.templateId = tpl.id;
+  grid.tiles = Array.from({ length: tpl.cells.length }, (_, i) => placed[i] ?? null);
+  store.save();
+  gridWins.get(grid.id)?.sync();
+  notifyManager();
+}
+
+function setGridOnTop(grid, onTop) {
+  grid.onTop = onTop;
+  const gw = gridWins.get(grid.id);
+  if (gw?.isOpen) gw.win.setAlwaysOnTop(onTop, "floating");
+  store.save();
+}
+
+function setTileChannel(cw, channel) {
+  if (channel === null) delete cw.tile.channel;
+  else cw.tile.channel = channel;
+  store.save();
+  cw.stream.restart();
+  setTimeout(() => refreshCameraMeta(cw), 50);
+}
+
+function editGrid(id) {
+  pendingEditor = id;
+  showManager();
+  notifyManager();
+}
+
+/** A new tile for a camera picked from an empty tile's menu: starts from the camera's window settings. */
+function newTile(key) {
+  const tile = { key };
+  const entry = store.data.windows[key];
+  for (const f of TILE_FIELDS) if (entry?.[f] !== undefined) tile[f] = structuredClone(entry[f]);
+  const dewarp = dewarpForView(key, entry?.dewarp ? viewOf(entry.dewarp) : "quad", entry?.dewarp);
+  if (dewarp) tile.dewarp = dewarp;
+  return tile;
+}
+
+function gridMenuItems(gw) {
+  const grid = gw.grid;
+  return [
+    { label: `Grid: ${grid.name}`, enabled: false },
+    {
+      label: "Layout",
+      submenu: TEMPLATES.filter((t) => t.cells).map((t) => ({
+        label: t.label, type: "radio", checked: grid.templateId === t.id, click: () => setGridTemplate(grid, t.id),
+      })),
+    },
+    { label: "Edit grid…", click: () => editGrid(grid.id) },
+    { label: "Always on top", type: "checkbox", checked: !!grid.onTop, click: () => setGridOnTop(grid, !grid.onTop) },
+    { label: "Full screen", type: "checkbox", checked: gw.isOpen && gw.win.isFullScreen(), click: () => gw.win.setFullScreen(!gw.win.isFullScreen()) },
+    { label: "Lock layout", type: "checkbox", checked: !!store.settings.lockLayout, click: () => setSetting("lockLayout", !store.settings.lockLayout) },
+    { type: "separator" },
+    { label: "Camera list…", click: () => showManager() },
+    { label: "Close grid", click: () => gw.close() },
+  ];
+}
+
+/** Right-click on an empty tile (or the gaps): put a camera there, or the grid's own items. */
+function gridPageMenuTemplate(gw, index) {
+  const empty = Number.isInteger(index) && !gw.grid.tiles[index];
+  const inGrid = new Set(gw.grid.tiles.filter(Boolean).map((t) => t.key));
+  const pick = empty
+    ? [{
+      label: "Put a camera here",
+      submenu: store.data.consoles.map((c) => {
+        const cams = (connections.get(c.id)?.cameras() ?? []).filter((cam) => !store.data.windows[`${c.id}/${cam.id}`]?.listHidden);
+        return {
+          label: c.name,
+          enabled: cams.length > 0,
+          submenu: cams.length ? cams.map((cam) => ({
+            label: cam.name,
+            enabled: !inGrid.has(`${c.id}/${cam.id}`),
+            click: () => setGridTile(gw.grid, index, newTile(`${c.id}/${cam.id}`)),
+          })) : [{ label: "No cameras", enabled: false }],
+        };
+      }),
+    }, { type: "separator" }]
+    : [];
+  return [...pick, ...gridMenuItems(gw)];
+}
+
+/** A tile's right-click menu: the camera's own items (for this tile), then the grid's. */
+function tileMenuTemplate(cw) {
+  const tile = cw.tile;
+  const meta = cameraMeta(cw);
+  return [
+    { label: meta.consoleName ? `${meta.title} - ${meta.consoleName}` : meta.title, enabled: false },
+    { type: "separator" },
+    { label: "Match tile size", type: "radio", checked: tile.channel == null, click: () => setTileChannel(cw, null) },
+    ...meta.channels.map((ch) => ({ label: ch.label, type: "radio", checked: tile.channel === ch.id, click: () => setTileChannel(cw, ch.id) })),
+    { type: "separator" },
+    { label: meta.fisheye ? "360° view" : "360° view (fisheye lens)", submenu: dewarpMenu(cw) },
+    {
+      label: "Color range",
+      submenu: RANGES.map((id) => ({ label: RANGE_LABELS[id], type: "radio", checked: (tile.range ?? "auto") === id, click: () => setRange(cw, id) })),
+    },
+    { label: "Adjust picture…", click: () => sendCommand(cw, "picture") },
+    { label: "Show name", type: "checkbox", checked: meta.showNames, enabled: !!store.settings.showNames, click: () => toggleName(cw) },
+    { label: "Show time", type: "checkbox", checked: meta.clock, click: () => toggleClock(cw) },
+    { label: "Reconnect stream", click: () => cw.stream.restart() },
+    { label: "Remove from grid", click: () => setGridTile(cw.gw.grid, cw.index, null) },
+    { type: "separator" },
+    ...gridMenuItems(cw.gw),
+  ];
 }
 
 function cameraTitle(key) {
@@ -911,6 +1226,7 @@ function setRange(cw, range) {
 }
 
 function toggleOnTop(cw) {
+  if (cw.gw) return setGridOnTop(cw.gw.grid, !cw.gw.grid.onTop); // a tile's window is the grid
   const entry = entryOf(cw);
   entry.onTop = !entry.onTop;
   cw.win.setAlwaysOnTop(entry.onTop, "floating");
@@ -938,7 +1254,7 @@ function toggleName(cw) {
 }
 
 function applyAspect(cw) {
-  if (cw.win.isDestroyed()) return;
+  if (cw.gw || cw.win.isDestroyed()) return; // a tile letterboxes inside its cell; the grid keeps its shape
   if (!store.settings.lockAspect || !cw.aspect) {
     cw.win.setAspectRatio(0);
     return;
@@ -980,6 +1296,13 @@ function tileOpenWindows() {
     applyAspect(cw);
     if (!store.data.windows[cw.key]?.hidden) cw.win.showInactive();
   }
+  const a = screen.getPrimaryDisplay().workArea;
+  for (const gw of gridWins.values()) {
+    if (!gw.isOpen) continue;
+    if (gw.win.isFullScreen()) gw.win.setFullScreen(false);
+    if (gw.win.isMaximized()) gw.win.unmaximize();
+    gw.win.setBounds({ x: a.x + 40, y: a.y + 40, width: Math.round(a.width * 0.7), height: Math.round(a.height * 0.7) });
+  }
 }
 
 function bringAllToFront() {
@@ -989,6 +1312,11 @@ function bringAllToFront() {
     cw.win.showInactive();
     cw.win.moveTop();
   }
+  for (const gw of gridWins.values()) {
+    if (!gw.isOpen || gw.grid.hidden) continue;
+    if (gw.win.isMinimized()) gw.win.restore();
+    gw.show();
+  }
 }
 
 function cameraContextMenu(cw) {
@@ -996,6 +1324,7 @@ function cameraContextMenu(cw) {
 }
 
 function cameraContextMenuTemplate(cw) {
+  if (cw.gw) return tileMenuTemplate(cw);
   const entry = entryOf(cw) ?? {};
   const meta = cameraMeta(cw);
   const template = [
@@ -1036,18 +1365,24 @@ function setSetting(name, value) {
   store.settings[name] = value;
   store.save();
   switch (name) {
-    case "lockLayout":
-      for (const cw of camWins.values()) {
-        cw.win.setMovable(!value);
-        cw.win.setResizable(!value);
+    case "lockLayout": {
+      const wins = [...[...camWins.values()].map((cw) => cw.win), ...[...gridWins.values()].filter((g) => g.isOpen).map((g) => g.win)];
+      for (const win of wins) {
+        win.setMovable(!value);
+        win.setResizable(!value);
       }
       updateTrayMenu();
       break;
+    }
     case "lockAspect":
       for (const cw of camWins.values()) applyAspect(cw);
       break;
     case "hideFromTaskbar":
       for (const cw of camWins.values()) cw.win.setSkipTaskbar(value);
+      for (const gw of gridWins.values()) if (gw.isOpen) gw.win.setSkipTaskbar(value);
+      break;
+    case "arrangeQuality":
+      for (const gw of gridWins.values()) gw.sync(); // re-lays out, which re-picks each tile's quality
       break;
     case "launchAtLogin":
       applyLoginItem();
@@ -1155,12 +1490,24 @@ const notifyManager = throttle(() => {
 function managerState() {
   const shown = (consoleId = null) => [...camWins.values()]
     .filter((cw) => (!consoleId || cw.consoleId === consoleId) && !store.data.windows[cw.key]?.hidden).length;
+  const editing = pendingEditor; // consumed: the list opens the editor once
+  pendingEditor = null;
   return {
     mock: MOCK,
     settings: { ...store.settings },
-    hiddenCount: hiddenKeys().length,
-    shownCount: shown(),
+    hiddenCount: hiddenCount(),
+    shownCount: shown() + [...gridWins.values()].filter((g) => g.isOpen && !g.grid.hidden).length,
     layouts: store.data.layouts.map((l) => ({ id: l.id, name: l.name, count: Object.keys(l.windows).length, editor: l.editor ?? null })),
+    grids: store.data.grids.map((g) => ({
+      id: g.id,
+      name: g.name,
+      open: !!gridWins.get(g.id)?.isOpen,
+      hidden: !!g.hidden,
+      count: g.tiles.filter(Boolean).length,
+      // In the editor's own terms, so Edit reopens it as it was saved.
+      editor: { displayId: g.editor?.displayId ?? null, templateId: g.templateId, cells: g.tiles.map((t) => (t ? { key: t.key, mode: viewOf(t.dewarp) } : null)) },
+    })),
+    openEditor: editing,
     screens: screensForEditor(),
     templates: TEMPLATES.map((t) => ({ id: t.id, label: t.label, cols: t.cols ?? null, rows: t.rows ?? null, cells: t.cells ?? null })),
     onScreenCount: onScreenWindows().length,
@@ -1215,7 +1562,7 @@ function trayMenuTemplate() {
   return [
     { label: "Camera list…", click: () => showManager() },
     // One toggle: while anything is hidden it puts it back, otherwise it hides what's on screen.
-    hiddenKeys().length
+    hiddenCount()
       ? { label: "Show cameras", click: () => showHiddenCameras() }
       : { label: "Hide cameras", click: () => hideCameras() },
     { label: "Bring cameras to front", click: () => bringAllToFront() },
@@ -1225,6 +1572,15 @@ function trayMenuTemplate() {
     },
     ...(store.data.layouts.length
       ? [{ label: "Layouts", submenu: store.data.layouts.map((l) => ({ label: l.name, click: () => applyLayout(l.id) })) }]
+      : []),
+    ...(store.data.grids.length
+      ? [{
+        label: "Grid windows",
+        submenu: store.data.grids.map((g) => {
+          const open = !!gridWins.get(g.id)?.isOpen;
+          return { label: g.name, type: "checkbox", checked: open, click: () => (open ? closeGrid(g.id) : openGrid(g.id)) };
+        }),
+      }]
       : []),
     { label: "Lock layout", type: "checkbox", checked: !!store.settings.lockLayout, click: (item) => setSetting("lockLayout", item.checked) },
     { type: "separator" },
@@ -1275,7 +1631,15 @@ function registerIpc() {
   ipcMain.on("cam:dewarp", (e, patch) => { const cw = fromCamera(e); if (cw) saveDewarpFromRenderer(cw, patch); });
   ipcMain.on("cam:picture", (e, patch) => { const cw = fromCamera(e); if (cw) savePictureFromRenderer(cw, patch); });
   ipcMain.on("cam:toggle-top", (e) => { const cw = fromCamera(e); if (cw) toggleOnTop(cw); });
-  ipcMain.on("cam:close", (e) => { const cw = fromCamera(e); if (cw) cw.win.close(); });
+  ipcMain.on("cam:close", (e) => {
+    const cw = fromCamera(e);
+    if (cw?.gw) setGridTile(cw.gw.grid, cw.index, null);
+    else cw?.win.close();
+  });
+  ipcMain.on("grid:context-menu", (e, index) => {
+    const gw = [...gridWins.values()].find((g) => g.isOpen && g.win.webContents === e.sender);
+    if (gw) Menu.buildFromTemplate(gridPageMenuTemplate(gw, Number.isInteger(index) ? index : null)).popup({ window: gw.win });
+  });
 
   const fromManager = (e) => managerWin && !managerWin.isDestroyed() && e.sender === managerWin.webContents;
   const handle = (channel, fn) => ipcMain.handle(channel, async (e, arg) => {
@@ -1319,5 +1683,8 @@ function registerIpc() {
   handle("mgr:open-all", (consoleId) => openAllCameras(String(consoleId)));
   handle("mgr:set-list-hidden", ({ key, hidden } = {}) => setListHidden(String(key), !!hidden));
   handle("mgr:preview", (key) => (store.settings.showPreviews ? previews.get(String(key)) : null));
+  handle("mgr:open-grid", (id) => openGrid(String(id)));
+  handle("mgr:close-grid", (id) => closeGrid(String(id)));
+  handle("mgr:delete-grid", (id) => deleteGrid(String(id)));
   handle("mgr:quit", () => { quitting = true; app.quit(); });
 }

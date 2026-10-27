@@ -875,6 +875,123 @@ async function editorSuite() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Grid windows: several cameras in one window's tiles, built in the layout editor.
+
+async function gridSuite() {
+  console.log("\nGrid window suite (mock consoles + a 360 camera, two launches)");
+  const g = await import(new URL("../src/grid.js", import.meta.url).href);
+  const userData = tmpDir("grid");
+  const A = "aaaaaaaa-0000-4000-8000-000000000001";
+  const B = "bbbbbbbb-0000-4000-8000-000000000002";
+  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, fish: `${A}/aaaaaaaa-cam360`, ramp: `${B}/bbbbbbbb-cam0` };
+  fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [
+      { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock"] },
+      { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp"], mockFisheye: false },
+    ],
+    windows: { [keys.lobby]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 } },
+    settings: { startHidden: false },
+  }, null, 2));
+  const env = { PANES_MOCK_FISHEYE: path.join(FIXTURES, "fisheye-ceiling.png") };
+
+  const build = `(() => {
+    const drop = (i, key) => { const dt = new DataTransfer(); dt.setData("text/x-protect-panes-camera", key);
+      document.querySelector('[data-cell="' + i + '"]').dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true })); };
+    document.querySelector('[data-tab="layouts"]').click();
+    document.getElementById("btn-new-layout").click();
+    document.getElementById("editor-name").value = "Wall";
+    const as = document.getElementById("editor-as"); as.value = "grid"; as.dispatchEvent(new Event("change"));
+    const t = document.getElementById("editor-template"); t.value = "2x2"; t.dispatchEvent(new Event("change"));
+    drop(0, ${JSON.stringify(keys.fish)});
+    const v = document.querySelector('[data-cell="0"] select'); v.value = "panorama"; v.dispatchEvent(new Event("change"));
+    drop(1, ${JSON.stringify(keys.ramp)});
+    drop(3, ${JSON.stringify(keys.dock)});
+    const apply = document.getElementById("editor-apply").textContent;
+    document.getElementById("editor-form").requestSubmit(document.getElementById("editor-apply"));
+    return apply;
+  })()`;
+  const readRow = `(() => {
+    const li = [...document.querySelectorAll("#layout-list li.grid-row")].find((l) => l.querySelector("b")?.textContent === "Wall");
+    return li ? { text: li.querySelector("small").textContent, buttons: [...li.querySelectorAll("button")].map((b) => b.textContent) } : null;
+  })()`;
+  const run1 = await runApp({
+    userData, results: path.join(userData, "results-1"), seconds: 16, extraArgs: ["--mock"],
+    env: {
+      ...env,
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 2500, do: "manager-js", js: build },
+        { at: 7000, do: "manager-js", js: readRow },
+        { at: 7200, do: "camera-js", tile: "Wall#1", js: `getComputedStyle(document.getElementById("bar")).display` },
+        { at: 7500, do: "menu-click", tile: "Wall#1", label: "Low · 640×360" },
+        { at: 9500, do: "tray-click", label: "Hide cameras" },
+        { at: 11000, do: "tray-click", label: "Show cameras" },
+      ]),
+    },
+  });
+  const acts = run1.result.actions;
+  const [applyLabel, row, barDisplay] = acts.map((a) => a.value ?? a.error);
+  const grid = run1.config.grids?.[0];
+  check("the layout editor's Open as: One grid window saves a grid (Save and open)",
+    applyLabel === "Save and open" && grid?.name === "Wall" && grid.templateId === "2x2" && grid.open === true
+      && JSON.stringify(grid.tiles.map((t) => t?.key ?? null)) === JSON.stringify([keys.fish, keys.ramp, null, keys.dock]) && grid.tiles[0].dewarp?.mode === "panorama",
+    JSON.stringify({ applyLabel, grid }));
+  const end = last(run1.result);
+  const tile = (cams, i) => cams[`grid:Wall#${i}`];
+  check("every filled tile is live in the one grid window", [0, 1, 3].every((i) => tile(end, i)?.status === "live" && tile(end, i).decodedFrames >= 30) && !tile(end, 2),
+    JSON.stringify([0, 1, 2, 3].map((i) => tile(end, i) && `${tile(end, i).status}/${tile(end, i).decodedFrames}`)));
+  check("the 360° tile shows its own view (Panorama)", tile(end, 0)?.dewarp?.active && tile(end, 0).dewarp.mode === "panorama", JSON.stringify(tile(end, 0)?.dewarp));
+  const [b0, b1, b3] = [0, 1, 3].map((i) => tile(end, i)?.bounds);
+  check("tiles sit in a 2 × 2 grid inside the window",
+    b0 && b1 && b3 && b0.x <= 2 && b0.y <= 2 && Math.abs(b1.x - (b0.x + b0.width)) <= 4 && Math.abs(b3.y - (b0.y + b0.height)) <= 4 && Math.abs(b0.width - b1.width) <= 2,
+    JSON.stringify({ b0, b1, b3 }));
+  check("a tile has no window bar of its own", barDisplay === "none", String(barDisplay));
+  check("the floating camera window is left alone", end[keys.lobby]?.visible && end[keys.lobby].status === "live", JSON.stringify(end[keys.lobby] && { v: end[keys.lobby].visible, s: end[keys.lobby].status }));
+  check("the Layouts tab lists it as an open grid window", row?.text === "grid window · 3 cameras" && row.buttons?.[0] === "Close", JSON.stringify(row));
+  const scale = run1.result.displays[0]?.scaleFactor ?? 1;
+  check("a tile's quality menu pins it (Low), the others follow their tile size",
+    acts.find((a) => a.act.label === "Low · 640×360")?.ok && tile(end, 1)?.videoWidth === 640 && grid?.tiles[1].channel === 2
+      && tile(end, 3)?.channel === g.channelForTile(b3.width * scale) && grid.tiles[3].channel === undefined,
+    JSON.stringify({ ramp: tile(end, 1)?.videoWidth, dock: tile(end, 3)?.channel, want: b3 && g.channelForTile(b3.width * scale) }));
+  const hideAt = acts.find((a) => a.act.label === "Hide cameras")?.t;
+  const showAt = acts.find((a) => a.act.label === "Show cameras")?.t;
+  const hidden = run1.result.samples.filter((s) => s.t > hideAt && s.t < showAt).at(-1)?.cams ?? {};
+  check("Hide cameras hides the grid window and pauses its tiles", [0, 1, 3].every((i) => tile(hidden, i)?.visible === false && tile(hidden, i).status === "paused"),
+    JSON.stringify([0, 1, 3].map((i) => tile(hidden, i) && `${tile(hidden, i).visible}/${tile(hidden, i).status}`)));
+  check("Show cameras brings it back live", [0, 1, 3].every((i) => tile(end, i)?.visible === true), JSON.stringify([0, 1, 3].map((i) => tile(end, i)?.visible)));
+
+  // Second launch: it reopens by itself. Fill the empty tile from its menu, switch to 1 + 5 from a
+  // tile's menu (the tiles must survive it: same page, same stream), then close it from the menu.
+  const run2 = await runApp({
+    userData, results: path.join(userData, "results-2"), seconds: 11, extraArgs: ["--mock"],
+    env: {
+      ...env,
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 2800, do: "camera-js", tile: "Wall#0", js: "window.__marker = 42" },
+        { at: 3000, do: "grid-menu-click", grid: "Wall", index: 2, label: "Building Lobby" },
+        { at: 4000, do: "menu-click", tile: "Wall#0", label: "1 + 5" },
+        { at: 6500, do: "camera-js", tile: "Wall#0", js: "window.__marker ?? null" },
+        { at: 9000, do: "menu-click", tile: "Wall#0", label: "Close grid" },
+      ]),
+    },
+  });
+  const a2 = run2.result.actions;
+  const first2 = run2.result.samples[0]?.cams ?? {};
+  check("an open grid window reopens at launch", !!tile(first2, 0) && !!tile(first2, 3), JSON.stringify(Object.keys(first2)));
+  const mid = run2.result.samples.filter((s) => s.t > a2[2]?.t && s.t < a2[4]?.t).at(-1)?.cams ?? {};
+  check("an empty tile's menu puts a camera in it", a2[1]?.ok && run2.config.grids[0].tiles.some((t) => t?.key === keys.lobby) && Object.keys(mid).filter((k) => k.startsWith("grid:")).length === 4,
+    `${a2[1]?.error ?? ""} ${JSON.stringify(Object.keys(mid))}`);
+  const big = tile(mid, 0)?.bounds;
+  const small = tile(mid, 1)?.bounds;
+  check("Layout → 1 + 5 from a tile's menu: the first camera gets the big tile", big && small && big.width > 1.7 * small.width && run2.config.grids[0].templateId === "1+5",
+    JSON.stringify({ big, small }));
+  check("switching the layout keeps the tiles' pages (no reload)", a2[3]?.value === 42, JSON.stringify(a2[3]));
+  check("Close grid closes it, and it stays closed", a2[4]?.ok && run2.config.grids[0].open === false && !Object.keys(last(run2.result)).some((k) => k.startsWith("grid:")),
+    `${a2[4]?.error ?? ""} open=${run2.config.grids[0].open}`);
+  console.log(`  results: ${userData}`);
+}
+
+// ---------------------------------------------------------------------------------------------
 // Camera list: Hide from list (cameras nobody uses) and putting them back.
 
 async function listSuite() {
@@ -1309,6 +1426,7 @@ try {
   if (suite === "arrange" || suite === "all") await runSuite(arrangeSuite);
   if (suite === "editor" || suite === "all") await runSuite(editorSuite);
   if (suite === "list" || suite === "all") await runSuite(listSuite);
+  if (suite === "grid" || suite === "all") await runSuite(gridSuite);
   if (suite === "update" || suite === "all") await runSuite(updateSuite);
   if (suite === "e2e" || suite === "all") await runSuite(e2eSuite);
 } catch (err) {

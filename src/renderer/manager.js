@@ -285,6 +285,13 @@ function render() {
   reattachTip();
   observePreviews();
   reattachPop();
+
+  // A grid tile's menu asked for "Edit grid…".
+  const asked = state.openEditor && state.grids?.find((g) => g.id === state.openEditor);
+  if (asked && !editorDialog.open && !dialog.open && !layoutDialog.open) {
+    showTab("layouts");
+    openEditor(asked, "grid");
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -543,9 +550,32 @@ function renderArrange() {
   }));
 }
 
+function renderGrid(g) {
+  return el("li", { class: "grid-row" },
+    el("b", { title: g.name }, g.name),
+    el("small", {}, `grid window · ${plural(g.count, "camera")}${g.hidden ? " · hidden" : ""}`),
+    el("button", {
+      class: "small", "data-focus-key": `ga-${g.id}`,
+      tip: g.open ? "Close this grid window. It reopens where it was." : "Open this grid window: all its cameras in one window.",
+      onclick: () => panes.invoke(g.open ? "mgr:close-grid" : "mgr:open-grid", g.id).then(refresh),
+    }, g.open ? "Close" : "Open"),
+    el("button", { class: "small ghost", tip: "Change this grid's cameras or layout in the layout editor.", onclick: () => openEditor(g, "grid") }, "Edit"),
+    el("button", {
+      class: "small ghost",
+      tip: "Delete this grid window. Its cameras' own windows aren't touched.",
+      onclick: async () => {
+        if (!confirm(`Delete the grid window "${g.name}"?`)) return;
+        await panes.invoke("mgr:delete-grid", g.id);
+        refresh();
+      },
+    }, "Delete"),
+  );
+}
+
 function renderLayouts() {
-  layoutList.replaceChildren(...(state.layouts.length
-    ? state.layouts.map((l) => el("li", {},
+  const grids = (state.grids ?? []).map(renderGrid);
+  layoutList.replaceChildren(...(state.layouts.length || grids.length
+    ? [...grids, ...state.layouts.map((l) => el("li", {},
       el("b", { title: l.name }, l.name),
       el("small", {}, plural(l.count, "camera")),
       el("button", {
@@ -565,8 +595,8 @@ function renderLayouts() {
           refresh();
         },
       }, "Delete"),
-    ))
-    : [el("li", { class: "empty" }, "No layouts yet. Arrange the camera windows, then save the arrangement, or import one of Protect's liveviews.")]));
+    ))]
+    : [el("li", { class: "empty" }, "No layouts yet. Build one with New layout… (as separate windows or one grid window), save the arrangement on screen, or import one of Protect's liveviews.")]));
 
   // Protect liveviews, grouped by console. The value is "<consoleId>|<liveviewId>".
   const groups = state.consoles.filter((c) => c.liveviews?.length).map((c) => el("optgroup", { label: c.name },
@@ -625,17 +655,21 @@ const CAMERA_TYPE = "text/x-protect-panes-camera";
 const CELL_TYPE = "text/x-protect-panes-cell";
 const VIEW_LABELS = [["quad", "Quad (4 views)"], ["single", "Single view"], ["panorama", "Panorama"], ["off", "Fisheye (raw)"]];
 
-let ed = null; // { id, displayId, templateId, cells: [{ key, mode } | null] }
+let ed = null; // { id, as: "windows" | "grid", displayId, templateId, cells: [{ key, mode } | null] }
 
+const editorAs = document.getElementById("editor-as");
+const editorApply = document.getElementById("editor-apply");
 const cameraByKey = () => new Map(state.consoles.flatMap((c) => c.cameras.map((cam) => [cam.key, { ...cam, consoleName: c.name }])));
 const editorTemplates = () => state.templates.filter((t) => t.cells);
 
-function openEditor(layout = null) {
+/** A saved layout, or with as = "grid" a saved grid window, or null for a new one. */
+function openEditor(layout = null, as = "windows") {
   const screens = state.screens;
   const fallbackScreen = screens.find((s) => s.primary) ?? screens[0];
   const e = layout?.editor;
   ed = {
     id: layout?.id ?? null,
+    as,
     displayId: screens.some((s) => s.id === e?.displayId) ? e.displayId : fallbackScreen?.id,
     templateId: e?.templateId ?? "2x2",
     cells: [],
@@ -643,7 +677,12 @@ function openEditor(layout = null) {
   const tpl = editorTemplates().find((t) => t.id === ed.templateId) ?? editorTemplates()[1];
   ed.templateId = tpl.id;
   ed.cells = Array.from({ length: tpl.cells.length }, (_, i) => e?.cells?.[i] ?? null);
-  document.getElementById("editor-title").textContent = layout ? "Edit layout" : "New layout";
+  const kind = as === "grid" ? "grid window" : "layout";
+  document.getElementById("editor-title").textContent = layout ? `Edit ${kind}` : "New layout";
+  // A saved layout stays a layout and a saved grid stays a grid; only a new one picks.
+  editorAs.value = as;
+  editorAs.disabled = !!layout;
+  showEditorAs();
   editorName.value = layout?.name ?? "";
   editorError.textContent = "";
   editorFilter.value = "";
@@ -763,6 +802,19 @@ function renderEditor() {
   document.getElementById("editor-count").textContent = `${placedKeys.size} of ${plural(tpl.cells.length, "tile")} filled`;
 }
 
+function showEditorAs() {
+  const grid = ed.as === "grid";
+  editorApply.textContent = grid ? "Save and open" : "Save and apply";
+  editorApply.dataset.tip = grid ? "Save it and open the grid window now." : "Save it and put the cameras on screen this way now.";
+  document.getElementById("editor-save").dataset.tip = grid
+    ? "Save it to your layouts without opening it. Open it later from the Layouts tab or the tray."
+    : "Save it to your layouts without changing what's on screen.";
+  editorScreen.dataset.tip = grid
+    ? "The monitor the grid window first opens on, filling it. Move or resize it any time."
+    : "The monitor this layout fills. Sizes come from that screen's real resolution and shape.";
+}
+
+editorAs.addEventListener("change", () => { ed.as = editorAs.value; showEditorAs(); });
 editorScreen.addEventListener("change", () => { ed.displayId = Number(editorScreen.value); renderEditor(); });
 editorTemplate.addEventListener("change", () => setTemplate(editorTemplate.value));
 editorFilter.addEventListener("input", () => renderEditor());
@@ -782,6 +834,7 @@ editorForm.addEventListener("submit", async (e) => {
   try {
     await panes.invoke("mgr:save-editor-layout", {
       id: ed.id,
+      as: ed.as,
       name: editorName.value,
       displayId: ed.displayId,
       templateId: ed.templateId,

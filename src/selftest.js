@@ -36,6 +36,7 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
     }
   }
 
+  const gridTiles = () => hooks.gridTiles?.() ?? [];
   const sample = async () => {
     const row = { t: Date.now(), cams: {} };
     for (const [key, cw] of camWins) {
@@ -43,6 +44,12 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
         const stats = await cw.win.webContents.executeJavaScript("window.__panesStats && window.__panesStats()");
         row.cams[key] = { ...stats, visible: cw.win.isVisible(), bounds: cw.win.getBounds() };
       } catch (err) { row.cams[key] = { error: String(err) }; }
+    }
+    for (const { id, cw, bounds, visible } of gridTiles()) {
+      try {
+        const stats = await cw.wc.executeJavaScript("window.__panesStats && window.__panesStats()");
+        row.cams[id] = { ...stats, visible, bounds, channel: cw.stream.channel };
+      } catch (err) { row.cams[id] = { error: String(err) }; }
     }
     samples.push(row);
   };
@@ -59,9 +66,10 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
   const managerWindow = () => BrowserWindow.getAllWindows().find((w) => w.getTitle() === "Protect Panes");
 
   // PANES_SELFTEST_ACTIONS: JSON list of { at, do, win, ... } driving camera windows with real input.
-  // tray-click and manager-js don't need a camera window.
+  // `tile: "<grid name>#<index>"` instead of `win` drives a grid tile. tray-click, manager-js and
+  // grid-menu-click (a grid window's own menu, { grid, index, label }) don't need a camera.
   const results = [];
-  const APP_ACTIONS = new Set(["tray-click", "manager-js"]);
+  const APP_ACTIONS = new Set(["tray-click", "manager-js", "grid-menu-click"]);
   for (const act of JSON.parse(process.env.PANES_SELFTEST_ACTIONS || "[]")) {
     setTimeout(async () => {
       let value;
@@ -70,6 +78,10 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
           if (act.do === "tray-click") {
             const item = findItem(hooks.trayMenuTemplate(), act.label);
             if (!item?.click) throw new Error(`no tray item "${act.label}"`);
+            item.click(item);
+          } else if (act.do === "grid-menu-click") {
+            const item = findItem(hooks.gridPageMenuTemplate(act.grid, act.index ?? null), act.label);
+            if (!item?.click) throw new Error(`no grid menu item "${act.label}"`);
             item.click(item);
           } else {
             const mgr = managerWindow();
@@ -82,9 +94,9 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
         }
         return;
       }
-      const cw = [...camWins.values()][act.win ?? 0];
+      const cw = act.tile ? gridTiles().find((t) => t.id === `grid:${act.tile}`)?.cw : [...camWins.values()][act.win ?? 0];
       if (!cw) { results.push({ act, error: "no window" }); return; }
-      const wc = cw.win.webContents;
+      const wc = cw.wc ?? cw.win.webContents;
       const mouse = (type, [x, y], extra = {}) => wc.sendInputEvent({ type, x, y, button: "left", clickCount: 1, ...extra });
       try {
         switch (act.do) {
@@ -180,6 +192,13 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
       const name = `${String(i++).padStart(2, "0")}-${win.getTitle().replace(/[^a-z0-9]+/gi, "_")}.png`;
       fs.writeFileSync(path.join(dir, name), img.toPNG());
       result.windows[name] = win.getBounds();
+    }
+    // A grid window's capture is only its own page; each tile is a separate view.
+    for (const { id, cw, bounds, visible } of gridTiles()) {
+      if (!visible) continue;
+      const name = `${id.replace(/[^a-z0-9]+/gi, "_")}.png`;
+      fs.writeFileSync(path.join(dir, name), (await cw.wc.capturePage()).toPNG());
+      result.windows[name] = bounds;
     }
     fs.writeFileSync(path.join(dir, "result.json"), JSON.stringify(result, null, 2));
     log.info(`self-test written to ${dir}`);

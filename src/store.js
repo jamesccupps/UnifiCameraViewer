@@ -11,8 +11,10 @@ import path from "node:path";
  *   consoles: [{ id, name, host, username, password: { enc: "safe" | "plain", data: base64 } }],
  *   windows:  { "<consoleId>/<cameraId>": { open, hidden, listHidden, bounds: {x,y,width,height}, channel, onTop, name, hideName, clock, range, dewarp } },
  *   settings: { lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin },
- *   layouts:  [{ id, name, windows: { "<consoleId>/<cameraId>": { bounds, channel, onTop, hideName, clock, range, dewarp } } }]
+ *   layouts:  [{ id, name, windows: { "<consoleId>/<cameraId>": { bounds, channel, onTop, hideName, clock, range, picture, dewarp } }, editor? }],
+ *   grids:    [{ id, name, templateId, bounds, open, hidden, onTop, editor?, tiles: [{ key, channel, range, picture, hideName, clock, dewarp } | null] }]
  * }
+ * (grids: see src/grid-window.js)
  *
  * Passwords are encrypted with Electron safeStorage, which on Windows is DPAPI bound to the
  * current Windows user - the file is useless if copied to another account or machine.
@@ -33,7 +35,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
 });
 
 function defaults() {
-  return { version: 1, consoles: [], windows: {}, settings: { ...DEFAULT_SETTINGS }, layouts: [] };
+  return { version: 1, consoles: [], windows: {}, settings: { ...DEFAULT_SETTINGS }, layouts: [], grids: [] };
 }
 
 export class Store {
@@ -68,6 +70,10 @@ export class Store {
       windows: raw.windows && typeof raw.windows === "object" ? raw.windows : {},
       settings: { ...d.settings, ...(raw.settings ?? {}) },
       layouts: Array.isArray(raw.layouts) ? raw.layouts.filter((l) => l && l.id && l.name && l.windows && typeof l.windows === "object") : [],
+      grids: Array.isArray(raw.grids)
+        ? raw.grids.filter((g) => g && g.id && g.name && typeof g.templateId === "string" && Array.isArray(g.tiles))
+          .map((g) => ({ ...g, tiles: g.tiles.map((t) => (t && typeof t.key === "string" ? t : null)) }))
+        : [],
     };
   }
 

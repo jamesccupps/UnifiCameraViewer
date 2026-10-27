@@ -159,6 +159,10 @@
       <div class="editor-controls">
         <label>Screen <select id="editor-screen" data-tip="The monitor this layout fills. Sizes come from that screen's real resolution and shape."></select></label>
         <label>Layout <select id="editor-template" data-tip="The grid. Cameras already placed keep their order when you switch."></select></label>
+        <label>Open as <select id="editor-as" data-tip="Separate windows: one window per camera, placed like this on the screen. One grid window: every camera in a tile of a single window you can move, resize, maximize or put in full screen.">
+          <option value="windows">Separate windows</option>
+          <option value="grid">One grid window</option>
+        </select></label>
         <span class="spacer"></span>
         <button type="button" id="editor-fill" class="small" data-tip="Fill the tiles with the camera windows on this screen right now, in their order (left to right, top to bottom).">Use what's on screen</button>
         <button type="button" id="editor-clear" class="small ghost" data-tip="Empty every tile.">Clear</button>
