@@ -281,20 +281,23 @@ try {
     $cur = Join-Path $res 'app.asar'
     $tmp = Join-Path $res "app.asar.new-$stamp"
     $bak = Join-Path $res "app.asar.old-$stamp"
-    $in = [IO.File]::OpenRead($AsarGz)
     try {
-      $gz = New-Object IO.Compression.GZipStream($in, [IO.Compression.CompressionMode]::Decompress)
-      $out = [IO.File]::Create($tmp)
-      try { $gz.CopyTo($out) } finally { $out.Dispose(); $gz.Dispose() }
-    } finally { $in.Dispose() }
-    # .NET, not Get-FileHash: started from PowerShell 7 (GitHub's runners, or a user's pwsh window),
-    # Windows PowerShell inherits pwsh's PSModulePath and Get-FileHash isn't found (measured in CI).
-    $sha = [Security.Cryptography.SHA256]::Create()
-    $fs = [IO.File]::OpenRead($tmp)
-    try { $hash = -join ($sha.ComputeHash($fs) | ForEach-Object { $_.ToString('x2') }) } finally { $fs.Dispose(); $sha.Dispose() }
-    if ($hash -ne $AsarSha256.ToLowerInvariant()) {
+      $in = [IO.File]::OpenRead($AsarGz)
+      try {
+        $gz = New-Object IO.Compression.GZipStream($in, [IO.Compression.CompressionMode]::Decompress)
+        $out = [IO.File]::Create($tmp)
+        try { $gz.CopyTo($out) } finally { $out.Dispose(); $gz.Dispose() }
+      } finally { $in.Dispose() }
+      # .NET, not Get-FileHash: started from PowerShell 7 (GitHub's runners, or a user's pwsh window),
+      # Windows PowerShell inherits pwsh's PSModulePath and Get-FileHash isn't found (measured in CI).
+      $sha = [Security.Cryptography.SHA256]::Create()
+      $fs = [IO.File]::OpenRead($tmp)
+      try { $hash = -join ($sha.ComputeHash($fs) | ForEach-Object { $_.ToString('x2') }) } finally { $fs.Dispose(); $sha.Dispose() }
+      if ($hash -ne $AsarSha256.ToLowerInvariant()) { throw "the unpacked app.asar doesn't match its signed checksum" }
+    } catch {
+      # Whatever failed before the swap, don't leave a half-made app.asar next to the real one.
       Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-      throw "the unpacked app.asar doesn't match its signed checksum"
+      throw
     }
     $moved = $false
     for ($i = 0; $i -lt 10 -and -not $moved; $i++) {

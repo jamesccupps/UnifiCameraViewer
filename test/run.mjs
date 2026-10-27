@@ -634,6 +634,21 @@ async function updateSuite() {
       u8.state.kind === "asar" && /doesn't match its signed checksum/.test(log8) && fs.readFileSync(path.join(res, "app.asar"), "utf8") === "v5 keep me"
         && JSON.stringify(fs.readdirSync(res)) === '["app.asar"]',
       `${log8.trim()} resources=${JSON.stringify(fs.readdirSync(res))}`);
+
+    // Signed and intact, but not gzip at all: unpacking itself throws, part-way through.
+    const junkAsar = path.join(dir, "junk-asar");
+    fs.cpSync(asarRel, junkAsar, { recursive: true });
+    fs.writeFileSync(path.join(junkAsar, "ProtectPanes-app.asar.gz"), crypto.randomBytes(4096));
+    const junkUnpacked = path.join(dir, "junk-unpacked.bin");
+    fs.writeFileSync(junkUnpacked, "never produced");
+    signRelease({ zip: path.join(junkAsar, "ProtectPanes-win32-x64.zip"), asar: { gz: path.join(junkAsar, "ProtectPanes-app.asar.gz"), unpacked: junkUnpacked, electron: "45.0.0" }, version: "9.9.11", keyFile: privFile });
+    const u9 = mk(junkAsar, "1.2.0", { electronVersion: "45.0.0" });
+    await u9.check();
+    const log9 = await runHelper(u9, installDir);
+    check("a download that won't unpack is reported, and leaves nothing half-made next to the app",
+      u9.state.kind === "asar" && /update failed/.test(log9) && /update: done/.test(log9) && fs.readFileSync(path.join(res, "app.asar"), "utf8") === "v5 keep me"
+        && JSON.stringify(fs.readdirSync(res)) === '["app.asar"]',
+      `${log9.trim()} resources=${JSON.stringify(fs.readdirSync(res))}`);
   }
 
   {
