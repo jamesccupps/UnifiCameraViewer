@@ -385,6 +385,29 @@ async function hideSuite() {
   }
   check("hidden flags cleared after Show cameras", Object.values(keys).every((k) => run2.config.windows[k]?.open === true && !run2.config.windows[k]?.hidden));
   console.log(`  results: ${userData}`);
+
+  // Hide cameras while a window is still loading (it hasn't shown yet): it must stay hidden when its
+  // page is ready, not appear with its stream paused. (Electron 45 doesn't show a window hidden
+  // before ready-to-show; this guards that.)
+  const early = tmpDir("hide-early");
+  fs.writeFileSync(path.join(early, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby"] }],
+    windows: { [keys.lobby]: { open: false, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 } },
+    settings: { startHidden: false },
+  }, null, 2));
+  const run3 = await runApp({
+    userData: early, results: path.join(early, "results"), seconds: 6, extraArgs: ["--mock"],
+    env: { PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 2500, do: "manager-js", js: `(async () => {
+      await panes.invoke("mgr:open-camera", ${JSON.stringify(keys.lobby)});
+      await panes.invoke("mgr:hide-cameras", null);
+      return true;
+    })()` }]) },
+  });
+  const seen3 = run3.result.samples.map((s) => s.cams[keys.lobby]).filter(Boolean);
+  check("a window hidden before its first paint stays hidden",
+    run3.result.actions[0]?.value === true && seen3.length > 0 && seen3.every((c) => c.visible === false && !c.decodedFrames) && run3.config.windows[keys.lobby]?.hidden === true,
+    JSON.stringify({ act: run3.result.actions[0]?.error, seen: seen3.map((c) => [c.visible, c.decodedFrames]), hidden: run3.config.windows[keys.lobby]?.hidden }));
 }
 
 // ---------------------------------------------------------------------------------------------
