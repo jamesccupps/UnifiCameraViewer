@@ -2,6 +2,13 @@ import { EventEmitter } from "node:events";
 import { ProtectAuthError, ProtectAuthorizationError, ProtectClient } from "unifi-protect";
 import { errorText, sleep } from "./util.js";
 
+// A refused login isn't always a wrong password. The library reports every non-2xx login answer as
+// ProtectAuthError, including the 502/503 UniFi OS gives while it boots, and after a power cut the PC
+// can be up first. So a refused login is retried too, slowly enough that a real wrong password stays
+// far from any lockout: about 6 tries in the first 20 minutes, then one every 10 minutes.
+const AUTH_RETRY_MS = [15_000, 30_000, 60_000, 120_000, 300_000, 600_000];
+const authRetryMs = (failures) => AUTH_RETRY_MS[Math.min(failures, AUTH_RETRY_MS.length - 1)];
+
 /*
  * One logged-in session to one UniFi OS console (UDM / UNVR / Cloud Key).
  *
@@ -17,6 +24,8 @@ export class ConsoleConnection extends EventEmitter {
   #cfg;
   #getPassword;
   #log;
+  #connect;
+  #authRetryMs;
   #abort = null;
   #client = null;
   #disposables = [];
@@ -24,11 +33,14 @@ export class ConsoleConnection extends EventEmitter {
   state = "idle";
   message = "";
 
-  constructor(cfg, getPassword, log) {
+  /** opts.connect and opts.authRetryMs replace ProtectClient.connect and the retry delays (unit tests). */
+  constructor(cfg, getPassword, log, { connect = (o) => ProtectClient.connect(o), authRetryMs: retry = authRetryMs } = {}) {
     super();
     this.#cfg = cfg;
     this.#getPassword = getPassword;
     this.#log = log;
+    this.#connect = connect;
+    this.#authRetryMs = retry;
   }
 
   get id() { return this.#cfg.id; }
@@ -100,10 +112,11 @@ export class ConsoleConnection extends EventEmitter {
 
   async #run(signal) {
     let delay = 5_000;
+    let authFailures = 0;
     while (!signal.aborted) {
       this.#set("connecting", `Connecting to ${this.#cfg.host}…`);
       try {
-        const client = await ProtectClient.connect({
+        const client = await this.#connect({
           host: this.#cfg.host,
           username: this.#cfg.username,
           password: await this.#getPassword(),
@@ -121,14 +134,15 @@ export class ConsoleConnection extends EventEmitter {
         return;
       } catch (err) {
         if (signal.aborted) return;
-        if (err instanceof ProtectAuthError) {
-          this.#log.warn(`login rejected: ${errorText(err)}`);
-          this.#set("authfailed", "Login rejected. Use a local-only account (not a UI.com account) and check the password.");
-          return;
-        }
-        if (err instanceof ProtectAuthorizationError) {
-          this.#set("authfailed", "Logged in, but this account has no access to Protect.");
-          return;
+        if (err instanceof ProtectAuthError || err instanceof ProtectAuthorizationError) {
+          const wait = this.#authRetryMs(authFailures++);
+          const again = `Trying again in ${wait < 60_000 ? `${Math.round(wait / 1000)} s` : `${Math.round(wait / 60_000)} min`}.`;
+          this.#log.warn(`login rejected: ${errorText(err)}; ${again.toLowerCase()}`);
+          this.#set("authfailed", err instanceof ProtectAuthError
+            ? `Login rejected. Use a local-only account (not a UI.com account) and check the password. ${again}`
+            : `Logged in, but this account has no access to Protect. ${again}`);
+          await sleep(wait, signal);
+          continue;
         }
         this.#log.warn(`connect failed: ${errorText(err)}`);
         this.#set("error", `${errorText(err)} - retrying in ${Math.round(delay / 1000)}s`);

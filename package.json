@@ -20,6 +20,7 @@
     "test:mock": "node test/run.mjs mock",
     "test:hide": "node test/run.mjs hide",
     "test:bounds": "node test/run.mjs bounds",
+    "test:connection": "node test/run.mjs connection",
     "test:range": "node test/run.mjs range",
     "test:layouts": "node test/run.mjs layouts",
     "test:update": "node test/run.mjs update",

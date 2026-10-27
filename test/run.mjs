@@ -388,6 +388,23 @@ async function hideSuite() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// ConsoleConnection unit checks (fake ProtectClient.connect), run under Electron's Node because
+// unifi-protect needs Node >= 22.20. test/connection-unit.mjs prints the results as JSON.
+
+async function connectionSuite() {
+  console.log("\nConsole connection suite (unit, fake library client)");
+  const r = spawnSync(ELECTRON, [path.join(ROOT, "test", "connection-unit.mjs")], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, encoding: "utf8", timeout: 60_000,
+  });
+  let out = {};
+  try { out = JSON.parse(r.stdout.trim().split(/\r?\n/).at(-1)); } catch { /* checked below */ }
+  check("connection unit script ran", r.status === 0 && Object.keys(out).length > 0, `${r.status} ${r.stderr?.slice(-500)}`);
+  const ra = out.refusedThenAccepted;
+  check("a refused login (UniFi OS booting) is retried and connects once accepted",
+    ra?.state === "connected" && ra.calls === 3 && ra.states.filter((s) => s === "authfailed").length === 2, JSON.stringify(ra));
+}
+
+// ---------------------------------------------------------------------------------------------
 // Window sizes across launches (mock consoles): at 150 % scaling Electron reads a window back up to
 // 1 DIP bigger than it was set (4 DIP for constructor bounds), and saving that made every window
 // grow on each launch. Odd sizes and positions, aspect lock off so nothing snaps the size back.
@@ -1589,6 +1606,7 @@ try {
   if (suite === "mock" || suite === "all") await runSuite(mockSuite);
   if (suite === "hide" || suite === "all") await runSuite(hideSuite);
   if (suite === "bounds" || suite === "all") await runSuite(boundsSuite);
+  if (suite === "connection" || suite === "all") await runSuite(connectionSuite);
   if (suite === "range" || suite === "all") await runSuite(rangeSuite);
   if (suite === "layouts" || suite === "all") await runSuite(layoutsSuite);
   if (suite === "arrange" || suite === "all") await runSuite(arrangeSuite);
