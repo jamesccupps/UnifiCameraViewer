@@ -1019,7 +1019,10 @@ async function gridSuite() {
 
 /**
  * Windows only: sample every 100 ms whether window `above` (by title) is higher in the z-order than
- * window `below`, for `seconds`. Resolves to [{ t: epoch ms, above: boolean }] for samples where both exist.
+ * window `below`, for `seconds`. `ready` resolves once sampling has started (compiling the Win32 shim
+ * takes seconds on a slow CI runner, and a run started before that missed its first samples);
+ * `stop()` ends it early; `done` resolves to [{ t: epoch ms, above: boolean }] for the samples
+ * where both windows existed.
  */
 function sampleZOrder(above, below, seconds) {
   const ps = `
@@ -1031,6 +1034,7 @@ public static class ZO {
   public static bool Above(IntPtr a, IntPtr b) { for (IntPtr h = GetWindow(b, 3); h != IntPtr.Zero; h = GetWindow(h, 3)) if (h == a) return true; return false; }
 }
 '@
+"ready"
 $end = (Get-Date).AddSeconds(${seconds})
 while ((Get-Date) -lt $end) {
   $a = [ZO]::FindWindow([NullString]::Value, ${JSON.stringify(above)}); $b = [ZO]::FindWindow([NullString]::Value, ${JSON.stringify(below)})
@@ -1039,11 +1043,17 @@ while ((Get-Date) -lt $end) {
 }`;
   const child = spawn("powershell", ["-NoProfile", "-Command", ps], { stdio: ["ignore", "pipe", "ignore"] });
   let out = "";
-  child.stdout.on("data", (d) => { out += d; });
-  return new Promise((resolve) => child.on("exit", () => resolve(out.trim().split(/\r?\n/).filter(Boolean).map((l) => {
-    const [t, v] = l.split(" ");
-    return { t: Number(t), above: v === "True" };
-  }))));
+  let markReady;
+  const ready = new Promise((resolve) => { markReady = resolve; });
+  child.stdout.on("data", (d) => { out += d; if (/\bready\b/.test(out)) markReady(); });
+  const done = new Promise((resolve) => child.on("exit", () => {
+    markReady();
+    resolve(out.trim().split(/\r?\n/).filter((l) => /^\d+ /.test(l)).map((l) => {
+      const [t, v] = l.split(" ");
+      return { t: Number(t), above: v === "True" };
+    }));
+  }));
+  return { ready, done, stop: () => child.kill() };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1198,7 +1208,8 @@ async function listSuite() {
       windows: {},
       settings: { startHidden: false },
     }, null, 2));
-    const zorder = sampleZOrder("Building Lobby", "Protect Panes", 10);
+    const zorder = sampleZOrder("Building Lobby", "Protect Panes", 90);
+    await zorder.ready;
     const run3 = await runApp({
       userData: zd, results: path.join(zd, "results"), seconds: 9, extraArgs: ["--mock"],
       env: {
@@ -1208,7 +1219,8 @@ async function listSuite() {
         ]),
       },
     });
-    const samples = await zorder;
+    zorder.stop();
+    const samples = await zorder.done;
     const clickAt = run3.result.actions[1]?.t ?? Infinity;
     const before = samples.filter((s) => s.t < clickAt - 200).at(-1);
     const after = samples.filter((s) => s.t > clickAt + 500);
