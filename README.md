@@ -9,9 +9,14 @@ UniFi Protect live view, one camera per window. Place each window anywhere on th
 
 ## Install (Windows 10/11, 64-bit)
 
-1. Download `ProtectPanes-win32-x64.zip` from the [latest release](https://github.com/jamesccupps/UnifiCameraViewer/releases/latest) and unzip it somewhere permanent that you can write to, e.g. `C:\Tools\Protect Panes`. In-place updates need that folder to be writable, so avoid `C:\Program Files`.
-2. Run `ProtectPanes.exe`. The app isn't code-signed, so the first launch shows *Windows protected your PC*: click **More info**, then **Run anyway**.
-3. Optionally pin it to the taskbar, or turn on **Start with Windows** in the app.
+**Installer (recommended):** download `ProtectPanes-Setup.exe` from the [latest release](https://github.com/jamesccupps/UnifiCameraViewer/releases/latest) and run it.
+- It installs for your Windows user only, with no admin prompt, into `%LOCALAPPDATA%\Programs\Protect Panes`.
+- It adds Start menu and desktop shortcuts, and appears in **Settings → Apps** for uninstalling.
+- The app isn't code-signed, so Windows shows *Windows protected your PC*: click **More info**, then **Run anyway**.
+
+**Portable:** download `ProtectPanes-win32-x64.zip` instead and unzip it somewhere permanent that you can write to, e.g. `C:\Tools\Protect Panes`. Avoid `C:\Program Files`: in-place updates need to write there. Then run `ProtectPanes.exe`.
+
+Either way, you can turn on **Start with Windows** in the app.
 
 ## Set up each console
 
@@ -71,7 +76,7 @@ From 1.2.0 on, Protect Panes can update itself.
 
 1. The camera list's **Settings → Updates** shows the **update location**. By default it's this project's latest GitHub release. To update from your own copy instead, set it to a folder (for example `\\server\share\Protect Panes`) or web address holding `ProtectPanes-win32-x64.zip` plus `latest.json`. Clear it to turn update checks off.
 2. Click **Check for updates**. A newer version is downloaded and checked first: it has to carry the release signature this copy of the app trusts, and match its signed checksum. Anything else is refused.
-3. Click **Install … and restart**. The app closes, swaps in the new version and opens again, in about a minute. Settings and layouts carry over.
+3. Click **Install … and restart**. The app closes, installs the new version and opens again. Installer copies run the new installer silently; portable copies swap their folder. Settings and layouts carry over.
 
 The folder the app lives in has to be one you can write to, e.g. `C:\Tools\Protect Panes`, not `C:\Program Files`. When an update location is set, the app also checks once at startup (one small request for `latest.json`) and says so in the list and the tray menu. It never downloads without a click.
 

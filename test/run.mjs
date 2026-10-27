@@ -487,7 +487,7 @@ async function updateSuite() {
   const zipsIn = (d) => (fs.existsSync(d) ? fs.readdirSync(d).filter((f) => f.endsWith(".zip") || f.endsWith(".part")) : []);
   const u1 = mk(good);
   await u1.check();
-  const staged = u1.state.zip && crypto.createHash("sha256").update(fs.readFileSync(u1.state.zip)).digest("hex");
+  const staged = u1.state.file && crypto.createHash("sha256").update(fs.readFileSync(u1.state.file)).digest("hex");
   check("newer signed release from a folder: downloaded and verified", u1.state.status === "ready" && staged === signed.sha256, JSON.stringify(u1.state));
   const same = mk(good, "9.9.9");
   await same.check();
@@ -500,7 +500,7 @@ async function updateSuite() {
   const u2 = mk(tampered);
   await u2.check();
   check("a zip that doesn't match the signed checksum is refused and not kept",
-    u2.state.status === "error" && /checksum|larger/.test(u2.state.message) && !u2.state.zip && zipsIn(u2.stageDir).length === 0,
+    u2.state.status === "error" && /checksum|larger/.test(u2.state.message) && !u2.state.file && zipsIn(u2.stageDir).length === 0,
     `${JSON.stringify(u2.state)} left: ${JSON.stringify(zipsIn(u2.stageDir))}`);
 
   // https path, through an injected fetch.
@@ -512,6 +512,13 @@ async function updateSuite() {
   const u3 = mk("https://releases.example.test/pp", "1.2.0", { fetch: fakeFetch });
   await u3.check();
   check("https release: manifest and zip fetched and verified", u3.state.status === "ready", JSON.stringify(u3.state));
+
+  // A release that also carries an installer ("Setup.exe" here is a copy of node.exe, see below).
+  const setupRel = path.join(dir, "with-installer");
+  fs.cpSync(good, setupRel, { recursive: true });
+  const fakeSetup = path.join(setupRel, "ProtectPanes-Setup.exe");
+  fs.copyFileSync(process.execPath, fakeSetup);
+  signRelease({ zip: path.join(setupRel, "ProtectPanes-win32-x64.zip"), installer: fakeSetup, version: "9.9.9", keyFile: privFile });
 
   if (process.platform === "win32") {
     // The swap helper, for real, on throwaway folders. noLaunch keeps it from starting the "exe".
@@ -542,7 +549,51 @@ async function updateSuite() {
     check("an update without ProtectPanes.exe is refused and the old version stays",
       u4.state.status === "ready" && fs.readFileSync(path.join(installDir, "ProtectPanes.exe"), "utf8") === "v2" && /update failed: the update has no/.test(log2) && fs.readdirSync(installRoot).length === 1,
       log2.trim());
+
+    // Installer installs: the stand-in "Setup.exe" is a copy of node.exe that preloads fake-setup.js
+    // (via NODE_OPTIONS, inherited down the helper's cmd -> PowerShell -> Start-Process chain), so
+    // the real helper runs a real exe whose behaviour and exit code the test controls.
+    const fakeJs = path.join(dir, "fake-setup.js");
+    fs.writeFileSync(fakeJs, [
+      "const fs = require('fs'), path = require('path');",
+      "fs.writeFileSync(process.env.FAKE_ARGS, JSON.stringify(process.argv.slice(1)));",
+      "if (process.env.FAKE_EXIT === '0') fs.writeFileSync(path.join(process.env.FAKE_TARGET, 'ProtectPanes.exe'), 'v3-from-installer');",
+      "process.exit(Number(process.env.FAKE_EXIT));",
+    ].join("\n"));
+    const runInstaller = async (updater, exitCode) => {
+      const argsFile = path.join(dir, `fake-args-${exitCode}.json`);
+      // Forward slashes: inside NODE_OPTIONS quotes, a backslash is an escape character.
+      Object.assign(process.env, { NODE_OPTIONS: `--require "${fakeJs.replace(/\\/g, "/")}"`, FAKE_TARGET: installDir, FAKE_EXIT: String(exitCode), FAKE_ARGS: argsFile });
+      try { return { log: await runHelper(updater, installDir), args: fs.existsSync(argsFile) ? JSON.parse(fs.readFileSync(argsFile, "utf8")) : null }; }
+      finally { for (const k of ["NODE_OPTIONS", "FAKE_TARGET", "FAKE_EXIT", "FAKE_ARGS"]) delete process.env[k]; }
+    };
+    const u5 = mk(setupRel, "1.2.0", { installKind: "installer" });
+    await u5.check();
+    check("installer install downloads and verifies Setup.exe, not the zip", u5.state.status === "ready" && u5.state.kind === "installer" && /Setup-9\.9\.9\.exe$/.test(u5.state.file ?? ""), JSON.stringify(u5.state));
+    const ok = await runInstaller(u5, 0);
+    // node resolves its first argument as a script path, so the stand-in sees "/S" as "<drive>:\S".
+    const silentArgs = ok.args?.length === 2 && /^([a-z]:)?[\\/]S$/i.test(ok.args[0]) && ok.args[1] === "--updated";
+    check("swap helper runs the installer silently (/S --updated) and it updates in place",
+      silentArgs && fs.readFileSync(path.join(installDir, "ProtectPanes.exe"), "utf8") === "v3-from-installer" && /installer finished/.test(ok.log) && fs.readdirSync(installRoot).length === 1,
+      `${JSON.stringify(ok.args)} ${ok.log.trim()}`);
+    const u6 = mk(setupRel, "1.2.0", { installKind: "installer" });
+    await u6.check();
+    const bad = await runInstaller(u6, 3);
+    check("a failing installer is reported, and the helper still relaunches what's there",
+      /update failed: the installer exited with code 3/.test(bad.log) && /update: done/.test(bad.log) && fs.readFileSync(path.join(installDir, "ProtectPanes.exe"), "utf8") === "v3-from-installer",
+      bad.log.trim());
   }
+
+  const folderCopy = mk(setupRel);
+  await folderCopy.check();
+  check("folder install still updates from the zip when the release also has an installer", folderCopy.state.kind === "folder" && /\.zip$/.test(folderCopy.state.file ?? ""), JSON.stringify(folderCopy.state));
+  const noSetup = mk(good, "1.2.0", { installKind: "installer" });
+  await noSetup.check();
+  check("installer install refuses a release without an installer", noSetup.state.status === "error" && /no installer/.test(noSetup.state.message), JSON.stringify(noSetup.state));
+  const sneaky = { ...signed, installer: { file: "..\\evil.exe", size: 1, sha256: "0".repeat(64) } };
+  const sneakyPayload = Buffer.from(JSON.stringify(sneaky));
+  const sneakyDoc = JSON.stringify({ payload: sneakyPayload.toString("base64"), signature: crypto.sign(null, sneakyPayload, privateKey).toString("base64") });
+  check("a signed manifest whose installer name is a path is still refused", throws(() => verifyManifest(sneakyDoc, pubPem)));
 
   // In the app: the camera list's Updates section, with the test key swapped in (dev builds only).
   const A = "aaaaaaaa-0000-4000-8000-000000000001";

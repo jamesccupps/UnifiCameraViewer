@@ -71,6 +71,7 @@ async function init() {
     getSource: () => store.settings.updateSource,
     publicKey: updatePublicKey(),
     stageDir: updateStageDir(),
+    installKind: installKind(),
     fetch: (url, init) => net.fetch(url, init), // Chromium networking: Windows proxy settings and certificate store
     log: log.child("update"),
   });
@@ -857,6 +858,17 @@ function updatePublicKey() {
 function updateStageDir() {
   if (process.env.PANES_USER_DATA || !process.env.LOCALAPPDATA) return path.join(app.getPath("userData"), "updates");
   return path.join(process.env.LOCALAPPDATA, "Protect Panes", "updates");
+}
+
+// ProtectPanes-Setup.exe (NSIS) leaves "Uninstall Protect Panes.exe" next to the app. Such copies
+// update by running the new installer; swapping in the zip's folder would delete the uninstaller.
+function installKind() {
+  if (!app.isPackaged) return "folder";
+  try {
+    return fs.readdirSync(path.dirname(process.execPath)).some((f) => /^Uninstall .+\.exe$/i.test(f)) ? "installer" : "folder";
+  } catch {
+    return "folder";
+  }
 }
 
 function setUpdateSource(value) {

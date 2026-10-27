@@ -54,11 +54,13 @@ export function verifyManifest(text, publicKeyPem) {
   if (!ok) throw new Error("The update manifest's signature doesn't match this app's key - not installing it.");
   let p;
   try { p = JSON.parse(payload.toString("utf8")); } catch { throw new Error("The update manifest is malformed."); }
+  // Bare file names only: no paths, nothing to traverse.
+  const fileOk = (f, ext) => typeof f?.file === "string" && new RegExp(`^[\\w.-]+\\.${ext}$`).test(f.file)
+    && /^[0-9a-f]{64}$/.test(f.sha256) && Number.isInteger(f.size) && f.size > 0 && f.size <= MAX_ZIP_BYTES;
   const valid = p?.app === "protect-panes"
     && /^\d+\.\d+\.\d+$/.test(p.version)
-    && /^[0-9a-f]{64}$/.test(p.sha256)
-    && Number.isInteger(p.size) && p.size > 0 && p.size <= MAX_ZIP_BYTES
-    && /^[\w.-]+\.zip$/.test(p.file); // a bare file name: no paths, nothing to traverse
+    && fileOk(p, "zip")
+    && (p.installer === undefined || fileOk(p.installer, "exe"));
   if (!valid) throw new Error("The update manifest is malformed.");
   return p;
 }
@@ -132,12 +134,14 @@ export class Updater extends EventEmitter {
    * @param {() => string} opts.getSource
    * @param {string} opts.publicKey     - PEM
    * @param {string} opts.stageDir      - where downloads are kept until installed
+   * @param {"folder" | "installer"} [opts.installKind] - how this copy was installed: unzipped folder
+   *   (update = swap the folder) or Setup.exe (update = run the new installer, which keeps its uninstaller)
    * @param {typeof fetch} [opts.fetch]
    * @param {object} opts.log
    */
   constructor(opts) {
     super();
-    this.#opts = { fetch: globalThis.fetch, ...opts };
+    this.#opts = { fetch: globalThis.fetch, installKind: "folder", ...opts };
   }
 
   #set(status, extra = {}) {
@@ -163,24 +167,27 @@ export class Updater extends EventEmitter {
         this.#set("available", { version: manifest.version, message: `Version ${manifest.version} is available.` });
         return this.state;
       }
+      const kind = this.#opts.installKind === "installer" ? "installer" : "folder";
+      const want = kind === "installer" ? manifest.installer : manifest;
+      if (!want) throw new Error(`Version ${manifest.version} has no installer. Download it from the release page.`);
       this.#set("downloading", { version: manifest.version, message: `Downloading ${manifest.version}…` });
       fs.mkdirSync(stageDir, { recursive: true });
-      const zip = path.join(stageDir, `ProtectPanes-${manifest.version}.zip`);
-      const part = `${zip}.part`;
+      const file = path.join(stageDir, kind === "installer" ? `ProtectPanes-Setup-${manifest.version}.exe` : `ProtectPanes-${manifest.version}.zip`);
+      const part = `${file}.part`;
       fs.rmSync(part, { force: true });
       let got;
       try {
-        got = await fetchTo(source, manifest.file, part, manifest.size, this.#opts.fetch);
-        if (got.size !== manifest.size || got.sha256 !== manifest.sha256) {
+        got = await fetchTo(source, want.file, part, want.size, this.#opts.fetch);
+        if (got.size !== want.size || got.sha256 !== want.sha256) {
           throw new Error("The downloaded update doesn't match its signed checksum - not installing it.");
         }
       } catch (err) {
         fs.rmSync(part, { force: true }); // never leave unverified bytes where they could be mistaken for the update
         throw err;
       }
-      fs.renameSync(part, zip);
-      log?.info(`update ${manifest.version} downloaded and verified (${got.size} bytes, sha256 ${got.sha256.slice(0, 12)}…)`);
-      this.#set("ready", { version: manifest.version, zip, message: `Version ${manifest.version} is ready to install.` });
+      fs.renameSync(part, file);
+      log?.info(`update ${manifest.version} (${kind}) downloaded and verified (${got.size} bytes, sha256 ${got.sha256.slice(0, 12)}…)`);
+      this.#set("ready", { version: manifest.version, kind, file, message: `Version ${manifest.version} is ready to install.` });
     } catch (err) {
       log?.warn(`update check: ${err.message}`);
       this.#set("error", { message: err.message });
@@ -195,7 +202,7 @@ export class Updater extends EventEmitter {
    * and relaunches. The caller quits the app right after this returns.
    */
   install({ installDir, exeName, pid, noLaunch = false }) {
-    if (this.state.status !== "ready" || !this.state.zip) throw new Error("No verified update is ready.");
+    if (this.state.status !== "ready" || !this.state.file) throw new Error("No verified update is ready.");
     const parent = path.dirname(installDir);
     try {
       fs.rmSync(fs.mkdtempSync(path.join(parent, ".pp-write-test-")), { recursive: true, force: true });
@@ -207,7 +214,8 @@ export class Updater extends EventEmitter {
     fs.writeFileSync(script, HELPER_PS1, "utf8");
     fs.rmSync(log, { force: true });
     const q = (s) => `'${String(s).replace(/['‘’‚‛]/g, "$&$&")}'`; // PowerShell single-quoted literal
-    const invoke = `& ${q(script)} -WaitPid ${Number(pid)} -Zip ${q(this.state.zip)} -Target ${q(installDir)} -Exe ${q(exeName)} -Log ${q(log)}${noLaunch ? " -NoLaunch" : ""}`;
+    const payload = this.state.kind === "installer" ? `-Installer ${q(this.state.file)}` : `-Zip ${q(this.state.file)}`;
+    const invoke = `& ${q(script)} -WaitPid ${Number(pid)} ${payload} -Target ${q(installDir)} -Exe ${q(exeName)} -Log ${q(log)}${noLaunch ? " -NoLaunch" : ""}`;
     /*
      * Measured on Windows 11: a detached powershell.exe (DETACHED_PROCESS, no console) exits 0 at
      * once without running anything, and a non-detached child sits in libuv's kill-on-close job, so
@@ -224,12 +232,16 @@ export class Updater extends EventEmitter {
 }
 
 /*
- * Runs after the app exits. Unpacks next to the install folder (same volume, so the swap is a
- * rename), checks the new folder has the exe, renames the old folder aside, moves the new one in,
- * and rolls back if that fails. Relaunches whichever version ended up in place.
+ * Runs after the app exits.
+ *   -Zip: unpacks next to the install folder (same volume, so the swap is a rename), checks the
+ *         new folder has the exe, renames the old folder aside, moves the new one in, and rolls
+ *         back if that fails.
+ *   -Installer: runs the verified Setup.exe silently, as electron-builder's own updater does
+ *         (/S --updated). The installer replaces the files and keeps its uninstaller and shortcuts.
+ * Either way it relaunches whichever version ended up in place.
  */
 export const HELPER_PS1 = String.raw`param(
-  [int]$WaitPid, [string]$Zip, [string]$Target, [string]$Exe, [string]$Log, [switch]$NoLaunch
+  [int]$WaitPid, [string]$Zip, [string]$Installer, [string]$Target, [string]$Exe, [string]$Log, [switch]$NoLaunch
 )
 $ErrorActionPreference = 'Stop'
 function Say([string]$m) { Add-Content -LiteralPath $Log -Value ("{0:s} {1}" -f (Get-Date), $m) }
@@ -240,25 +252,32 @@ try {
   Say "update: waiting for process $WaitPid to exit"
   for ($i = 0; $i -lt 60 -and (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Seconds 1 }
   if (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue) { throw "the app didn't exit" }
-  Expand-Archive -LiteralPath $Zip -DestinationPath $work -Force
-  $new = Get-ChildItem -LiteralPath $work -Directory | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName $Exe) } | Select-Object -First 1
-  if ($new) { $new = $new.FullName } elseif (Test-Path -LiteralPath (Join-Path $work $Exe)) { $new = $work } else { throw "the update has no $Exe" }
-  $moved = $false
-  for ($i = 0; $i -lt 10 -and -not $moved; $i++) {
-    try { Rename-Item -LiteralPath $Target -NewName (Split-Path $old -Leaf); $moved = $true } catch { Start-Sleep -Seconds 1 }
+  if ($Installer) {
+    $p = Start-Process -FilePath $Installer -ArgumentList '/S', '--updated' -Wait -PassThru
+    if ($p.ExitCode -ne 0) { throw "the installer exited with code $($p.ExitCode)" }
+    Say "update: installer finished"
+    Remove-Item -LiteralPath $Installer -Force -ErrorAction SilentlyContinue
+  } else {
+    Expand-Archive -LiteralPath $Zip -DestinationPath $work -Force
+    $new = Get-ChildItem -LiteralPath $work -Directory | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName $Exe) } | Select-Object -First 1
+    if ($new) { $new = $new.FullName } elseif (Test-Path -LiteralPath (Join-Path $work $Exe)) { $new = $work } else { throw "the update has no $Exe" }
+    $moved = $false
+    for ($i = 0; $i -lt 10 -and -not $moved; $i++) {
+      try { Rename-Item -LiteralPath $Target -NewName (Split-Path $old -Leaf); $moved = $true } catch { Start-Sleep -Seconds 1 }
+    }
+    if (-not $moved) { throw "couldn't move $Target aside (a file in it is still in use)" }
+    try {
+      Move-Item -LiteralPath $new -Destination $Target
+    } catch {
+      Say "update: move failed, restoring the old version: $_"
+      if (Test-Path -LiteralPath $Target) { Remove-Item -LiteralPath $Target -Recurse -Force }
+      Rename-Item -LiteralPath $old -NewName (Split-Path $Target -Leaf)
+      throw
+    }
+    Say "update: installed into $Target"
+    Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $Zip -Force -ErrorAction SilentlyContinue
   }
-  if (-not $moved) { throw "couldn't move $Target aside (a file in it is still in use)" }
-  try {
-    Move-Item -LiteralPath $new -Destination $Target
-  } catch {
-    Say "update: move failed, restoring the old version: $_"
-    if (Test-Path -LiteralPath $Target) { Remove-Item -LiteralPath $Target -Recurse -Force }
-    Rename-Item -LiteralPath $old -NewName (Split-Path $Target -Leaf)
-    throw
-  }
-  Say "update: installed into $Target"
-  Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $Zip -Force -ErrorAction SilentlyContinue
 } catch {
   Say "update failed: $_"
 } finally {

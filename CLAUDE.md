@@ -31,7 +31,7 @@ npm run test:range        # SPS color-range rewrite (unit, ffmpeg fixtures) + di
 npm run test:layouts      # save / apply named layouts, import a Protect liveview, switch from the tray
 npm run test:update       # signed manifest, verified download, the real folder-swap helper, camera-list Updates
 npm run test:e2e          # fake UniFi OS consoles over HTTPS/WSS through the real unifi-protect library
-npm run build:win         # portable build -> dist/Protect Panes-win32-x64/ + dist/ProtectPanes-win32-x64.zip + dist/latest.json (signed)
+npm run build:win         # dist/Protect Panes-win32-x64/ + ProtectPanes-win32-x64.zip + ProtectPanes-Setup.exe + latest.json (signed)
 ```
 
 **Run `npm test` after any change and before building.** It prints PASS/FAIL per check, and keeps screenshots of every window plus `result.json` (per-window playback stats) in the printed results folder. **Look at the screenshots** for anything visual. Tests use their own temp settings folder, so they never touch the real config and can run while the app is open.
@@ -59,7 +59,8 @@ src/selftest.js             Dev-only harness, active only when PANES_SELFTEST_DI
 test/run.mjs                Test runner (mock, hide, range, layouts and e2e suites with assertions)
 test/fake-console/          Fake UniFi OS console (HTTPS + WSS) and its throwaway self-signed cert
 test/fixtures/              Synthetic fisheye frames with known geometry (ceiling circle truth: x .513, y .4938, r .4818)
-scripts/build-win.js        @electron/packager build + zip (no Wine needed); ELECTRON_ZIP_DIR to use a pre-downloaded runtime; signs latest.json if the key exists
+scripts/build-win.js        @electron/packager folder + zip, then electron-builder NSIS --prepackaged on that same folder -> Setup.exe; signs latest.json if the key exists
+.github/workflows/test.yml  CI: npm test on windows-latest, plus a real Setup.exe install / start / uninstall on the runner
 scripts/sign-release.js     Writes latest.json {payload, signature} for a zip (Ed25519, private key outside the repo)
 scripts/make-signing-key.js One-time: create the signing key pair (refuses to overwrite)
 ```
@@ -164,6 +165,14 @@ Passwords are DPAPI-encrypted (`safeStorage`) and tied to the Windows user. `enc
   Launching the helper (measured): a `detached` powershell.exe never runs, because it gets no console. A non-detached one dies with the app (libuv's kill-on-close job). So it goes `cmd /c start /min powershell -EncodedCommand <base64>`, with no paths on cmd's line, because `&` and `%` are legal in user and folder names. The test installs into `Tools & 100% O'Brien\` on purpose.
 
   The install folder's parent must be writable; Program Files isn't.
+
+  **Two install kinds** (`installKind()` in main.js):
+  - **Installer installs:** ProtectPanes-Setup.exe is a per-user NSIS oneClick installer to `%LOCALAPPDATA%\Programs\Protect Panes`, with an `Uninstall Protect Panes.exe` beside the app. These update by downloading `installer` from the manifest and running it as `/S --updated`, the same flags electron-updater uses. Swapping in the zip there would delete the uninstaller.
+  - **Folder installs:** unzipped copies, and every 1.2.x, update by folder swap from the zip. `latest.json` keeps the zip fields at the top level so 1.2.x clients keep working; `installer` is an extra field they ignore.
+  - The fake-installer test is a copy of node.exe preloading a script via `NODE_OPTIONS` (forward slashes: a backslash is an escape inside its quotes).
+  - The real installer is exercised only in CI. Running it here would add shortcuts and an uninstall entry to the dev PC.
+
+  Build retries: packager's final rename of its temp folder into `dist\` sometimes fails with EPERM right after the files are written. It happened twice here, and electron-builder hit the same on its cache, most likely antivirus scanning fresh executables. `build-win.js` retries it.
 - **Hidden vs closed vs minimized.**
   - Hide cameras (tray, list header) and Hide all (per console) apply to the windows on screen; minimized ones are skipped. Each window gets `win.hide()` plus `CameraStream.pause()`, so its renderer stays alive and Show only waits for a keyframe.
   - At launch, hidden windows aren't created at all. Show cameras creates them.
@@ -211,7 +220,7 @@ Action results carry `t` (epoch ms), so a check can compare against the samples 
 3. `npm run build:win`. This also signs `dist/latest.json` with `%USERPROFILE%\.protect-panes\update-signing-key.pem`.
    - Never commit that private key. Back it up: without it, installed copies can't update in place.
    - `scripts/make-signing-key.js` refuses to replace an existing key.
-4. Tag `vX.Y.Z`, push it, and create a GitHub release for the tag with **both** `dist/ProtectPanes-win32-x64.zip` and `dist/latest.json` attached. Installed copies find it through `releases/latest/download/latest.json`. Installed copies pick the update up from Settings → Updates.
+4. Tag `vX.Y.Z`, push it, and create a GitHub release for the tag with `dist/ProtectPanes-Setup.exe`, `dist/ProtectPanes-win32-x64.zip` **and** `dist/latest.json` attached. Installed copies find it through `releases/latest/download/latest.json`. Installed copies pick the update up from Settings → Updates.
    - For a first install, or a copy older than 1.2.0, hand over the zip instead. The owner quits the app and replaces the folder; settings in `%APPDATA%` carry over.
 
 The exe is unsigned, so SmartScreen shows "Run anyway" on first launch.
