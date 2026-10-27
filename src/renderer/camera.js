@@ -35,6 +35,8 @@ const RESET_GAP_MS = 3_000;   // between stream restarts; doubles while restarts
 const RESET_GAP_MAX_MS = 60_000; // ...up to this
 const DECODE_HELP_AFTER = 3;  // failed restarts in a row before saying it's this PC's decoder
 const DECODE_HELP = "This PC couldn't decode this stream. Try Medium or Low quality from the right-click menu.";
+const STUCK_MS = 5_000;       // fragments arriving but no new frame this long => restart the stream
+const CLOCK_FRESH_MS = 1_500; // the clock shows only if a new frame came this recently
 
 let mediaSource = null;
 let sourceBuffer = null;
@@ -283,6 +285,32 @@ function requestReset(reason) {
 }
 
 video.addEventListener("error", () => requestReset(`video error ${video.error?.code ?? ""}`));
+
+// Fragments that keep appending while no new frame decodes leave a frozen picture under a green
+// dot, and nothing else notices: a hung decoder, or a restart whose timestamps went back to zero
+// without a discontinuity flag, so its video lands behind the playhead. Stalls with no fragments
+// coming are the library's to detect. A hidden or covered window may legitimately stop presenting.
+let lastFrames = -1;
+let lastFrameAt = 0;
+let appendedAtFrame = 0;
+function decodedFrames() {
+  return video.getVideoPlaybackQuality?.().totalVideoFrames ?? 0;
+}
+setInterval(() => {
+  const frames = decodedFrames();
+  const now = performance.now();
+  if (frames !== lastFrames || streamState !== "live" || document.hidden || !mediaSource) {
+    lastFrames = frames;
+    lastFrameAt = now;
+    appendedAtFrame = stats.appended;
+    return;
+  }
+  if (now - lastFrameAt > STUCK_MS && stats.appended - appendedAtFrame >= 10) {
+    lastFrameAt = now;
+    appendedAtFrame = stats.appended;
+    requestReset("no new frames");
+  }
+}, 1_000);
 video.addEventListener("resize", reportAspect);
 
 // Dewarped layouts keep their chosen shape (16:9 by default, 0x0 = any shape) whatever the
@@ -450,8 +478,18 @@ function clockText() {
 }
 
 // Only over live video: a ticking clock on a frozen or reconnecting picture would claim it's live.
+// "Live" alone isn't enough: the library reports a stall only after 5 s, so the clock also needs a
+// frame within the last 1.5 s.
+let clockFrames = -1;
+let clockFrameAt = 0;
 function updateClock() {
-  const show = clockWanted && clockFits && streamState === "live" && !codecError;
+  const frames = decodedFrames();
+  if (frames !== clockFrames) {
+    clockFrames = frames;
+    clockFrameAt = performance.now();
+  }
+  const fresh = performance.now() - clockFrameAt < CLOCK_FRESH_MS;
+  const show = clockWanted && clockFits && streamState === "live" && !codecError && fresh;
   if (show) clockEl.textContent = clockText();
   clockEl.classList.toggle("hidden", !show);
 }

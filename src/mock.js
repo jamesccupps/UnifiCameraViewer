@@ -96,6 +96,10 @@ class MockCamera {
     // "... Broken" sends a valid init, then fragments no decoder accepts (each first NAL length is
     // corrupt), like a stream the GPU's decoder takes on and then rejects every time.
     this.broken = /\bBroken\b/.test(name);
+    // "... Rewind" restarts its encoder 12 s in WITHOUT flagging the discontinuity, so its new
+    // fragments (timestamps from zero) land behind the playhead: appends succeed, the picture freezes
+    // until the new timeline reaches the old one (another 12 s), unless something restarts it.
+    this.rewind = /\bRewind\b/.test(name);
     this.isOnline = online;
     this.snapshots = 0;
     this.subscriptions = 0;
@@ -135,11 +139,13 @@ class MockCamera {
 
   livestream({ source, signal }) {
     // Once per camera: a later subscription (quality change, Show cameras) must not be cut off again.
-    const restartSec = this.index === 0 && !this.restartUsed ? Number(process.env.PANES_MOCK_RESTART_SEC || 0) : 0;
+    let restartSec = this.index === 0 && !this.restartUsed ? Number(process.env.PANES_MOCK_RESTART_SEC || 0) : 0;
+    if (this.rewind && !this.restartUsed) restartSec = 12;
     if (restartSec) this.restartUsed = true;
     this.subscriptions++;
     const sub = new MockSubscription({
-      channel: source?.channel ?? 0, hue: this.index * 70, label: this.name, signal, restartSec, image: this.image, shadows: this.shadows, broken: this.broken,
+      channel: source?.channel ?? 0, hue: this.index * 70, label: this.name, signal, restartSec, flagRestart: !this.rewind,
+      image: this.image, shadows: this.shadows, broken: this.broken,
       onDone: () => this.live.delete(sub),
     });
     this.live.add(sub);
@@ -169,7 +175,7 @@ class MockSubscription {
       this.restartTimer = setTimeout(() => {
         // Simulate the library's reconnect: new encoder, timestamps restart at zero.
         this.#proc?.kill("SIGKILL");
-        this.#pendingDiscontinuity = true;
+        this.#pendingDiscontinuity = opts.flagRestart !== false;
         this.#spawn();
       }, opts.restartSec * 1000);
     }

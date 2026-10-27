@@ -28,7 +28,7 @@ npm run test:mock         # mock cameras: playback, forced reconnect, 360° quad
 npm run test:hide         # Hide cameras / Show cameras / per-console Hide all, across two launches
 npm run test:bounds       # window and grid sizes stay put across three launches at a forced 150 % scale
 npm run test:connection   # ConsoleConnection unit checks with a fake library client (runs under Electron's Node)
-npm run test:streams      # stream recovery: a camera going offline while viewed, a stream that never decodes
+npm run test:streams      # stream recovery: a camera going offline while viewed, a stream that never decodes, a frozen picture
 npm run test:range        # SPS color-range rewrite (unit, ffmpeg fixtures) + displayed pixel levels in Chromium, Adjust picture
 npm run test:layouts      # save / apply named layouts, import a Protect liveview, switch from the tray
 npm run test:update       # signed manifest, verified download, the real swap helper (folder, installer, app.asar), camera-list Updates
@@ -68,7 +68,7 @@ src/renderer/camera.*       Camera page: MSE playback, live-edge tracking, codec
 src/renderer/dewarp.js      360°: WebGL fisheye dewarp (quad / panorama), PTZ input, circle auto-detect, calibration UI
 src/renderer/grid-window.*  The page under a grid window's tiles: empty-tile placeholders, right-click
 src/renderer/manager.*      Camera list: Cameras / Layouts / Settings tabs, previews, hover tips (data-tip), vanilla DOM, no innerHTML with camera/console names
-src/mock.js                 Dev-only fake consoles/cameras (--mock); PANES_MOCK_FISHEYE adds a 360 camera, cfg.mockOffline marks cameras offline, cfg.mockDropout takes one offline and back mid-run, a "… Broken" camera never decodes
+src/mock.js                 Dev-only fake consoles/cameras (--mock); PANES_MOCK_FISHEYE adds a 360 camera, cfg.mockOffline marks cameras offline, cfg.mockDropout takes one offline and back mid-run, "… Broken" never decodes, "… Rewind" freezes
 src/selftest.js             Dev-only harness, active only when PANES_SELFTEST_DIR is set
 test/run.mjs                Test runner (all the suites above, with assertions)
 test/legacy-password.cjs    Writes a password the way 1.3.x did (sync safeStorage), for the e2e upgrade check
@@ -95,6 +95,7 @@ release-notes/vX.Y.Z.md     Release text the workflow publishes
    - It holds about 0.2-0.7 s behind live: it plays 1.15× faster when behind, and jumps forward past 1.5 s.
    - It trims history older than 12 s.
    - Anything unrecoverable sends `cam:reset`, and main restarts the subscription. Resets are at least 3 s apart; one asked for sooner waits rather than being dropped (dropping it once left a closed MediaSource under a "live" status: black with a green dot). The gap doubles while restarts fail with no frame shown in between (up to 60 s), and after 3 the window says the PC couldn't decode the stream and suggests a lower quality. A frame on screen (`requestVideoFrameCallback`) clears the count. The mock's "… Broken" camera sends fragments no decoder takes; the streams suite checks it.
+   - A 1 s watchdog restarts the stream when fragments keep appending (10+) but `totalVideoFrames` hasn't moved for 5 s while live and visible: a hung decoder, or a restart whose timestamps went back to zero without a discontinuity flag (its video lands behind the playhead, and the picture froze until the new timeline caught up). Stalls with no fragments arriving are the library's to detect. The mock's "… Rewind" camera does the unflagged restart.
 5. On reconnect the library rebases timestamps to zero and flags `discontinuity`. Main then resends init with `reset: true`, and the renderer rebuilds the MediaSource.
 6. 360°: `Dewarper` reads `<video>` frames as a WebGL texture (on `requestVideoFrameCallback`) and draws the views. The video element stays rendered *under* the canvas: rVFC doesn't fire for hidden videos.
 
@@ -157,7 +158,7 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
   - Fixture-tested: no flag, flagged pc, flagged tv, and no VUI. Each one decodes bit-identically after the rewrite.
   - Verified live afterwards: pure black dropped to 0.02%. H.265 isn't handled.
 - **App clock on 360° views.** The camera's own timestamp sits in a corner of the fisheye frame, which no dewarped view samples. `updateClock()` draws PC time minus the buffer lag, bottom right.
-  - It shows only while the stream is live: a ticking clock over a frozen picture would claim it's live.
+  - It shows only while the stream is live and a new frame arrived within 1.5 s: a ticking clock over a frozen picture would claim it's live, and the library reports a stall only after 5 s. A camera below about 1 fps would make it flicker.
   - It hides when it would take more than 45% of the window width (below the label's 50%, so the two never overlap).
   - It's PC time, not NVR time.
 - **Apply to all.** There are two entry points:

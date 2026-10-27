@@ -394,17 +394,19 @@ async function streamsSuite() {
   console.log("\nStreams suite (mock consoles)");
   const userData = tmpDir("streams");
   const A = "aaaaaaaa-0000-4000-8000-000000000001";
-  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, broken: `${A}/aaaaaaaa-cam2` };
+  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, broken: `${A}/aaaaaaaa-cam2`, rewind: `${A}/aaaaaaaa-cam3` };
   // Dock goes offline 4 s after the console connects and comes back at 10 s. The library would keep
   // its stream "recovering" (renegotiating every few seconds) the whole time. Broken's fragments
-  // fail to decode every time.
+  // fail to decode every time. Rewind's encoder restarts 12 s in without flagging the discontinuity:
+  // its picture would freeze until the new timestamps caught up with the playhead, another 12 s.
   fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
     version: 1,
-    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Broken"], mockDropout: { camera: "Dock", offMs: 4000, onMs: 10000 } }],
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Broken", "Rewind"], mockDropout: { camera: "Dock", offMs: 4000, onMs: 10000 } }],
     windows: {
       [keys.lobby]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 },
       [keys.dock]: { open: true, bounds: { x: 500, y: 0, width: 480, height: 270 }, channel: 2 },
       [keys.broken]: { open: true, bounds: { x: 0, y: 300, width: 480, height: 270 }, channel: 2 },
+      [keys.rewind]: { open: true, bounds: { x: 500, y: 300, width: 480, height: 270 }, channel: 2, clock: true },
     },
     settings: { startHidden: true },
   }, null, 2));
@@ -430,6 +432,16 @@ async function streamsSuite() {
   check("its window always says something once it has failed (never black under a hidden status)",
     afterFirst.length > 3 && afterFirst.every((c) => c.statusText), JSON.stringify(afterFirst.map((c) => [c.status, c.statusText])));
   check("after 3 failed restarts it says this PC couldn't decode it", /couldn't decode/.test(end?.statusText ?? ""), end?.statusText);
+
+  // Fragments still arriving but no new frame: restart, and meanwhile no clock over the frozen picture.
+  const rw = result.samples.map((s) => s.cams[keys.rewind]).filter((c) => c && !c.error);
+  const rwEnd = rw.at(-1);
+  check("a picture that freezes while fragments keep arriving is restarted",
+    rwEnd?.errors?.includes("no new frames") && rwEnd.status === "live" && rwEnd.decodedFrames > rw.at(-2)?.decodedFrames,
+    JSON.stringify({ errors: rwEnd?.errors, frames: rw.map((c) => c.decodedFrames) }));
+  const frozen = rw.filter((c, i) => i > 0 && c.status === "live" && c.decodedFrames === rw[i - 1].decodedFrames && c.decodedFrames > 0);
+  check("no clock over the frozen picture", frozen.length >= 1 && frozen.every((c) => !c.clock.shown) && rwEnd?.clock?.shown,
+    JSON.stringify(rw.map((c) => [c.decodedFrames, c.clock.shown])));
   console.log(`  results: ${userData}`);
 }
 
