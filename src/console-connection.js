@@ -29,6 +29,7 @@ export class ConsoleConnection extends EventEmitter {
   #abort = null;
   #client = null;
   #disposables = [];
+  #stops = 0;
 
   state = "idle";
   message = "";
@@ -55,10 +56,13 @@ export class ConsoleConnection extends EventEmitter {
   }
 
   async stop() {
+    const stop = ++this.#stops;
     this.#abort?.abort();
     this.#abort = null;
     await this.#teardown();
-    this.#set("idle", "");
+    // Two restarts in a row (Reconnect clicked twice, a slow client close): the newer one may have
+    // connected while this teardown ran, and must not be marked idle under a live client.
+    if (stop === this.#stops && !this.#abort) this.#set("idle", "");
   }
 
   async restart(cfg) {

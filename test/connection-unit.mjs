@@ -38,4 +38,19 @@ const out = {};
   await conn.stop();
 }
 
+// Reconnect clicked twice while the old client is slow to close: the second restart connects, and
+// the first one finishing its teardown afterwards must not mark the console idle.
+{
+  const slowClient = () => ({ ...fakeClient(), async [Symbol.asyncDispose]() { await new Promise((r) => setTimeout(r, 200)); } });
+  const conn = new ConsoleConnection({ id: "c2", host: "h" }, async () => "pw", quiet, { connect: async () => slowClient() });
+  conn.start();
+  await until(() => conn.state === "connected");
+  const states = [];
+  conn.on("state", () => states.push(conn.state));
+  await Promise.all([conn.restart(), conn.restart()]);
+  await new Promise((r) => setTimeout(r, 400)); // well past the slow close
+  out.overlappingRestarts = { state: conn.state, states };
+  await conn.stop();
+}
+
 console.log(JSON.stringify(out));

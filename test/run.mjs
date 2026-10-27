@@ -504,6 +504,8 @@ async function connectionSuite() {
   const ra = out.refusedThenAccepted;
   check("a refused login (UniFi OS booting) is retried and connects once accepted",
     ra?.state === "connected" && ra.calls === 3 && ra.states.filter((s) => s === "authfailed").length === 2, JSON.stringify(ra));
+  const or = out.overlappingRestarts;
+  check("two overlapping restarts leave the console connected, not idle", or?.state === "connected", JSON.stringify(or));
 }
 
 // ---------------------------------------------------------------------------------------------
