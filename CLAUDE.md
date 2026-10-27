@@ -7,12 +7,13 @@ Hard requirements, all deliberate:
 - **Direct login by IP** with a local account. No ui.com/cloud, no MFA.
 - **Low resource use.** Medium channel by default, GPU decode via MSE, minimized windows stop streaming, WebGL only for 360° windows.
 
-Current version: **1.4.1**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
+Current version: **1.4.2**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
 - **1.2.0:** color-range fix for crushed shadows, name label collapse and per-window hide, clock on 360° views, Apply to all, Hide / Show cameras, named layouts with Protect liveview import, signed in-place updates.
 - **1.3.0:** the Setup.exe installer, Arrange and Close all, the layout editor, the tabbed camera list with hover tips, 360° Single view, and undici patched for security.
 - **1.3.1:** portable copies' in-app update fixed (the helper's working folder blocked the swap); Arrange / "Use what's on screen" missing just-shown windows.
 - **1.4.0:** grid windows, Hide from list, camera previews, Adjust picture (brightness / contrast), small app.asar-only updates, async safeStorage.
 - **1.4.1:** a click in the camera list brings it back above a camera opened from it. The first release 1.4.0 copies take as a small update.
+- **1.4.2:** Start with Windows touches the Run key only when it needs changing, never in test runs (a Defender ASEP alert).
 
 The owner ran 1.0 to 1.2 on the real consoles, and their installed copy updated itself from 1.3.1 to 1.4.0 in the app (the installer path). Later versions are tested against the real consoles only through self-test runs from source on a copy of the config.
 
