@@ -82,7 +82,9 @@ jobs:
             Where-Object { $_.DisplayName -like 'Protect Panes*' } | Select-Object -First 1
           if (-not $entry) { throw "no Add/Remove Programs entry for Protect Panes" }
           "entry: $($entry.DisplayName) $($entry.DisplayVersion) | InstallLocation=$($entry.InstallLocation) | $($entry.UninstallString)"
+          # electron-builder leaves InstallLocation empty; the folder is the one holding the uninstaller.
           $dir = $entry.InstallLocation
+          if (-not $dir) { $dir = Split-Path ($entry.UninstallString -replace '^"([^"]+)".*$', '$1') }
           Get-ChildItem $dir | Select-Object -ExpandProperty Name | Select-Object -First 40
           $exe = Join-Path $dir 'ProtectPanes.exe'
           if (-not (Test-Path $exe)) { throw "no ProtectPanes.exe in $dir" }

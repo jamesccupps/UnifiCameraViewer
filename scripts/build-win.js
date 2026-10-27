@@ -82,7 +82,7 @@ if (process.platform === "win32") {
       directories: { output: out },
       win: { icon: "assets/icon.ico", executableName: "ProtectPanes" },
       nsis: {
-        // Per-user, no admin prompt: installs to %LOCALAPPDATA%\Programs\Protect Panes, which the
+        // Per-user, no admin prompt: installs to %LOCALAPPDATA%\Programs\protect-panes, which the
         // in-app updater can write to. Settings in %APPDATA%\Protect Panes survive uninstall.
         oneClick: true,
         perMachine: false,

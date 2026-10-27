@@ -167,7 +167,7 @@ Passwords are DPAPI-encrypted (`safeStorage`) and tied to the Windows user. `enc
   The install folder's parent must be writable; Program Files isn't.
 
   **Two install kinds** (`installKind()` in main.js):
-  - **Installer installs:** ProtectPanes-Setup.exe is a per-user NSIS oneClick installer to `%LOCALAPPDATA%\Programs\Protect Panes`, with an `Uninstall Protect Panes.exe` beside the app. These update by downloading `installer` from the manifest and running it as `/S --updated`, the same flags electron-updater uses. Swapping in the zip there would delete the uninstaller.
+  - **Installer installs:** ProtectPanes-Setup.exe is a per-user NSIS oneClick installer to `%LOCALAPPDATA%\Programs\protect-panes`, with an `Uninstall ProtectPanes.exe` beside the app. Both names were measured by the CI install job: electron-builder names the folder after the package name and the uninstaller after the exe. Its uninstall registry entry has no `InstallLocation`. These update by downloading `installer` from the manifest and running it as `/S --updated`, the same flags electron-updater uses. Swapping in the zip there would delete the uninstaller.
   - **Folder installs:** unzipped copies, and every 1.2.x, update by folder swap from the zip. `latest.json` keeps the zip fields at the top level so 1.2.x clients keep working; `installer` is an extra field they ignore.
   - The fake-installer test is a copy of node.exe preloading a script via `NODE_OPTIONS` (forward slashes: a backslash is an escape inside its quotes).
   - The real installer is exercised only in CI. Running it here would add shortcuts and an uninstall entry to the dev PC.
