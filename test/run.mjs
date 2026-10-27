@@ -180,6 +180,8 @@ async function mockSuite() {
     { at: 10500, do: "menu-click", win: 0, label: "Quality: Medium" },
     { at: 11000, do: "menu-click", win: 0, label: "Show time: on" },
     { at: 11500, do: "menu-click", win: 2, label: "Picture: 130% brightness, 110% contrast" },
+    { at: 12000, do: "menu-click", win: 2, label: "4:3" },
+    { at: 12500, do: "menu-click", win: 3, label: "Any shape (no lock)" },
   ];
   const { result, config } = await runApp({
     // 20 s: the Apply-to-all quality change at 10.5 s restarts two streams, and a runner without a
@@ -251,6 +253,17 @@ async function mockSuite() {
       && Object.values(keys).every((k) => cams[k]?.picture?.filter === pic) && JSON.stringify(config.windows[stair]?.picture) === JSON.stringify({ brightness: 1.3, contrast: 1.1 }),
     JSON.stringify(Object.values(keys).map((k) => cams[k]?.picture?.filter)));
   check("the picture filter is on the 360° canvas too", cams[keys.quad]?.picture?.canvasFilter === pic && cams[keys.pano]?.picture?.canvasFilter === pic, JSON.stringify(cams[keys.quad]?.picture));
+
+  const aspects = views.find((i) => typeof i === "object" && i["Aspect ratio"])?.["Aspect ratio"] ?? [];
+  check("360° view offers an aspect ratio for the window (16:9 checked by default)",
+    ["[x] 16:9 (default)", "4:3", "3:2", "1:1 (square)", "21:9 (ultrawide)", "Any shape (no lock)"].every((l) => aspects.includes(l)), JSON.stringify(aspects));
+  const qb = cams[keys.quad]?.bounds;
+  check("Aspect ratio 4:3 reshapes the quad window to 4:3 and saves it",
+    config.windows[keys.quad]?.dewarp?.aspect === "4:3" && cams[keys.quad]?.dewarp?.aspect === "4:3" && Math.abs(cams[keys.quad]?.aspectLock - 4 / 3) < 0.001
+      && qb && Math.abs(qb.width / qb.height - 4 / 3) < 0.02,
+    JSON.stringify({ saved: config.windows[keys.quad]?.dewarp?.aspect, lock: cams[keys.quad]?.aspectLock, bounds: qb }));
+  check("Any shape takes the panorama window's aspect lock off", config.windows[keys.pano]?.dewarp?.aspect === "free" && cams[keys.pano]?.aspectLock === null,
+    JSON.stringify({ saved: config.windows[keys.pano]?.dewarp?.aspect, lock: cams[keys.pano]?.aspectLock }));
   console.log(`  results: ${results}`);
 }
 
@@ -949,6 +962,7 @@ async function gridSuite() {
         { at: 2500, do: "manager-js", js: build },
         { at: 7000, do: "manager-js", js: readRow },
         { at: 7200, do: "camera-js", tile: "Wall#1", js: `getComputedStyle(document.getElementById("bar")).display` },
+        { at: 7300, do: "menu", tile: "Wall#0" },
         { at: 7500, do: "menu-click", tile: "Wall#1", label: "Low · 640×360" },
         { at: 9500, do: "tray-click", label: "Hide cameras" },
         { at: 11000, do: "tray-click", label: "Show cameras" },
@@ -972,6 +986,10 @@ async function gridSuite() {
     b0 && b1 && b3 && b0.x <= 2 && b0.y <= 2 && Math.abs(b1.x - (b0.x + b0.width)) <= 4 && Math.abs(b3.y - (b0.y + b0.height)) <= 4 && Math.abs(b0.width - b1.width) <= 2,
     JSON.stringify({ b0, b1, b3 }));
   check("a tile has no window bar of its own", barDisplay === "none", String(barDisplay));
+  const tileMenu = acts.find((a) => a.act.do === "menu")?.menu ?? [];
+  const tileViews = tileMenu.find((i) => typeof i === "object" && i["360° view"])?.["360° view"] ?? [];
+  check("a 360° tile's menu has its views but no aspect ratio (the grid sets its shape)",
+    tileViews.includes("[x] Panorama") && !tileViews.some((i) => typeof i === "object" && i["Aspect ratio"]), JSON.stringify(tileViews));
   check("the floating camera window is left alone", end[keys.lobby]?.visible && end[keys.lobby].status === "live", JSON.stringify(end[keys.lobby] && { v: end[keys.lobby].visible, s: end[keys.lobby].status }));
   check("the Layouts tab lists it as an open grid window", row?.text === "grid window · 3 cameras" && row.buttons?.[0] === "Close", JSON.stringify(row));
   const scale = run1.result.displays[0]?.scaleFactor ?? 1;

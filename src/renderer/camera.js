@@ -260,11 +260,13 @@ function requestReset(reason) {
 video.addEventListener("error", () => requestReset(`video error ${video.error?.code ?? ""}`));
 video.addEventListener("resize", reportAspect);
 
-// Dewarped layouts are 16:9 whatever the fisheye's own shape; otherwise follow the video.
+// Dewarped layouts keep their chosen shape (16:9 by default, 0x0 = any shape) whatever the
+// fisheye's own; otherwise follow the video.
 function reportAspect() {
   const pref = dewarper.preferredAspect();
   let size = null;
-  if (pref) size = { width: 16, height: 9 };
+  if (pref === 0) size = { width: 0, height: 0 };
+  else if (pref) size = { width: Math.round(pref * 1000), height: 1000 };
   else if (video.videoWidth && video.videoHeight) size = { width: video.videoWidth, height: video.videoHeight };
   if (!size) return;
   const key = `${size.width}x${size.height}`;

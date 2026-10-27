@@ -183,9 +183,17 @@ window.Dewarper = (() => {
       this.canvas.classList.toggle("ptz", on && this.active);
     }
 
-    /** Aspect ratio the window should keep in the current mode (null = use the video's own). */
+    /**
+     * Aspect ratio the window should keep in the current mode: null = use the video's own, 0 = any
+     * shape. The views fill whatever shape the window has (each quad view is the window's shape, and a
+     * panorama strip's tilt span follows from it), so this only sets what the window locks to.
+     */
     preferredAspect() {
-      return this.active ? 16 / 9 : null;
+      if (!this.active) return null;
+      const a = this.cfg?.aspect ?? "16:9";
+      if (a === "free") return 0;
+      const [w, h] = String(a).split(":").map(Number);
+      return w > 0 && h > 0 ? w / h : 16 / 9;
     }
 
     circlePx() {
@@ -196,7 +204,7 @@ window.Dewarper = (() => {
     }
 
     stats() {
-      return { active: this.active, gl: !!this.gl, renderer: this.renderer, software: this.software, circle: this.cfg?.circle ?? this.detectedCircle, mode: this.cfg?.mode, focus: this.cfg?.focus };
+      return { active: this.active, gl: !!this.gl, renderer: this.renderer, software: this.software, circle: this.cfg?.circle ?? this.detectedCircle, mode: this.cfg?.mode, focus: this.cfg?.focus, aspect: this.cfg?.aspect ?? "16:9" };
     }
 
     // ------------------------------------------------------------------ frames

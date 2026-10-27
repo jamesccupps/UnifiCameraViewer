@@ -943,6 +943,8 @@ function cameraMeta(cw) {
 
 const DEWARP_MODES = ["off", "quad", "panorama"];
 const MOUNTS = ["ceiling", "wall", "desk"];
+// Shapes a 360° window can keep (dewarp.aspect, absent = 16:9). "free" = no lock, any shape.
+const DEWARP_ASPECTS = [["16:9", "16:9 (default)"], ["4:3", "4:3"], ["3:2", "3:2"], ["1:1", "1:1 (square)"], ["21:9", "21:9 (ultrawide)"], ["free", "Any shape (no lock)"]];
 
 function defaultViews(mount) {
   // Quad order: top-left, top-right, bottom-left, bottom-right.
@@ -1059,12 +1061,22 @@ function dewarpMenu(cw) {
   };
   // Single view is quad with one view enlarged (the same state double-click toggles).
   const single = mode === "quad" && (d?.focus ?? -1) >= 0;
+  // The views fill the window, so this is the shape the window keeps. A grid tile's shape is the grid's.
+  const aspect = d?.aspect ?? "16:9";
+  const aspectMenu = cw.gw ? [] : [{
+    label: "Aspect ratio",
+    submenu: [
+      ...(store.settings.lockAspect ? [] : [{ label: "Turn on Keep video shape (Settings) to use these", enabled: false }, { type: "separator" }]),
+      ...DEWARP_ASPECTS.map(([id, label]) => ({ label, type: "radio", checked: aspect === id, click: () => updateDewarp(cw, { aspect: id }) })),
+    ],
+  }];
   return [
     { label: "Quad view", type: "radio", checked: mode === "quad" && !single, click: () => setMode("quad") },
     { label: "Single view", type: "radio", checked: single, click: () => updateDewarp(cw, { mode: "quad", focus: single ? d.focus : 0 }) },
     { label: "Panorama", type: "radio", checked: mode === "panorama", click: () => setMode("panorama") },
     { label: "Fisheye (no dewarp)", type: "radio", checked: mode === "off", click: () => setMode("off") },
     { type: "separator" },
+    ...aspectMenu,
     {
       label: "Mount",
       submenu: MOUNTS.map((m) => ({
@@ -1629,7 +1641,13 @@ function registerIpc() {
     const cw = fromCamera(e);
     const w = Number(size?.width);
     const h = Number(size?.height);
-    if (!cw || !(w > 0 && h > 0)) return;
+    if (!cw) return;
+    if (w === 0 && h === 0) { // a 360° view set to any shape: no lock
+      cw.aspect = null;
+      applyAspect(cw);
+      return;
+    }
+    if (!(w > 0 && h > 0)) return;
     const aspect = w / h;
     if (cw.aspect && Math.abs(cw.aspect - aspect) < 0.001) return;
     cw.aspect = aspect;

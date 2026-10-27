@@ -58,7 +58,7 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
     for (const [key, cw] of camWins) {
       try {
         const stats = await cw.win.webContents.executeJavaScript("window.__panesStats && window.__panesStats()");
-        row.cams[key] = { ...stats, visible: cw.win.isVisible(), bounds: cw.win.getBounds() };
+        row.cams[key] = { ...stats, visible: cw.win.isVisible(), bounds: cw.win.getBounds(), aspectLock: cw.aspect ?? null };
       } catch (err) { row.cams[key] = { error: String(err) }; }
     }
     for (const { id, cw, bounds, visible } of gridTiles()) {
