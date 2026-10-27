@@ -1156,6 +1156,13 @@ async function e2eSuite() {
       settings: { startHidden: false },
     }, null, 2));
 
+    // Garage's password saved the way 1.3.x saved it (sync safeStorage): the async API must read it.
+    const legacy = process.platform === "win32";
+    if (legacy) {
+      const r = spawnSync(ELECTRON, [path.join(ROOT, "test", "legacy-password.cjs"), userData, ids.G, "secret"], { encoding: "utf8" });
+      if (r.status !== 0) throw new Error(`legacy-password.cjs failed: ${r.stderr || r.status}`);
+    }
+
     const importJs = `(() => {
       const sel = document.getElementById("import-liveview");
       const options = [...sel.options].map((o) => o.textContent);
@@ -1163,13 +1170,30 @@ async function e2eSuite() {
       sel.dispatchEvent(new Event("change"));
       return options;
     })()`;
+    // A console added through the dialog: its password goes through encryptStringAsync.
+    const addJs = `(() => {
+      document.getElementById("btn-add").click();
+      const f = document.getElementById("console-form");
+      f.name.value = "Added Here";
+      f.host.value = "127.0.0.1:${P.garage}";
+      f.username.value = "viewer";
+      f.password.value = "secret";
+      f.requestSubmit();
+      return true;
+    })()`;
     const thumbsJs = `(() => Object.fromEntries([...document.querySelectorAll(".cams li")].map((li) => [
       li.querySelector(".cam-name b")?.textContent,
       { jpeg: !!li.querySelector(".thumb img")?.src?.startsWith("data:image/jpeg"), text: li.querySelector(".thumb")?.textContent ?? null },
     ])))()`;
     const { result, config } = await runApp({
       userData, results, seconds: 16,
-      env: { PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 5000, do: "manager-js", js: importJs }, { at: 10000, do: "manager-js", js: thumbsJs }]) },
+      env: {
+        PANES_SELFTEST_ACTIONS: JSON.stringify([
+          { at: 5000, do: "manager-js", js: importJs },
+          { at: 10000, do: "manager-js", js: thumbsJs },
+          { at: 6000, do: "manager-js", js: addJs },
+        ]),
+      },
     });
     const cams = last(result);
     const conn = result.connections;
@@ -1199,7 +1223,15 @@ async function e2eSuite() {
     check("imported liveview: first camera of each slot, empty slot skipped, grid order kept",
       imported && Object.keys(imported.windows).length === 3 && ib.every(Boolean) && ib[0].x < ib[1].x && ib[2].y > ib[0].y && Math.abs(ib[2].x - ib[1].x) < 3,
       JSON.stringify(imported && Object.keys(imported.windows)));
-    const thumbs = result.actions[1]?.value ?? {};
+    if (legacy) {
+      check("a password saved by 1.3.x (sync safeStorage) still logs in", config.consoles.find((c) => c.id === ids.G)?.password?.enc === "safe" && conn[ids.G]?.state === "connected",
+        JSON.stringify(conn[ids.G]));
+    }
+    const added = config.consoles.find((c) => c.name === "Added Here");
+    check("a console added in the dialog saves its password encrypted and connects with it",
+      added?.password?.enc === "safe" && !String(added.password.data).includes("secret") && conn[added.id]?.state === "connected",
+      JSON.stringify({ enc: added?.password?.enc, state: added && conn[added.id] }));
+    const thumbs = result.actions.find((a) => a.act.js === thumbsJs)?.value ?? {};
     const asked = servers[0].output.filter((l) => l.includes(" snapshot "));
     check("camera list previews: a JPEG from Protect's snapshot endpoint, through the library",
       thumbs["Building Cam 1"]?.jpeg && asked.some((l) => l.includes(`snapshot ${cam(P.building, 0)} w=480`)),

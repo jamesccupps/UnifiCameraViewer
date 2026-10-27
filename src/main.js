@@ -111,7 +111,7 @@ async function init() {
 function startConnection(cfg, MockConnection = null) {
   const conn = MockConnection
     ? new MockConnection(cfg)
-    : new ConsoleConnection(cfg, () => decryptPassword(cfg.password), log.child(cfg.name || cfg.host));
+    : new ConsoleConnection(cfg, () => decryptPassword(cfg.password, (plain) => reEncryptPassword(cfg, plain)), log.child(cfg.name || cfg.host));
   conn.on("state", () => {
     notifyManager();
     for (const cw of camWins.values()) {
@@ -125,6 +125,16 @@ function startConnection(cfg, MockConnection = null) {
   return conn;
 }
 
+async function reEncryptPassword(cfg, plain) {
+  try {
+    cfg.password = await encryptPassword(plain);
+    store.save();
+    log.info(`[${cfg.name || cfg.host}] saved password re-encrypted with the current key`);
+  } catch (err) {
+    log.warn(`[${cfg.name || cfg.host}] couldn't re-encrypt the saved password: ${err.message}`);
+  }
+}
+
 async function saveConsole(input) {
   const name = String(input?.name ?? "").trim().slice(0, 60);
   const host = normalizeHost(input?.host);
@@ -136,13 +146,13 @@ async function saveConsole(input) {
   let cfg = store.data.consoles.find((c) => c.id === input?.id);
   if (!cfg) {
     if (!password) throw new Error("Enter the password.");
-    cfg = { id: newId(), name: name || host, host, username, password: encryptPassword(password) };
+    cfg = { id: newId(), name: name || host, host, username, password: await encryptPassword(password) };
     store.data.consoles.push(cfg);
     store.flush();
     startConnection(cfg);
   } else {
     Object.assign(cfg, { name: name || host, host, username });
-    if (password) cfg.password = encryptPassword(password);
+    if (password) cfg.password = await encryptPassword(password);
     store.flush();
     await connections.get(cfg.id)?.restart(cfg);
   }

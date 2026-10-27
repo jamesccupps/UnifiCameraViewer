@@ -91,17 +91,25 @@ export class Store {
   }
 }
 
-export function encryptPassword(plain) {
-  if (safeStorage.isEncryptionAvailable()) {
-    return { enc: "safe", data: safeStorage.encryptString(plain).toString("base64") };
+// The async safeStorage API: Electron 45 deprecated the sync one. On Windows both use the same
+// DPAPI-protected key in "Local State" and the same "v10" format, so each reads what the other
+// wrote (checked against 1.3.x configs) and going back to an older version still works.
+export async function encryptPassword(plain) {
+  if (await safeStorage.isAsyncEncryptionAvailable()) {
+    return { enc: "safe", data: (await safeStorage.encryptStringAsync(plain)).toString("base64") };
   }
   // Only reachable on Linux desktops without a keyring; Windows always has DPAPI.
   return { enc: "plain", data: Buffer.from(plain, "utf8").toString("base64") };
 }
 
-export function decryptPassword(stored) {
+/** onReEncrypt(plain) runs when Electron says the saved copy should be encrypted again (a new key). */
+export async function decryptPassword(stored, onReEncrypt = null) {
   if (!stored?.data) return "";
-  if (stored.enc === "safe") return safeStorage.decryptString(Buffer.from(stored.data, "base64"));
+  if (stored.enc === "safe") {
+    const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(Buffer.from(stored.data, "base64"));
+    if (shouldReEncrypt) onReEncrypt?.(result);
+    return result;
+  }
   return Buffer.from(stored.data, "base64").toString("utf8");
 }
 

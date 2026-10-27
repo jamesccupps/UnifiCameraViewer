@@ -106,7 +106,7 @@ export class ConsoleConnection extends EventEmitter {
         const client = await ProtectClient.connect({
           host: this.#cfg.host,
           username: this.#cfg.username,
-          password: this.#getPassword(),
+          password: await this.#getPassword(),
           signal,
           log: this.#libLog(),
         });
