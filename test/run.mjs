@@ -193,6 +193,9 @@ async function mockSuite() {
   check("double-click enlarged view 4 and it was saved", qd?.focus === 3, `focus=${qd?.focus}`);
   const menu = result.actions.find((a) => a.act.do === "menu");
   check("context menu builds with 360° submenu", !!menu?.menu?.some((i) => typeof i === "object" && i["360° view"]), menu?.error);
+  const views = menu?.menu?.find((i) => typeof i === "object" && i["360° view"])?.["360° view"] ?? [];
+  check("360° view offers Quad, Single view, Panorama and Fisheye (panorama window: Panorama checked)",
+    ["Quad view", "Single view", "[x] Panorama", "Fisheye (no dewarp)"].every((l) => views.includes(l)), JSON.stringify(views));
   const resizedAt = result.actions.find((a) => a.act.do === "resize")?.t ?? 0;
   const before = result.samples.filter((s) => s.t < resizedAt).at(-1)?.cams ?? {};
   const label = (c) => c && JSON.stringify(c.label);
@@ -614,7 +617,7 @@ async function updateSuite() {
     { at: 3000, do: "manager-js", js: `document.getElementById("btn-check-update").click(), true` },
     { at: 6000, do: "manager-js", js: read },
     { at: 6500, do: "manager-js", js: `panes.invoke("mgr:install-update").then(() => "installed?!", (e) => String(e.message))` },
-    { at: 7000, do: "manager-js", js: `document.querySelector(".updates").scrollIntoView(), true` }, // for the screenshot
+    { at: 7000, do: "manager-js", js: `document.querySelector('[data-tab="settings"]').click(), document.querySelector(".updates").scrollIntoView(), true` }, // for the screenshot
   ]);
   const [startup, , afterCheck, installTry] = app1.result.actions.map((a) => a.value ?? a.error);
   check("startup check finds the update without downloading it", /9\.9\.9 is available/.test(startup?.status) && startup?.check === "Download 9.9.9", JSON.stringify(startup));
@@ -626,6 +629,100 @@ async function updateSuite() {
   const real = app2.result.actions[0]?.value;
   check("with its real key the app refuses a release signed by another key", /signature doesn't match/.test(real?.status) && !fs.existsSync(path.join(app2.userData, "updates", "ProtectPanes-9.9.9.zip")), JSON.stringify(real));
   console.log(`  results: ${dir}`);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Arrange: the grid templates (unit) and tiling real windows (mock app), plus Close all.
+
+async function arrangeSuite() {
+  console.log("\nArrange suite (layout geometry + tiling real windows)");
+  const g = await import(new URL("../src/grid.js", import.meta.url).href);
+  const counts = Object.fromEntries(g.TEMPLATES.filter((t) => t.cells).map((t) => [t.id, t.cells.length]));
+  check("templates have the advertised number of tiles",
+    JSON.stringify(counts) === JSON.stringify({ 1: 1, "2x2": 4, "1+5": 6, "1+7": 8, "3x3": 9, "2+8": 10, "1+12": 13, "4x4": 16, "5x5": 25 }), JSON.stringify(counts));
+  const coverage = g.TEMPLATES.filter((t) => t.cells).map((t) => {
+    const hit = Array.from({ length: t.rows }, () => Array(t.cols).fill(0));
+    for (const [c, r, cs = 1, rs = 1] of t.cells) for (let y = r; y < r + rs; y++) for (let x = c; x < c + cs; x++) hit[y][x]++;
+    return [t.id, hit.flat().every((n) => n === 1)];
+  });
+  check("every template covers its grid exactly once (no gaps, no overlaps)", coverage.every(([, ok]) => ok), JSON.stringify(coverage.filter(([, ok]) => !ok)));
+  check("the big tile comes first", ["1+5", "1+7", "1+12"].every((id) => g.templateById(id).cells[0][2] > 1));
+  const shape = (n, w, h) => { const a = g.autoGrid(n, { x: 0, y: 0, width: w, height: h }); return `${a.cols}x${a.rows}`; };
+  const auto = { "4@16:9": shape(4, 1920, 1040), "6@16:9": shape(6, 1920, 1040), "6@21:9": shape(6, 3440, 1400), "4@portrait": shape(4, 1080, 1860), "2@16:9": shape(2, 1920, 1040) };
+  check("Auto follows the screen's shape (16:9, ultrawide, portrait)",
+    auto["4@16:9"] === "2x2" && auto["6@16:9"] === "3x2" && auto["6@21:9"] === "3x2" && auto["4@portrait"] === "1x4" && auto["2@16:9"] === "2x1", JSON.stringify(auto));
+  const fit = g.fitAspect({ x: 0, y: 0, width: 400, height: 400 }, 16 / 9);
+  check("cameras keep their shape inside a cell (centered)", fit.width === 400 && fit.height === 225 && fit.y === 87 && fit.x === 0, JSON.stringify(fit));
+  check("quality follows tile size", g.channelForTile(640) === 2 && g.channelForTile(1280) === 1 && g.channelForTile(1920) === 0);
+
+  const A = "aaaaaaaa-0000-4000-8000-000000000001";
+  const B = "bbbbbbbb-0000-4000-8000-000000000002";
+  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, stair: `${A}/aaaaaaaa-cam2`, parking: `${A}/aaaaaaaa-cam3`, ramp: `${B}/bbbbbbbb-cam0` };
+  const at = (x, y) => ({ open: true, bounds: { x, y, width: 400, height: 225 }, channel: 2 });
+  const userData = tmpDir("arrange");
+  const results = path.join(userData, "results");
+  fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [
+      { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Stair", "Parking"] },
+      { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp"] },
+    ],
+    // Scattered on purpose; reading order by window centers is dock, stair, ramp, parking, lobby.
+    windows: { [keys.lobby]: at(600, 400), [keys.dock]: at(50, 50), [keys.stair]: at(400, 50), [keys.parking]: at(50, 400), [keys.ramp]: at(700, 100) },
+    settings: { startHidden: false },
+  }, null, 2));
+  const arrangeJs = (id) => `panes.invoke("mgr:arrange", { templateId: ${JSON.stringify(id)} })`;
+  const { result, config } = await runApp({
+    userData, results, seconds: 15, extraArgs: ["--mock"],
+    env: {
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 3000, do: "manager-js", js: arrangeJs("auto") },
+        { at: 5500, do: "manager-js", js: `(() => { document.querySelector('[data-tab="layouts"]').click(); const b = document.querySelector('[data-template="1+5"]'); b?.click(); return !!b; })()` },
+        { at: 8000, do: "manager-js", js: arrangeJs("2x2") },
+        { at: 11500, do: "manager-js", js: `(() => { window.confirm = () => true; const card = [...document.querySelectorAll("article.panel")].find((a) => a.querySelector(".console-head b")?.textContent === "Garage"); const b = [...card.querySelectorAll("button")].find((x) => x.textContent === "Close all"); b?.click(); return !!b; })()` },
+      ]),
+    },
+  });
+  const acts = result.actions;
+  // The first sample after a step: "last before the next step" can race with that step's effect.
+  const sampleAfter = (i) => result.samples.find((s) => s.t > (acts[i]?.t ?? Infinity))?.cams ?? {};
+  const order = ["dock", "stair", "ramp", "parking", "lobby"];
+  const rects = (cams) => order.map((n) => cams[keys[n]]?.bounds);
+  const overlap = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+  // The screen the tiles landed on (the camera list's), found from the first tile's center.
+  const displayOf = (r) => r && result.displays?.find(({ workArea: w }) => r.x + r.width / 2 >= w.x && r.x + r.width / 2 < w.x + w.width && r.y + r.height / 2 >= w.y && r.y + r.height / 2 < w.y + w.height);
+  const afterAuto = rects(sampleAfter(0));
+  const display = displayOf(afterAuto[0]);
+  const area = display?.workArea;
+  check("Auto arranged all five", JSON.stringify(acts[0]?.value) === JSON.stringify({ arranged: 5, left: 0 }), JSON.stringify(acts[0]?.value ?? acts[0]?.error));
+  check("Auto tiles sit inside the screen without overlapping",
+    afterAuto.every(Boolean) && area && afterAuto.every((r) => r.x >= area.x - 1 && r.y >= area.y - 1 && r.x + r.width <= area.x + area.width + 1 && r.y + r.height <= area.y + area.height + 1)
+      && afterAuto.every((a, i) => afterAuto.every((b, j) => i === j || !overlap(a, b))),
+    JSON.stringify({ area, afterAuto }));
+  check("Auto keeps reading order (first camera top-left) and equal tile sizes",
+    afterAuto.every(Boolean) && afterAuto[0].x <= Math.min(...afterAuto.map((r) => r.x)) && afterAuto[0].y <= Math.min(...afterAuto.map((r) => r.y))
+      && Math.max(...afterAuto.map((r) => r.width)) - Math.min(...afterAuto.map((r) => r.width)) <= 2,
+    JSON.stringify(afterAuto));
+  const afterBig = rects(sampleAfter(1));
+  check("clicking the 1 + 5 thumbnail made the first camera the big tile",
+    acts[1]?.value === true && afterBig.every(Boolean) && afterBig[0].width > 1.7 * Math.max(...afterBig.slice(1).map((r) => r.width)),
+    JSON.stringify(afterBig.map((r) => r && `${r.width}x${r.height}`)));
+  check("2 x 2 with five windows arranges four and leaves one", JSON.stringify(acts[2]?.value) === JSON.stringify({ arranged: 4, left: 1 }), JSON.stringify(acts[2]?.value ?? acts[2]?.error));
+  const scale = display?.scaleFactor ?? 1;
+  const afterSquare = sampleAfter(2);
+  const sq = rects(afterSquare);
+  check("re-arranging after 1 + 5 keeps the big top-left camera first",
+    sq[0] && sq.slice(1, 4).every((r) => r && (r.y > sq[0].y + 2 || (Math.abs(r.y - sq[0].y) <= 2 && r.x > sq[0].x))),
+    JSON.stringify(sq.slice(0, 4)));
+  const ro = g.readingOrder([{ n: "big", b: { x: 0, y: 0, width: 1078, height: 607 } }, { n: "small", b: { x: 1600, y: 0, width: 538, height: 303 } }, { n: "below", b: { x: 1600, y: 305, width: 538, height: 303 } }], (i) => i.b).map((i) => i.n);
+  check("reading order goes by top edges (a big tile beside small ones stays first)", ro.join() === "big,small,below", ro.join());
+  const quality = order.slice(0, 4).map((n) => [n, config.windows[keys[n]]?.channel, g.channelForTile((afterSquare[keys[n]]?.bounds?.width ?? 0) * scale)]);
+  check("Match quality to tile size set each arranged camera's stream from its tile", quality.every(([, saved, want]) => saved === want), JSON.stringify(quality));
+  const end = last(result);
+  check("Close all closed only Garage's windows",
+    acts[3]?.value === true && !end[keys.ramp] && config.windows[keys.ramp]?.open === false && order.slice(0, 2).every((n) => end[keys[n]]),
+    `${acts[3]?.error ?? ""} open=${Object.keys(end).length} ramp=${config.windows[keys.ramp]?.open}`);
+  console.log(`  results: ${results}`);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -842,6 +939,7 @@ try {
   if (suite === "hide" || suite === "all") await runSuite(hideSuite);
   if (suite === "range" || suite === "all") await runSuite(rangeSuite);
   if (suite === "layouts" || suite === "all") await runSuite(layoutsSuite);
+  if (suite === "arrange" || suite === "all") await runSuite(arrangeSuite);
   if (suite === "update" || suite === "all") await runSuite(updateSuite);
   if (suite === "e2e" || suite === "all") await runSuite(e2eSuite);
 } catch (err) {

@@ -29,7 +29,9 @@ Then, in Protect Panes, click **Add console**. Enter a name ("Building"), the co
 
 ## Use
 
-- In the camera list, flip a camera's switch to open its window. **Show all** opens every camera on that console.
+- The camera list has three tabs: **Cameras**, **Layouts** and **Settings**. Hover over any button for a short explanation.
+- On **Cameras**, flip a camera's switch to open its window. **Show all** opens every camera on that console, and **Close all** closes them. Each camera remembers its place. Type in **Find a camera…** to narrow a long list.
+- **Arrange** tiles the camera windows on your screen. Cameras tab → **Arrange** picks the best-fitting grid for that screen's size and shape; **Layouts** has fixed choices (2×2, 1+5, 1+7, 3×3, 2+8, 1+12, 4×4, 5×5). The camera at the top left gets the big tile. With **Match each camera's quality to its tile size** on, small tiles get the Low stream and big ones Medium or High. The tray menu has **Arrange windows** too.
 - **Move** a window by hovering over it and dragging the bar that appears at the top. **Resize** from any edge. With **Keep video shape** on, windows snap to the camera's aspect ratio so there are no black bars.
 - **Right-click** a camera for quality (High / Medium / Low), Always on top, Lock layout, Reconnect, or Close.
 - **Right-click → Apply to all cameras** copies that window's quality, always on top, name, time or color range to every camera on both consoles, including ones you haven't opened yet. In the camera list, **Quality for all…** sets one console's cameras at once.
@@ -46,7 +48,7 @@ A fisheye camera opens in **quad view**: four virtual pan/tilt/zoom views of the
 
 - **Drag** inside a view to aim it, and **scroll** to zoom. Each view remembers where it's pointed.
 - **Double-click** a view to enlarge it to the whole window. Double-click again to return to the quad.
-- **Right-click → 360° view** to switch to **Panorama** (ceiling: the full 360° as two 180° strips; wall: one 180° strip) or back to the raw fisheye. The same menu has Mount, Lens field of view, Reset views and **Adjust image circle…**, for when the auto-detected circle is off: drag and scroll to fit the green circle to the edge of the round picture, then click Done.
+- **Right-click → 360° view** to switch to **Single view** (one direction, whole window), **Panorama** (ceiling: the full 360° as two 180° strips; wall: one 180° strip) or back to the raw fisheye. The same menu has Mount, Lens field of view, Reset views and **Adjust image circle…**, for when the auto-detected circle is off: drag and scroll to fit the green circle to the edge of the round picture, then click Done.
 - Quad and panorama views show the date and time in the corner, since the camera's own timestamp is cut out by the dewarp. It's this PC's clock, so keep the PC's time synced. **Right-click → Show time** turns it on or off for any window.
 - **Lock layout** also locks the views, so a wall display can't get nudged.
 

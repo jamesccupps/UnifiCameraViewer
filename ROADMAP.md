@@ -129,6 +129,29 @@ Open:
 - Should **Bring cameras to front** also un-hide hidden windows, or only raise the visible ones? Today it restores everything, minimized ones included.
 - Should **Show all** keep meaning "every camera on the console", or become "restore what I had" when windows are hidden? Suggestion: keep it literal, and let Restore / Show cameras do the putting back.
 
+## 8. One download: an installer
+
+**Status:** built (2026-10-27), unreleased. `ProtectPanes-Setup.exe` is a per-user NSIS installer with shortcuts and an uninstaller, published alongside the zip. Installer copies update by running the new installer silently; zip copies keep the folder swap. CI installs, starts and uninstalls it on a throwaway runner.
+
+## 9. Arrange windows and Close all
+
+**Status:** built (2026-10-27), unreleased.
+- **Arrange** tiles the windows on a screen: Auto (best fit for that screen's size and shape) or fixed layouts (1, 2×2, 1+5, 1+7, 3×3, 2+8, 1+12, 4×4, 5×5). The top-left camera gets the big tile.
+- Optionally each camera's quality follows its tile size.
+- **Close all** per console is the opposite of Show all.
+- `npm run test:arrange` covers it.
+
+## 10. Layout editor (exacqVision-style)
+
+**Status:** next. Pick a screen and a layout, then drag cameras from the list into cells, or start from what's on screen. Each 360° camera gets a view choice per cell (Quad default, Single, Panorama, Fisheye). Saves a named layout, optionally applying it.
+
+## 11. Easier camera list
+
+**Status:** built (2026-10-27), unreleased.
+- Cameras / Layouts / Settings tabs, and hover tips on every control.
+- A camera filter, and a per-console "⋯" menu for the rarely used actions.
+- An About section with the version, the project page and the log folder.
+
 ---
 
 ## Housekeeping found along the way

@@ -1,5 +1,11 @@
 "use strict";
 
+/*
+ * The camera list: Cameras / Layouts / Settings tabs. Vanilla DOM built with el(); camera and console
+ * names only ever go in as text nodes, never innerHTML. State comes from main ("mgr:state") on every
+ * mgr:changed and on a light 3 s poll for online/offline status.
+ */
+
 const consolesEl = document.getElementById("consoles");
 const dialog = document.getElementById("console-dialog");
 const form = document.getElementById("console-form");
@@ -10,19 +16,14 @@ const layoutForm = document.getElementById("layout-form");
 const layoutError = document.getElementById("layout-error");
 const layoutList = document.getElementById("layout-list");
 const importSelect = document.getElementById("import-liveview");
+const filterInput = document.getElementById("filter");
 
 let state = null;
 let editingId = null;
 let refreshing = false;
+let openMenuFor = null; // console id whose "⋯" menu is open, kept open across re-renders
 
-const STATE_DOT = {
-  connected: "live",
-  connecting: "warn",
-  reconnecting: "warn",
-  idle: "warn",
-  error: "bad",
-  authfailed: "bad",
-};
+const STATE_DOT = { connected: "live", connecting: "warn", reconnecting: "warn", idle: "warn", error: "bad", authfailed: "bad" };
 const STATE_LABEL = {
   connected: "Connected",
   connecting: "Connecting",
@@ -31,6 +32,9 @@ const STATE_LABEL = {
   error: "Can't reach console",
   authfailed: "Login failed",
 };
+
+const rpcError = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 async function refresh() {
   if (refreshing) return;
@@ -48,6 +52,9 @@ function el(tag, attrs = {}, ...children) {
   for (const [k, v] of Object.entries(attrs)) {
     if (v == null || v === false) continue;
     if (k === "class") node.className = v;
+    else if (k === "tip") node.dataset.tip = v;
+    // CSSOM, not a style="" attribute: the page's CSP (style-src 'self') blocks inline style attributes.
+    else if (k === "style") Object.assign(node.style, v);
     else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
     else if (k in node && typeof v !== "string") node[k] = v;
     else node.setAttribute(k, v === true ? "" : v);
@@ -59,27 +66,131 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Hover tips: one floating box for every element with data-tip. Shows after a short pause, flips
+// above the element near the bottom edge, and re-attaches after the 3 s re-render.
+
+const tip = document.getElementById("tip");
+let tipFor = null;
+let tipTimer = null;
+let pointer = { x: -1, y: -1 };
+
+function placeTip(target) {
+  const text = target.dataset.tip;
+  if (!text) return;
+  tip.textContent = text;
+  tip.hidden = false;
+  const r = target.getBoundingClientRect();
+  const t = tip.getBoundingClientRect();
+  let top = r.bottom + 8;
+  if (top + t.height > window.innerHeight - 6) top = r.top - t.height - 8;
+  const left = Math.max(6, Math.min(r.left + r.width / 2 - t.width / 2, window.innerWidth - t.width - 6));
+  tip.style.top = `${Math.max(6, top)}px`;
+  tip.style.left = `${left}px`;
+}
+
+function hideTip() {
+  clearTimeout(tipTimer);
+  tipTimer = null;
+  tipFor = null;
+  tip.hidden = true;
+}
+
+function tipTarget(node) {
+  const t = node?.closest?.("[data-tip]");
+  return t && t.dataset.tip ? t : null;
+}
+
+document.addEventListener("pointermove", (e) => { pointer = { x: e.clientX, y: e.clientY }; });
+document.addEventListener("pointerover", (e) => {
+  const t = tipTarget(e.target);
+  if (t === tipFor) return;
+  hideTip();
+  if (!t) return;
+  tipFor = t;
+  tipTimer = setTimeout(() => { if (tipFor === t && t.isConnected) placeTip(t); }, 400);
+});
+document.addEventListener("pointerdown", hideTip);
+document.addEventListener("scroll", hideTip, true);
+window.addEventListener("blur", hideTip);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideTip(); });
+document.addEventListener("focusin", (e) => {
+  const t = tipTarget(e.target);
+  if (!t || !e.target.matches(":focus-visible")) return;
+  hideTip();
+  tipFor = t;
+  placeTip(t);
+});
+document.addEventListener("focusout", hideTip);
+
+/** After a re-render the hovered element is new; point the visible tip at its replacement. */
+function reattachTip() {
+  if (!tipFor || tipFor.isConnected) return;
+  const wasShown = !tip.hidden;
+  const t = tipTarget(document.elementFromPoint(pointer.x, pointer.y));
+  hideTip();
+  if (t) {
+    tipFor = t;
+    if (wasShown) placeTip(t);
+    else tipTimer = setTimeout(() => { if (tipFor === t && t.isConnected) placeTip(t); }, 400);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Tabs
+
+for (const btn of document.querySelectorAll("[data-tab]")) {
+  btn.addEventListener("click", () => showTab(btn.dataset.tab));
+}
+function showTab(name) {
+  for (const btn of document.querySelectorAll("[data-tab]")) btn.setAttribute("aria-selected", String(btn.dataset.tab === name));
+  for (const panel of document.querySelectorAll(".tab-panel")) panel.classList.toggle("hidden", panel.id !== `tab-${name}`);
+  hideTip();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Render
+
 function render() {
   document.getElementById("mock-badge").classList.toggle("hidden", !state.mock);
   const hideBtn = document.getElementById("btn-hide");
   hideBtn.textContent = state.hiddenCount ? "Show cameras" : "Hide cameras";
-  hideBtn.title = state.hiddenCount ? "Put the hidden camera windows back where they were" : "Take the camera windows off the screen; Show cameras puts them back";
+  hideBtn.dataset.tip = state.hiddenCount
+    ? "Put the hidden camera windows back exactly where they were."
+    : "Take every camera window off the screen and pause its video. Show cameras puts them back where they were, even after a restart.";
   hideBtn.disabled = !state.hiddenCount && !state.shownCount;
-  for (const input of document.querySelectorAll("[data-setting]")) {
-    input.checked = !!state.settings[input.dataset.setting];
-  }
+  for (const input of document.querySelectorAll("[data-setting]")) input.checked = !!state.settings[input.dataset.setting];
+  document.getElementById("about-version").textContent = `version ${state.update?.current ?? ""}`;
 
-  // Preserve focus/scroll across re-renders.
   const focusedKey = document.activeElement?.dataset?.focusKey;
   const scroll = document.querySelector("main").scrollTop;
 
-  consolesEl.replaceChildren(...(state.consoles.length ? state.consoles.map(renderConsole) : [renderEmpty()]));
+  renderConsoles();
+  renderArrange();
   renderLayouts();
   renderUpdate();
 
   if (focusedKey) document.querySelector(`[data-focus-key="${CSS.escape(focusedKey)}"]`)?.focus();
   document.querySelector("main").scrollTop = scroll;
+  reattachTip();
 }
+
+// ---------------------------------------------------------------------------------------------
+// Cameras tab
+
+function renderConsoles() {
+  const q = filterInput.value.trim().toLowerCase();
+  const all = state.consoles.flatMap((c) => c.cameras);
+  const open = all.filter((cam) => cam.open).length;
+  const matching = q ? all.filter((cam) => matches(cam, q)).length : all.length;
+  document.getElementById("cam-count").textContent = q
+    ? `${matching} of ${plural(all.length, "camera")}`
+    : `${plural(all.length, "camera")} · ${open} open`;
+  document.getElementById("btn-arrange-auto").disabled = !state.onScreenCount;
+  consolesEl.replaceChildren(...(state.consoles.length ? state.consoles.map((c) => renderConsole(c, q)) : [renderEmpty()]));
+}
+
+const matches = (cam, q) => `${cam.name} ${cam.model ?? ""}`.toLowerCase().includes(q);
 
 function renderEmpty() {
   return el("div", { class: "panel empty-state" },
@@ -89,33 +200,68 @@ function renderEmpty() {
   );
 }
 
-function renderConsole(c) {
+function consoleMenu(c) {
+  const close = () => { openMenuFor = null; };
+  const details = el("details", {
+    class: "menu",
+    open: openMenuFor === c.id,
+    ontoggle: (e) => { openMenuFor = e.target.open ? c.id : (openMenuFor === c.id ? null : openMenuFor); },
+  },
+  el("summary", { "aria-label": `More for ${c.name}`, tip: "More: edit the address or login, reconnect, or remove this console." }, "⋯"),
+  el("div", { class: "menu-items" },
+    el("button", { onclick: () => { close(); openDialog(c); } }, "Edit console…"),
+    el("button", { onclick: () => { close(); panes.invoke("mgr:reconnect", c.id).then(refresh); } }, "Reconnect"),
+    el("hr"),
+    el("button", {
+      class: "danger",
+      onclick: async () => {
+        close();
+        if (!confirm(`Remove ${c.name}? Its camera windows will close, and its saved login is deleted.`)) return;
+        await panes.invoke("mgr:remove-console", c.id);
+        refresh();
+      },
+    }, "Remove console…"),
+  ));
+  return details;
+}
+
+function renderConsole(c, q) {
   const dotClass = STATE_DOT[c.state] ?? "warn";
   const subtitle = [c.host, c.controllerName && c.controllerName !== c.name ? c.controllerName : null].filter(Boolean).join(" · ");
+  const connected = c.state === "connected";
   const head = el("div", { class: "console-head" },
-    el("span", { class: `dot ${dotClass}`, title: STATE_LABEL[c.state] ?? c.state }),
+    el("span", { class: `dot ${dotClass}`, tip: STATE_LABEL[c.state] ?? c.state }),
     el("div", { class: "title" }, el("b", {}, c.name), el("span", {}, subtitle)),
     el("div", { class: "buttons" },
       el("button", {
-        class: "small", disabled: c.state !== "connected",
-        title: "Open a window for every camera on this console",
+        class: "small", disabled: !connected,
+        tip: `Open a window for every camera on ${c.name}.`,
         onclick: () => panes.invoke("mgr:open-all", c.id).then(refresh),
       }, "Show all"),
+      el("button", {
+        class: "small", disabled: !c.openCount,
+        tip: `Close every ${c.name} window. Each camera remembers its place for next time.`,
+        onclick: async () => {
+          if (!confirm(`Close ${plural(c.openCount, "camera window")} from ${c.name}?`)) return;
+          await panes.invoke("mgr:close-all", c.id);
+          refresh();
+        },
+      }, "Close all"),
       c.hiddenCount
         ? el("button", {
           class: "small",
-          title: "Put this console's hidden windows back where they were",
+          tip: `Put ${c.name}'s hidden windows back where they were.`,
           onclick: () => panes.invoke("mgr:show-cameras", c.id).then(refresh),
         }, "Restore")
         : el("button", {
           class: "small", disabled: !c.shownCount,
-          title: "Take this console's camera windows off the screen; Restore puts them back",
+          tip: `Take ${c.name}'s windows off the screen and pause their video. Restore puts them back.`,
           onclick: () => panes.invoke("mgr:hide-cameras", c.id).then(refresh),
         }, "Hide all"),
       el("select", {
         class: "small", "aria-label": `Quality for every camera on ${c.name}`, "data-focus-key": `qa-${c.id}`,
-        disabled: c.state !== "connected",
-        title: "Set every camera on this console, open or not, to one quality",
+        disabled: !connected,
+        tip: `Set every camera on ${c.name}, open or not, to one stream quality.`,
         onchange: async (e) => {
           const channel = Number(e.target.value);
           e.target.value = "";
@@ -126,36 +272,26 @@ function renderConsole(c) {
           refresh();
         },
       },
-      el("option", { value: "", selected: true }, "Quality for all…"),
+      el("option", { value: "", selected: true }, "Quality…"),
       ...["High", "Medium", "Low"].map((n, id) => el("option", { value: String(id) }, n))),
-      el("button", { class: "small", onclick: () => openDialog(c) }, "Edit"),
-      el("button", { class: "small", onclick: () => panes.invoke("mgr:reconnect", c.id).then(refresh) }, "Reconnect"),
-      el("button", {
-        class: "small danger",
-        onclick: async () => {
-          if (!confirm(`Remove ${c.name}? Its camera windows will close.`)) return;
-          await panes.invoke("mgr:remove-console", c.id);
-          refresh();
-        },
-      }, "Remove"),
+      consoleMenu(c),
     ),
   );
 
-  const msg = c.message || (c.state !== "connected" ? STATE_LABEL[c.state] : "");
+  const msg = c.message || (connected ? "" : STATE_LABEL[c.state]);
   const bad = c.state === "error" || c.state === "authfailed";
+  const cams = q ? c.cameras.filter((cam) => matches(cam, q)) : c.cameras;
+  let empty = null;
+  if (!c.cameras.length) empty = connected ? "No cameras on this console." : "Cameras appear here once connected.";
+  else if (!cams.length) empty = "No matching cameras.";
 
-  const list = el("ul", { class: "cams" },
-    c.cameras.length
-      ? c.cameras.map((cam) => renderCamera(c, cam))
-      : el("li", { class: "empty" }, c.state === "connected" ? "No cameras on this console." : "Cameras appear here once connected."),
-  );
-
+  const list = el("ul", { class: "cams" }, empty ? el("li", { class: "empty" }, empty) : cams.map((cam) => renderCamera(cam)));
   return el("article", { class: "panel" }, head, msg ? el("p", { class: `console-msg${bad ? " bad" : ""}` }, msg) : null, list);
 }
 
-function renderCamera(c, cam) {
+function renderCamera(cam) {
   const toggleId = `t-${cam.key}`;
-  const toggle = el("label", { class: "switch", title: cam.open ? "Hide this camera" : "Show this camera" },
+  const toggle = el("label", { class: "switch", tip: cam.open ? "Close this camera's window. It remembers its place." : "Open a window for this camera." },
     el("input", {
       type: "checkbox",
       id: toggleId,
@@ -187,6 +323,7 @@ function renderCamera(c, cam) {
     ? el("select", {
       "aria-label": `Quality for ${cam.name}`,
       "data-focus-key": `q-${cam.key}`,
+      tip: "Stream quality. Medium suits most windows; High (up to 4K) costs the most graphics power.",
       onchange: (e) => panes.invoke("mgr:set-channel", { key: cam.key, channel: Number(e.target.value) }).then(refresh),
     }, cam.channels.map((ch) => el("option", { value: String(ch.id), selected: ch.id === (cam.channel ?? 1) }, ch.label)))
     : el("span");
@@ -194,25 +331,84 @@ function renderCamera(c, cam) {
   const find = el("button", {
     class: "small ghost",
     disabled: !cam.open,
-    title: cam.hidden ? "Bring this camera's window back" : "Flash this camera's window",
+    tip: cam.hidden ? "Bring this camera's hidden window back." : "Flash this camera's window so you can spot it.",
     onclick: () => panes.invoke("mgr:find-camera", cam.key),
   }, "Find");
 
   return el("li", {}, toggle, name, channelSelect, find);
 }
 
+filterInput.addEventListener("input", () => renderConsoles());
+filterInput.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && filterInput.value) { filterInput.value = ""; renderConsoles(); e.stopPropagation(); }
+});
+
+// Close an open "⋯" menu when clicking anywhere else.
+document.addEventListener("click", (e) => {
+  for (const d of document.querySelectorAll("details.menu[open]")) if (!d.contains(e.target)) { d.open = false; openMenuFor = null; }
+});
+
 // ---------------------------------------------------------------------------------------------
-// Layouts
+// Layouts tab: Arrange thumbnails, saved layouts, Protect import
+
+function templatePicture(t) {
+  if (!t.cells) return el("div", { class: "tpl-pic auto" }, "Auto");
+  const pic = el("div", { class: "tpl-pic" });
+  for (const [c, r, cs = 1, rs = 1] of t.cells) {
+    pic.append(el("i", {
+      style: {
+        left: `calc(${(c / t.cols) * 100}% + 1.5px)`,
+        top: `calc(${(r / t.rows) * 100}% + 1.5px)`,
+        width: `calc(${(cs / t.cols) * 100}% - 3px)`,
+        height: `calc(${(rs / t.rows) * 100}% - 3px)`,
+      },
+    }));
+  }
+  return pic;
+}
+
+async function arrange(templateId) {
+  const msg = document.getElementById("arrange-msg");
+  try {
+    const { arranged, left } = await panes.invoke("mgr:arrange", { templateId });
+    msg.textContent = !arranged
+      ? "There are no camera windows on screen to arrange."
+      : `Arranged ${plural(arranged, "window")}.${left ? ` ${plural(left, "window")} didn't fit and stayed where ${left === 1 ? "it was" : "they were"}.` : ""}`;
+  } catch (err) {
+    msg.textContent = rpcError(err);
+  }
+  refresh();
+}
+
+function renderArrange() {
+  const n = state.onScreenCount;
+  const box = document.getElementById("arrange-templates");
+  box.replaceChildren(...state.templates.map((t) => {
+    const cells = t.cells?.length ?? null;
+    const fits = cells === null || n <= cells;
+    const tipText = cells === null
+      ? "Pick the grid with the biggest tiles for the windows on screen, for this screen's size and shape."
+      : `Tile up to ${plural(cells, "camera")}${t.cells.length > 1 && t.cells[0][2] > 1 ? ", the first one big" : ""}.${fits ? "" : ` You have ${n} on screen; the last ${n - cells} stay where they are.`}`;
+    return el("button", { class: "tpl", disabled: !n, tip: tipText, "data-template": t.id, onclick: () => arrange(t.id) },
+      templatePicture(t),
+      el("span", {}, t.label),
+      el("small", {}, cells === null ? "best fit" : plural(cells, "camera")));
+  }));
+}
 
 function renderLayouts() {
-  const plural = (n) => `${n} camera${n === 1 ? "" : "s"}`;
   layoutList.replaceChildren(...(state.layouts.length
     ? state.layouts.map((l) => el("li", {},
       el("b", { title: l.name }, l.name),
-      el("small", {}, plural(l.count)),
-      el("button", { class: "small", "data-focus-key": `la-${l.id}`, onclick: () => panes.invoke("mgr:apply-layout", l.id).then(refresh) }, "Apply"),
+      el("small", {}, plural(l.count, "camera")),
+      el("button", {
+        class: "small", "data-focus-key": `la-${l.id}`,
+        tip: "Open this layout's cameras at their saved places and settings, and close the windows that aren't in it.",
+        onclick: () => panes.invoke("mgr:apply-layout", l.id).then(refresh),
+      }, "Apply"),
       el("button", {
         class: "small ghost",
+        tip: "Delete this saved layout. Open camera windows aren't touched.",
         onclick: async () => {
           if (!confirm(`Delete the layout "${l.name}"? Camera windows aren't affected.`)) return;
           await panes.invoke("mgr:delete-layout", l.id);
@@ -220,12 +416,14 @@ function renderLayouts() {
         },
       }, "Delete"),
     ))
-    : [el("li", { class: "empty" }, "No layouts yet. Arrange the camera windows, then Save current layout. Protect's own liveviews can be imported too.")]));
+    : [el("li", { class: "empty" }, "No layouts yet. Arrange the camera windows, then save the arrangement, or import one of Protect's liveviews.")]));
 
   // Protect liveviews, grouped by console. The value is "<consoleId>|<liveviewId>".
   const groups = state.consoles.filter((c) => c.liveviews?.length).map((c) => el("optgroup", { label: c.name },
-    c.liveviews.map((lv) => el("option", { value: `${c.id}|${lv.id}` }, `${lv.name} (${plural(lv.count)})`))));
-  importSelect.replaceChildren(el("option", { value: "", selected: true }, "Import a Protect liveview…"), ...groups);
+    c.liveviews.map((lv) => el("option", { value: `${c.id}|${lv.id}` }, `${lv.name} (${plural(lv.count, "camera")})`))));
+  if (document.activeElement !== importSelect) {
+    importSelect.replaceChildren(el("option", { value: "", selected: true }, "Import a Protect liveview…"), ...groups);
+  }
   importSelect.classList.toggle("hidden", !groups.length);
 }
 
@@ -236,7 +434,7 @@ importSelect.addEventListener("change", async () => {
   try {
     await panes.invoke("mgr:import-liveview", { consoleId, liveviewId });
   } catch (err) {
-    alert(String(err?.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""));
+    alert(rpcError(err));
   }
   refresh();
 });
@@ -256,12 +454,12 @@ layoutForm.addEventListener("submit", async (e) => {
     layoutDialog.close();
     refresh();
   } catch (err) {
-    layoutError.textContent = String(err?.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+    layoutError.textContent = rpcError(err);
   }
 });
 
 // ---------------------------------------------------------------------------------------------
-// Updates
+// Settings tab: updates
 
 const updateSource = document.getElementById("update-source");
 const updateStatus = document.getElementById("update-status");
@@ -277,12 +475,9 @@ function renderUpdate() {
   checkBtn.textContent = u.status === "available" ? `Download ${u.version}` : "Check for updates";
   installBtn.classList.toggle("hidden", u.status !== "ready");
   installBtn.textContent = `Install ${u.version ?? ""} and restart`;
-  const text = updateError || (u.status && u.status !== "idle" ? u.message : `This is version ${u.current}.`);
-  updateStatus.textContent = text;
+  updateStatus.textContent = updateError || (u.status && u.status !== "idle" ? u.message : `This is version ${u.current}.`);
   updateStatus.classList.toggle("bad", !!updateError || u.status === "error");
 }
-
-const rpcError = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 
 updateSource.addEventListener("change", async () => {
   updateError = "";
@@ -319,6 +514,7 @@ function openDialog(c) {
   form.password.placeholder = c ? "Leave blank to keep the saved password" : "";
   form.password.required = !c;
   dialogError.textContent = "";
+  hideTip();
   dialog.showModal();
   (c ? form.password : form.name).focus();
 }
@@ -340,7 +536,7 @@ form.addEventListener("submit", async (e) => {
     dialog.close();
     refresh();
   } catch (err) {
-    dialogError.textContent = String(err?.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+    dialogError.textContent = rpcError(err);
   } finally {
     save.disabled = false;
   }
@@ -358,16 +554,22 @@ document.getElementById("btn-hide").addEventListener("click", () => {
   panes.invoke(state?.hiddenCount ? "mgr:show-cameras" : "mgr:hide-cameras", null).then(refresh);
 });
 document.getElementById("btn-front").addEventListener("click", () => panes.invoke("mgr:bring-to-front"));
+document.getElementById("btn-arrange-auto").addEventListener("click", async () => {
+  await panes.invoke("mgr:arrange", { templateId: "auto" }).catch(() => {});
+  refresh();
+});
 document.getElementById("btn-reset").addEventListener("click", () => {
   if (confirm("Move every open camera window back onto the main screen?")) panes.invoke("mgr:reset-positions");
 });
+document.getElementById("btn-project").addEventListener("click", () => panes.invoke("mgr:open-project"));
+document.getElementById("btn-logs").addEventListener("click", () => panes.invoke("mgr:open-log-folder"));
 document.getElementById("btn-quit").addEventListener("click", () => panes.invoke("mgr:quit"));
 
 panes.onChanged(() => refresh());
 // Camera online/offline status isn't pushed; poll lightly while the list is visible.
 setInterval(() => {
-  // Don't re-render under an open dropdown or dialog.
-  if (document.hidden || dialog.open || layoutDialog.open || document.activeElement?.tagName === "SELECT") return;
+  // Don't re-render under an open dropdown, menu or dialog.
+  if (document.hidden || dialog.open || layoutDialog.open || openMenuFor || document.activeElement?.tagName === "SELECT") return;
   refresh();
 }, 3_000);
 refresh();

@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, screen } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -158,7 +158,13 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
   setTimeout(async () => {
     clearInterval(timer);
     await sample();
-    const result = { connections: {}, windows: {}, samples, actions: results };
+    const result = {
+      connections: {},
+      windows: {},
+      samples,
+      actions: results,
+      displays: screen.getAllDisplays().map((d) => ({ id: d.id, bounds: d.bounds, workArea: d.workArea, scaleFactor: d.scaleFactor })),
+    };
     for (const [id, c] of connections) result.connections[id] = { state: c.state, message: c.message, cameras: c.cameras().length };
     if (process.env.PANES_SELFTEST_SHOWBAR) {
       for (const cw of camWins.values()) await cw.win.webContents.executeJavaScript("document.getElementById('bar').style.opacity = 1").catch(() => {});

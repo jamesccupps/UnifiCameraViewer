@@ -1,9 +1,10 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, screen, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, screen, shell, Tray } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CameraStream } from "./camera-stream.js";
 import { ConsoleConnection, channelList, fisheyeInfo, resolveChannel } from "./console-connection.js";
+import { autoGrid, cellRects, channelForTile, fitAspect, readingOrder, templateById, TEMPLATES } from "./grid.js";
 import { createLogger } from "./log.js";
 import { decryptPassword, DEFAULT_SETTINGS, encryptPassword, newId, Store } from "./store.js";
 import { UPDATE_PUBLIC_KEY } from "./update-key.js";
@@ -13,6 +14,7 @@ import { debounce, normalizeHost, throttle } from "./util.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS = path.join(__dirname, "..", "assets");
 const MOCK = process.argv.includes("--mock");
+const PROJECT_URL = "https://github.com/jamesccupps/UnifiCameraViewer";
 const IS_WIN = process.platform === "win32";
 
 if (process.env.PANES_USER_DATA) app.setPath("userData", process.env.PANES_USER_DATA);
@@ -297,6 +299,56 @@ function showHiddenCameras(consoleId = null) {
   notifyManager();
 }
 
+/** "Close all": the opposite of Show all. Each camera keeps its saved place for next time. */
+function closeAllCameras(consoleId) {
+  for (const [key, w] of Object.entries(store.data.windows)) {
+    if (w.open && key.startsWith(`${consoleId}/`)) closeCamera(key);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Arrange windows: tile the camera windows on one screen into a layout (src/grid.js).
+
+const onScreenWindows = () => [...camWins.values()].filter((cw) => !cw.win.isDestroyed() && cw.win.isVisible()
+  && !cw.win.isMinimized() && !store.data.windows[cw.key]?.hidden);
+
+/** The screen to arrange: the one the camera list is on, else the one under the mouse. */
+function arrangeDisplay(fromManager) {
+  if (fromManager && managerWin && !managerWin.isDestroyed() && managerWin.isVisible()) return screen.getDisplayMatching(managerWin.getBounds());
+  return screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+}
+
+/**
+ * Tile the windows on `display` (or, if none are there yet, every window on screen) into the
+ * template, keeping their current reading order. Windows past the template's last cell are left
+ * where they are. With "Match quality to tile size" on, each camera's channel follows its tile.
+ */
+function arrangeWindows(templateId = "auto", display = arrangeDisplay(false)) {
+  const area = display.workArea;
+  const all = onScreenWindows();
+  let wins = all.filter((cw) => screen.getDisplayMatching(cw.win.getBounds()).id === display.id);
+  if (!wins.length) wins = all;
+  if (!wins.length) return { arranged: 0, left: 0 };
+  wins = readingOrder(wins, (cw) => cw.win.getBounds());
+  const tpl = templateId === "auto" ? autoGrid(wins.length, area) : templateById(templateId);
+  if (!tpl) throw new Error(`unknown layout ${templateId}`);
+  const rects = cellRects(tpl, area);
+  const n = Math.min(wins.length, rects.length);
+  for (let i = 0; i < n; i++) {
+    const cw = wins[i];
+    const b = fitAspect(rects[i], cw.aspect ?? 16 / 9);
+    if (cw.win.isMaximized()) cw.win.unmaximize();
+    cw.win.setBounds(b);
+    if (store.settings.arrangeQuality) {
+      const ch = channelForTile(b.width * display.scaleFactor);
+      if (store.data.windows[cw.key]?.channel !== ch) setChannel(cw, ch);
+    }
+  }
+  store.save();
+  notifyManager();
+  return { arranged: n, left: wins.length - n };
+}
+
 // ---------------------------------------------------------------------------------------------
 // Named layouts: a saved set of on-screen windows with their places and per-window settings.
 // Applying one closes the windows it doesn't include and opens or moves the ones it does.
@@ -539,8 +591,11 @@ function dewarpMenu(cw) {
     if (!store.data.windows[cw.key]?.dewarp) updateDewarp(cw, {});
     fn();
   };
+  // Single view is quad with one view enlarged (the same state double-click toggles).
+  const single = mode === "quad" && (d?.focus ?? -1) >= 0;
   return [
-    { label: "Quad view", type: "radio", checked: mode === "quad", click: () => setMode("quad") },
+    { label: "Quad view", type: "radio", checked: mode === "quad" && !single, click: () => setMode("quad") },
+    { label: "Single view", type: "radio", checked: single, click: () => updateDewarp(cw, { mode: "quad", focus: single ? d.focus : 0 }) },
     { label: "Panorama", type: "radio", checked: mode === "panorama", click: () => setMode("panorama") },
     { label: "Fisheye (no dewarp)", type: "radio", checked: mode === "off", click: () => setMode("off") },
     { type: "separator" },
@@ -860,7 +915,7 @@ function updateStageDir() {
   return path.join(process.env.LOCALAPPDATA, "Protect Panes", "updates");
 }
 
-// ProtectPanes-Setup.exe (NSIS) leaves "Uninstall Protect Panes.exe" next to the app. Such copies
+// ProtectPanes-Setup.exe (NSIS) leaves "Uninstall ProtectPanes.exe" next to the app. Such copies
 // update by running the new installer; swapping in the zip's folder would delete the uninstaller.
 function installKind() {
   if (!app.isPackaged) return "folder";
@@ -946,6 +1001,8 @@ function managerState() {
     hiddenCount: hiddenKeys().length,
     shownCount: shown(),
     layouts: store.data.layouts.map((l) => ({ id: l.id, name: l.name, count: Object.keys(l.windows).length })),
+    templates: TEMPLATES.map((t) => ({ id: t.id, label: t.label, cols: t.cols ?? null, rows: t.rows ?? null, cells: t.cells ?? null })),
+    onScreenCount: onScreenWindows().length,
     update: { status: updater?.state.status, version: updater?.state.version, message: updater?.state.message, current: app.getVersion() },
     consoles: store.data.consoles.map((c) => {
       const conn = connections.get(c.id);
@@ -973,6 +1030,7 @@ function managerState() {
         controllerName: conn?.controllerName ?? null,
         hiddenCount: hiddenKeys(c.id).length,
         shownCount: shown(c.id),
+        openCount: Object.entries(store.data.windows).filter(([key, w]) => w.open && key.startsWith(`${c.id}/`)).length,
         liveviews: (conn?.liveviews?.() ?? []).map((lv) => ({ id: lv.id, name: lv.name, count: lv.slots.filter(Boolean).length })),
         cameras,
       };
@@ -997,6 +1055,10 @@ function trayMenuTemplate() {
       ? { label: "Show cameras", click: () => showHiddenCameras() }
       : { label: "Hide cameras", click: () => hideCameras() },
     { label: "Bring cameras to front", click: () => bringAllToFront() },
+    {
+      label: "Arrange windows",
+      submenu: TEMPLATES.map((t) => ({ label: t.label, click: () => arrangeWindows(t.id, arrangeDisplay(false)) })),
+    },
     ...(store.data.layouts.length
       ? [{ label: "Layouts", submenu: store.data.layouts.map((l) => ({ label: l.name, click: () => applyLayout(l.id) })) }]
       : []),
@@ -1066,6 +1128,10 @@ function registerIpc() {
   handle("mgr:open-camera", (key) => openCameraWindow(String(key)));
   handle("mgr:close-camera", (key) => closeCamera(String(key)));
   handle("mgr:hide-cameras", (consoleId) => hideCameras(consoleId ? String(consoleId) : null));
+  handle("mgr:close-all", (consoleId) => closeAllCameras(String(consoleId)));
+  handle("mgr:open-log-folder", () => shell.openPath(app.getPath("userData")));
+  handle("mgr:open-project", () => shell.openExternal(PROJECT_URL)); // fixed URL; the renderer can't pass one
+  handle("mgr:arrange", ({ templateId } = {}) => arrangeWindows(String(templateId ?? "auto"), arrangeDisplay(true)));
   handle("mgr:show-cameras", (consoleId) => showHiddenCameras(consoleId ? String(consoleId) : null));
   handle("mgr:find-camera", (key) => openCameraWindow(String(key)));
   handle("mgr:set-channel", ({ key, channel } = {}) => {
