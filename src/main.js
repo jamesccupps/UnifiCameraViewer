@@ -1688,6 +1688,7 @@ function registerIpc() {
   handle("mgr:open-all", (consoleId) => openAllCameras(String(consoleId)));
   handle("mgr:set-list-hidden", ({ key, hidden } = {}) => setListHidden(String(key), !!hidden));
   handle("mgr:preview", (key) => (store.settings.showPreviews ? previews.get(String(key)) : null));
+  handle("mgr:raise", () => managerWin.moveTop());
   handle("mgr:open-grid", (id) => openGrid(String(id)));
   handle("mgr:close-grid", (id) => closeGrid(String(id)));
   handle("mgr:delete-grid", (id) => deleteGrid(String(id)));

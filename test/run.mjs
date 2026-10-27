@@ -1006,6 +1006,35 @@ async function gridSuite() {
   console.log(`  results: ${userData}`);
 }
 
+/**
+ * Windows only: sample every 100 ms whether window `above` (by title) is higher in the z-order than
+ * window `below`, for `seconds`. Resolves to [{ t: epoch ms, above: boolean }] for samples where both exist.
+ */
+function sampleZOrder(above, below, seconds) {
+  const ps = `
+Add-Type @'
+using System; using System.Runtime.InteropServices;
+public static class ZO {
+  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint cmd);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string cls, string title);
+  public static bool Above(IntPtr a, IntPtr b) { for (IntPtr h = GetWindow(b, 3); h != IntPtr.Zero; h = GetWindow(h, 3)) if (h == a) return true; return false; }
+}
+'@
+$end = (Get-Date).AddSeconds(${seconds})
+while ((Get-Date) -lt $end) {
+  $a = [ZO]::FindWindow([NullString]::Value, ${JSON.stringify(above)}); $b = [ZO]::FindWindow([NullString]::Value, ${JSON.stringify(below)})
+  if ($a -ne [IntPtr]::Zero -and $b -ne [IntPtr]::Zero) { "$([DateTimeOffset]::Now.ToUnixTimeMilliseconds()) $([ZO]::Above($a, $b))" }
+  Start-Sleep -Milliseconds 100
+}`;
+  const child = spawn("powershell", ["-NoProfile", "-Command", ps], { stdio: ["ignore", "pipe", "ignore"] });
+  let out = "";
+  child.stdout.on("data", (d) => { out += d; });
+  return new Promise((resolve) => child.on("exit", () => resolve(out.trim().split(/\r?\n/).filter(Boolean).map((l) => {
+    const [t, v] = l.split(" ");
+    return { t: Number(t), above: v === "True" };
+  }))));
+}
+
 // ---------------------------------------------------------------------------------------------
 // Camera list: Hide from list (cameras nobody uses) and putting them back.
 
@@ -1146,6 +1175,35 @@ async function listSuite() {
     asked(A) === 2 && asked(B) === 1, JSON.stringify({ building: asked(A), garage: asked(B) }));
   check("Show camera previews off removes them from the list",
     run2.config.settings.showPreviews === false && thumbsOff && Object.values(thumbsOff).every((t) => t === null), JSON.stringify(thumbsOff));
+
+  // A camera opened from the list appears above it without taking the focus, so the list stays the
+  // active window under it, and on Windows clicking an active window doesn't raise it (the owner
+  // couldn't get back to the list). A click anywhere in the list must bring it above the camera.
+  if (process.platform === "win32") {
+    const zd = tmpDir("raise");
+    fs.writeFileSync(path.join(zd, "config.json"), JSON.stringify({
+      version: 1,
+      consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby"] }],
+      windows: {},
+      settings: { startHidden: false },
+    }, null, 2));
+    const zorder = sampleZOrder("Building Lobby", "Protect Panes", 10);
+    const run3 = await runApp({
+      userData: zd, results: path.join(zd, "results"), seconds: 9, extraArgs: ["--mock"],
+      env: {
+        PANES_SELFTEST_ACTIONS: JSON.stringify([
+          { at: 3000, do: "manager-js", js: `(() => { document.querySelector(".switch input").click(); return true; })()` },
+          { at: 6000, do: "manager-js", js: `(() => { document.getElementById("filter").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); return true; })()` },
+        ]),
+      },
+    });
+    const samples = await zorder;
+    const clickAt = run3.result.actions[1]?.t ?? Infinity;
+    const before = samples.filter((s) => s.t < clickAt - 200).at(-1);
+    const after = samples.filter((s) => s.t > clickAt + 500);
+    check("a camera opened from the list shows above it", before?.above === true, JSON.stringify(before));
+    check("a click in the camera list brings it back above the camera", after.length > 0 && after.every((s) => !s.above), JSON.stringify(after.slice(0, 3)));
+  }
 }
 
 // ---------------------------------------------------------------------------------------------

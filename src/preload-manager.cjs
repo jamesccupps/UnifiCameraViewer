@@ -8,7 +8,7 @@ const ALLOWED = new Set([
   "mgr:save-layout", "mgr:apply-layout", "mgr:delete-layout", "mgr:import-liveview",
   "mgr:set-update-source", "mgr:check-update", "mgr:install-update",
   "mgr:close-all", "mgr:arrange", "mgr:open-log-folder", "mgr:open-project", "mgr:save-editor-layout",
-  "mgr:set-list-hidden", "mgr:preview", "mgr:open-grid", "mgr:close-grid", "mgr:delete-grid",
+  "mgr:set-list-hidden", "mgr:preview", "mgr:open-grid", "mgr:close-grid", "mgr:delete-grid", "mgr:raise",
 ]);
 
 contextBridge.exposeInMainWorld("panes", {

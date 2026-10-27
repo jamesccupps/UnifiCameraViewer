@@ -237,6 +237,10 @@ document.addEventListener("pointerover", (e) => {
   }, 300);
 });
 document.addEventListener("pointerdown", hidePop);
+// Camera and grid windows opened from here appear above the list without taking the focus, so the
+// list stays the active window underneath them, and on Windows clicking the already-active window
+// doesn't bring it forward. Raise it on any click, as clicking a window normally does.
+document.addEventListener("pointerdown", () => panes.invoke("mgr:raise"), true);
 document.addEventListener("scroll", hidePop, true);
 window.addEventListener("blur", hidePop);
 
