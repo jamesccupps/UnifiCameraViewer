@@ -287,7 +287,12 @@ try {
       $out = [IO.File]::Create($tmp)
       try { $gz.CopyTo($out) } finally { $out.Dispose(); $gz.Dispose() }
     } finally { $in.Dispose() }
-    if ((Get-FileHash -LiteralPath $tmp -Algorithm SHA256).Hash -ne $AsarSha256.ToUpperInvariant()) {
+    # .NET, not Get-FileHash: started from PowerShell 7 (GitHub's runners, or a user's pwsh window),
+    # Windows PowerShell inherits pwsh's PSModulePath and Get-FileHash isn't found (measured in CI).
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $fs = [IO.File]::OpenRead($tmp)
+    try { $hash = -join ($sha.ComputeHash($fs) | ForEach-Object { $_.ToString('x2') }) } finally { $fs.Dispose(); $sha.Dispose() }
+    if ($hash -ne $AsarSha256.ToLowerInvariant()) {
       Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
       throw "the unpacked app.asar doesn't match its signed checksum"
     }
