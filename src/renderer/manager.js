@@ -406,6 +406,9 @@ function renderLayouts() {
         tip: "Open this layout's cameras at their saved places and settings, and close the windows that aren't in it.",
         onclick: () => panes.invoke("mgr:apply-layout", l.id).then(refresh),
       }, "Apply"),
+      l.editor
+        ? el("button", { class: "small ghost", tip: "Change this layout's cameras, grid or screen in the layout editor.", onclick: () => openEditor(l) }, "Edit")
+        : el("span"),
       el("button", {
         class: "small ghost",
         tip: "Delete this saved layout. Open camera windows aren't touched.",
@@ -457,6 +460,194 @@ layoutForm.addEventListener("submit", async (e) => {
     layoutError.textContent = rpcError(err);
   }
 });
+
+// ---------------------------------------------------------------------------------------------
+// Layout editor: drag cameras from the palette into a template's tiles on a chosen screen. The
+// dialog keeps its own model (ed); only ids and choices go to main, which computes the bounds.
+
+const editorDialog = document.getElementById("editor-dialog");
+const editorForm = document.getElementById("editor-form");
+const editorName = document.getElementById("editor-name");
+const editorScreen = document.getElementById("editor-screen");
+const editorTemplate = document.getElementById("editor-template");
+const editorPreview = document.getElementById("editor-preview");
+const editorCameras = document.getElementById("editor-cameras");
+const editorFilter = document.getElementById("editor-filter");
+const editorError = document.getElementById("editor-error");
+const CAMERA_TYPE = "text/x-protect-panes-camera";
+const CELL_TYPE = "text/x-protect-panes-cell";
+const VIEW_LABELS = [["quad", "Quad (4 views)"], ["single", "Single view"], ["panorama", "Panorama"], ["off", "Fisheye (raw)"]];
+
+let ed = null; // { id, displayId, templateId, cells: [{ key, mode } | null] }
+
+const cameraByKey = () => new Map(state.consoles.flatMap((c) => c.cameras.map((cam) => [cam.key, { ...cam, consoleName: c.name }])));
+const editorTemplates = () => state.templates.filter((t) => t.cells);
+
+function openEditor(layout = null) {
+  const screens = state.screens;
+  const fallbackScreen = screens.find((s) => s.primary) ?? screens[0];
+  const e = layout?.editor;
+  ed = {
+    id: layout?.id ?? null,
+    displayId: screens.some((s) => s.id === e?.displayId) ? e.displayId : fallbackScreen?.id,
+    templateId: e?.templateId ?? "2x2",
+    cells: [],
+  };
+  const tpl = editorTemplates().find((t) => t.id === ed.templateId) ?? editorTemplates()[1];
+  ed.templateId = tpl.id;
+  ed.cells = Array.from({ length: tpl.cells.length }, (_, i) => e?.cells?.[i] ?? null);
+  document.getElementById("editor-title").textContent = layout ? "Edit layout" : "New layout";
+  editorName.value = layout?.name ?? "";
+  editorError.textContent = "";
+  editorFilter.value = "";
+  editorScreen.replaceChildren(...screens.map((s) => el("option", { value: String(s.id), selected: s.id === ed.displayId }, s.label)));
+  editorTemplate.replaceChildren(...editorTemplates().map((t) => el("option", { value: t.id, selected: t.id === ed.templateId }, `${t.label} (${plural(t.cells.length, "camera")})`)));
+  hideTip();
+  editorDialog.showModal();
+  renderEditor();
+  editorName.focus();
+}
+
+function setTemplate(id) {
+  const tpl = editorTemplates().find((t) => t.id === id);
+  if (!tpl) return;
+  // Keep the placed cameras in order; a smaller layout drops the ones past its last tile.
+  const placed = ed.cells.filter(Boolean);
+  ed.templateId = id;
+  ed.cells = Array.from({ length: tpl.cells.length }, (_, i) => placed[i] ?? null);
+  renderEditor();
+  const dropped = placed.length - Math.min(placed.length, tpl.cells.length);
+  editorError.textContent = dropped ? `${plural(dropped, "camera")} didn't fit in ${tpl.label} and came out of the layout.` : "";
+}
+
+function place(index, key, mode = null) {
+  const from = ed.cells.findIndex((c) => c?.key === key);
+  const was = from >= 0 ? ed.cells[from] : null;
+  if (from >= 0) ed.cells[from] = null;
+  ed.cells[index] = { key, mode: mode ?? was?.mode ?? "quad" };
+  renderEditor();
+}
+
+function swap(a, b) {
+  [ed.cells[a], ed.cells[b]] = [ed.cells[b], ed.cells[a]];
+  renderEditor();
+}
+
+function dropTarget(node, index) {
+  node.addEventListener("dragover", (e) => {
+    if (![...e.dataTransfer.types].some((t) => t === CAMERA_TYPE || t === CELL_TYPE)) return;
+    e.preventDefault();
+    node.classList.add("over");
+  });
+  node.addEventListener("dragleave", () => node.classList.remove("over"));
+  node.addEventListener("drop", (e) => {
+    e.preventDefault();
+    node.classList.remove("over");
+    const key = e.dataTransfer.getData(CAMERA_TYPE);
+    const cell = e.dataTransfer.getData(CELL_TYPE);
+    if (cell !== "" && Number(cell) !== index) swap(Number(cell), index);
+    else if (key) place(index, key);
+  });
+}
+
+function renderEditor() {
+  const screen = state.screens.find((s) => s.id === ed.displayId) ?? state.screens[0];
+  const tpl = editorTemplates().find((t) => t.id === ed.templateId);
+  const cams = cameraByKey();
+  editorPreview.style.aspectRatio = `${screen.workArea.width} / ${screen.workArea.height}`;
+  editorPreview.replaceChildren(...tpl.cells.map(([c, r, cs = 1, rs = 1], i) => {
+    const filled = ed.cells[i];
+    const cam = filled ? cams.get(filled.key) : null;
+    const node = el("div", {
+      class: `cell${filled ? " filled" : ""}`,
+      "data-cell": String(i),
+      draggable: filled ? "true" : null,
+      style: {
+        left: `calc(${(c / tpl.cols) * 100}% + 2px)`,
+        top: `calc(${(r / tpl.rows) * 100}% + 2px)`,
+        width: `calc(${(cs / tpl.cols) * 100}% - 4px)`,
+        height: `calc(${(rs / tpl.rows) * 100}% - 4px)`,
+      },
+    },
+    el("span", { class: "n" }, String(i + 1)),
+    filled
+      ? [
+        el("b", { title: cam?.name ?? filled.key }, cam?.name ?? "Camera not available"),
+        el("small", {}, cam ? cam.consoleName : "removed from its console"),
+        cam?.fisheye
+          ? el("select", {
+            "aria-label": `360° view for ${cam.name}`,
+            tip: "How this 360° camera shows in its tile. Quad (four views) is the default.",
+            onchange: (e) => { filled.mode = e.target.value; },
+          }, VIEW_LABELS.map(([v, label]) => el("option", { value: v, selected: v === (filled.mode ?? "quad") }, label)))
+          : null,
+        el("button", { type: "button", class: "x", "aria-label": "Remove from this tile", tip: "Take this camera out of the tile.", onclick: () => { ed.cells[i] = null; renderEditor(); } }, "✕"),
+      ]
+      : el("span", { class: "empty" }, "Drop a camera here"));
+    if (filled) node.addEventListener("dragstart", (e) => { e.dataTransfer.setData(CELL_TYPE, String(i)); e.dataTransfer.effectAllowed = "move"; });
+    dropTarget(node, i);
+    return node;
+  }));
+
+  const q = editorFilter.value.trim().toLowerCase();
+  const placedKeys = new Set(ed.cells.filter(Boolean).map((c) => c.key));
+  editorCameras.replaceChildren(...state.consoles.flatMap((c) => {
+    const list = c.cameras.filter((cam) => !q || matches(cam, q));
+    if (!list.length) return [];
+    return [
+      el("li", { class: "group" }, c.name),
+      ...list.map((cam) => {
+        const li = el("li", {
+          class: `cam${placedKeys.has(cam.key) ? " placed" : ""}`,
+          draggable: "true",
+          "data-key": cam.key,
+          tip: placedKeys.has(cam.key) ? "Already in the layout. Drag it to move it to another tile." : "Drag onto a tile, or double-click to fill the next empty one.",
+          ondblclick: () => {
+            const free = ed.cells.findIndex((x) => !x);
+            if (free >= 0) place(free, cam.key);
+            else editorError.textContent = "Every tile is taken. Pick a bigger layout or remove a camera first.";
+          },
+        }, el("span", { class: `dot ${cam.online ? "live" : "bad"}` }), cam.name, cam.fisheye ? el("small", {}, "360°") : null);
+        li.addEventListener("dragstart", (e) => { e.dataTransfer.setData(CAMERA_TYPE, cam.key); e.dataTransfer.effectAllowed = "copyMove"; });
+        return li;
+      }),
+    ];
+  }));
+  document.getElementById("editor-count").textContent = `${placedKeys.size} of ${plural(tpl.cells.length, "tile")} filled`;
+}
+
+editorScreen.addEventListener("change", () => { ed.displayId = Number(editorScreen.value); renderEditor(); });
+editorTemplate.addEventListener("change", () => setTemplate(editorTemplate.value));
+editorFilter.addEventListener("input", () => renderEditor());
+document.getElementById("editor-clear").addEventListener("click", () => { ed.cells = ed.cells.map(() => null); editorError.textContent = ""; renderEditor(); });
+document.getElementById("editor-fill").addEventListener("click", () => {
+  const keys = (state.screens.find((s) => s.id === ed.displayId)?.onScreen ?? []);
+  ed.cells = ed.cells.map((_, i) => (keys[i] ? { key: keys[i], mode: "quad" } : null));
+  const extra = keys.length - Math.min(keys.length, ed.cells.length);
+  editorError.textContent = !keys.length ? "There are no camera windows on that screen."
+    : extra ? `${plural(extra, "window")} didn't fit. Pick a bigger layout to include ${extra === 1 ? "it" : "them"}.` : "";
+  renderEditor();
+});
+document.getElementById("editor-cancel").addEventListener("click", () => editorDialog.close());
+editorForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  editorError.textContent = "";
+  try {
+    await panes.invoke("mgr:save-editor-layout", {
+      id: ed.id,
+      name: editorName.value,
+      displayId: ed.displayId,
+      templateId: ed.templateId,
+      cells: ed.cells,
+      apply: e.submitter?.value === "apply",
+    });
+    editorDialog.close();
+    refresh();
+  } catch (err) {
+    editorError.textContent = rpcError(err);
+  }
+});
+document.getElementById("btn-new-layout").addEventListener("click", () => openEditor(null));
 
 // ---------------------------------------------------------------------------------------------
 // Settings tab: updates
@@ -569,7 +760,7 @@ panes.onChanged(() => refresh());
 // Camera online/offline status isn't pushed; poll lightly while the list is visible.
 setInterval(() => {
   // Don't re-render under an open dropdown, menu or dialog.
-  if (document.hidden || dialog.open || layoutDialog.open || openMenuFor || document.activeElement?.tagName === "SELECT") return;
+  if (document.hidden || dialog.open || layoutDialog.open || editorDialog.open || openMenuFor || document.activeElement?.tagName === "SELECT") return;
   refresh();
 }, 3_000);
 refresh();

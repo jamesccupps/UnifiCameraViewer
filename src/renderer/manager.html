@@ -59,6 +59,7 @@
           <span class="spacer"></span>
           <select id="import-liveview" class="small hidden" aria-label="Import a Protect liveview as a layout"
             data-tip="Turn one of the console's saved Protect liveviews into a layout here. It's saved, not applied."></select>
+          <button id="btn-new-layout" class="small primary" data-tip="Build a layout by dragging cameras into a grid on the screen of your choice, like exacqVision's view editor.">New layout…</button>
           <button id="btn-save-layout" class="small" data-tip="Save the camera windows on screen right now (place, size, quality, 360° views) under a name.">Save current arrangement…</button>
         </div>
         <ul id="layout-list" class="layout-list"></ul>
@@ -143,6 +144,38 @@
       <div class="dialog-actions">
         <button type="button" id="layout-cancel" class="ghost">Cancel</button>
         <button type="submit" id="layout-save" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="editor-dialog" class="editor">
+    <form id="editor-form" method="dialog">
+      <div class="editor-head">
+        <h2 id="editor-title">New layout</h2>
+        <input name="name" id="editor-name" placeholder="Layout name, e.g. Lobby wall" maxlength="60" required autocomplete="off" aria-label="Layout name">
+      </div>
+      <div class="editor-controls">
+        <label>Screen <select id="editor-screen" data-tip="The monitor this layout fills. Sizes come from that screen's real resolution and shape."></select></label>
+        <label>Layout <select id="editor-template" data-tip="The grid. Cameras already placed keep their order when you switch."></select></label>
+        <span class="spacer"></span>
+        <button type="button" id="editor-fill" class="small" data-tip="Fill the tiles with the camera windows on this screen right now, in their order (left to right, top to bottom).">Use what's on screen</button>
+        <button type="button" id="editor-clear" class="small ghost" data-tip="Empty every tile.">Clear</button>
+      </div>
+      <div class="editor-body">
+        <aside class="palette">
+          <input type="search" id="editor-filter" placeholder="Find a camera…" aria-label="Find a camera" spellcheck="false" autocomplete="off">
+          <ul id="editor-cameras"></ul>
+          <p class="muted small">Drag a camera onto a tile, or double-click it to fill the next empty one. Drag a tile onto another to swap them.</p>
+        </aside>
+        <div class="stage"><div id="editor-preview" class="preview" aria-label="Layout preview"></div></div>
+      </div>
+      <p id="editor-error" class="error-text" role="alert"></p>
+      <div class="dialog-actions">
+        <span id="editor-count" class="muted small"></span>
+        <span class="spacer"></span>
+        <button type="button" id="editor-cancel" class="ghost">Cancel</button>
+        <button type="submit" value="save" id="editor-save" data-tip="Save it to your layouts without changing what's on screen.">Save</button>
+        <button type="submit" value="apply" id="editor-apply" class="primary" data-tip="Save it and put the cameras on screen this way now.">Save and apply</button>
       </div>
     </form>
   </dialog>

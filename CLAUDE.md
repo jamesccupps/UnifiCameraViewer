@@ -31,6 +31,7 @@ npm run test:range        # SPS color-range rewrite (unit, ffmpeg fixtures) + di
 npm run test:layouts      # save / apply named layouts, import a Protect liveview, switch from the tray
 npm run test:update       # signed manifest, verified download, the real folder-swap helper, camera-list Updates
 npm run test:arrange      # layout geometry (unit) + Arrange / Close all on real windows
+npm run test:editor       # layout editor: synthetic drag-and-drop into tiles, 360° view per tile, Edit, fill from screen
 npm run test:e2e          # fake UniFi OS consoles over HTTPS/WSS through the real unifi-protect library
 npm run build:win         # dist/Protect Panes-win32-x64/ + ProtectPanes-win32-x64.zip + ProtectPanes-Setup.exe + latest.json (signed)
 ```
@@ -87,7 +88,7 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
 
 - **Camera → main:** `cam:ready`, `cam:aspect {width,height}`, `cam:reset`, `cam:context-menu`, `cam:toggle-top`, `cam:close`, `cam:dewarp {views?, pano?, focus?, circle?}`
 - **Main → camera:** `cam:init`, `cam:media`, `cam:status`, `cam:meta`, `cam:highlight`, `cam:command {cmd: "calibrate" | "autodetect"}`
-- **Camera list (invoke):** `mgr:state`, `mgr:save-console`, `mgr:remove-console`, `mgr:reconnect`, `mgr:open-camera`, `mgr:close-camera`, `mgr:find-camera`, `mgr:set-channel`, `mgr:set-setting`, `mgr:bring-to-front`, `mgr:reset-positions`, `mgr:open-all`, `mgr:hide-cameras consoleId|null`, `mgr:show-cameras consoleId|null`, `mgr:apply-all {consoleId|null, changes}`, `mgr:save-layout name`, `mgr:apply-layout id`, `mgr:delete-layout id`, `mgr:import-liveview {consoleId, liveviewId}`, `mgr:set-update-source`, `mgr:check-update`, `mgr:install-update`, `mgr:close-all consoleId`, `mgr:arrange {templateId}`, `mgr:open-log-folder`, `mgr:open-project` (a fixed URL; the renderer can't pass one), `mgr:quit`. `changes` goes through `cleanChanges()`, which keeps only `channel`, `onTop`, `hideName`, `clock` and `range`.
+- **Camera list (invoke):** `mgr:state`, `mgr:save-console`, `mgr:remove-console`, `mgr:reconnect`, `mgr:open-camera`, `mgr:close-camera`, `mgr:find-camera`, `mgr:set-channel`, `mgr:set-setting`, `mgr:bring-to-front`, `mgr:reset-positions`, `mgr:open-all`, `mgr:hide-cameras consoleId|null`, `mgr:show-cameras consoleId|null`, `mgr:apply-all {consoleId|null, changes}`, `mgr:save-layout name`, `mgr:apply-layout id`, `mgr:delete-layout id`, `mgr:import-liveview {consoleId, liveviewId}`, `mgr:set-update-source`, `mgr:check-update`, `mgr:install-update`, `mgr:close-all consoleId`, `mgr:arrange {templateId}`, `mgr:save-editor-layout {id?, name, displayId, templateId, cells: [{key, mode} | null], apply}`, `mgr:open-log-folder`, `mgr:open-project` (a fixed URL; the renderer can't pass one), `mgr:quit`. `changes` goes through `cleanChanges()`, which keeps only `channel`, `onTop`, `hideName`, `clock` and `range`.
 - **Main → camera list:** `mgr:changed` (throttled). The list also polls every 3 s while visible, for online/offline status.
 
 ## Config and logs
@@ -98,7 +99,7 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
   - `consoles[]`: `{id, name, host, username, password: {enc: "safe" | "plain", data}}`
   - `windows["<consoleId>/<cameraId>"]`: `{open, bounds, channel, onTop, name, hideName, hidden, clock, range, dewarp}`. `range` is `"full" | "limited"` (absent = auto). `clock` true/false overrides the default (on in quad/panorama, off otherwise). `hideName` hides one window's label; `settings.showNames` off hides all of them. `hidden` (with `open: true`) means taken off screen by Hide cameras / Hide all.
   - `settings`: `{lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin, arrangeQuality, updateSource}`. `arrangeQuality` (default on) lets Arrange set each camera's channel from its tile's physical width: up to 700 px Low, up to 1400 px Medium, above that High. `updateSource` is an `https://` base URL or a folder (UNC or drive path) holding `latest.json` and the zip. Plain http is refused. It defaults to `https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download`, and blank turns checks off. `runApp()` in the tests blanks it unless a suite sets one, so tests never touch the network.
-  - `layouts[]`: `{id, name, windows: {"<consoleId>/<cameraId>": {bounds, channel, onTop, hideName, clock, range, dewarp}}}`. Saving under an existing name (case-insensitive) replaces it.
+  - `layouts[]`: `{id, name, windows: {"<consoleId>/<cameraId>": {bounds, channel, onTop, hideName, clock, range, dewarp}}, editor?}`. Saving under an existing name (case-insensitive) replaces it. `editor: {displayId, templateId, cells}` is present only on layouts built in the layout editor, and is what its Edit button reopens.
 - `protect-panes.log`: connection log. Rolls to `.log.1` at 2 MB.
 
 Passwords are DPAPI-encrypted (`safeStorage`) and tied to the Windows user. `enc: "plain"` is base64 and only exists in tests and on Linux without a keyring. **Never print or log decrypted passwords.**
@@ -143,6 +144,12 @@ Passwords are DPAPI-encrypted (`safeStorage`) and tied to the Windows user. `enc
   - Order: reading order by **top edge**, then x. Centers were wrong: after a 1+5, a small top-right tile's center is higher than the big tile's, so the big tile stopped being first.
   - Sizing: each window is fitted to its own aspect (`cw.aspect`, default 16:9) inside its cell, with a 2 px gap. Windows past the last cell stay put, and the call returns `{arranged, left}`.
   - Auto picks the column count that maximizes tile width for that work area, so 16:9, ultrawide and portrait screens get different grids.
+- **Layout editor** (manager.js `ed` model, main `saveEditorLayout()`).
+  - The renderer only sends ids and choices; main validates them (console ids, template, view mode) and computes bounds with grid.js on the chosen display.
+  - Each camera goes in one cell. Quality is picked by tile size when `arrangeQuality` is on.
+  - 360° cells set `dewarp.mode`. "single" is quad with `focus ≥ 0`.
+  - Drag data types are `text/x-protect-panes-camera` (from the palette) and `…-cell` (tile to tile, which swaps). The tests dispatch synthetic `DragEvent("drop")` with a constructed `DataTransfer`; Chromium lets `getData` read it.
+  - `screens[]` in `mgr:state` lists each display with its on-screen windows in reading order, for "Use what's on screen". Its labels snap odd physical widths to even, because Electron rounds DIPs (3440 px at 150% shows as 3441).
 - **Camera list CSP:** `style-src 'self'` blocks `style=""` attributes, so positioning goes through CSSOM: `el(…, {style: {...}})` uses `Object.assign(node.style)`. A `setAttribute("style")` silently does nothing, which is how the Arrange thumbnails first rendered blank.
 - **Hover tips:** any element with `data-tip` (or `el(…, {tip})`) gets the floating `#tip`. It shows after 400 ms, also on keyboard focus, and re-attaches to the replacement element after the 3 s re-render. Don't add `title` as well, or you get two tooltips.
 - **Layouts.**

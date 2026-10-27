@@ -226,7 +226,7 @@ main { flex: 1; overflow: auto; padding: 14px 18px 18px; }
 .layout-list { list-style: none; margin: 10px 0 0; padding: 0; border-top: 1px solid var(--line); }
 .layout-list li {
   display: grid;
-  grid-template-columns: 1fr auto auto auto;
+  grid-template-columns: 1fr auto auto auto auto;
   align-items: center;
   gap: 10px;
   padding: 7px 4px;
@@ -255,6 +255,45 @@ main { flex: 1; overflow: auto; padding: 14px 18px 18px; }
 
 .empty-state { text-align: center; padding: 34px 16px; }
 .empty-state p { color: var(--muted); margin: 6px 0 16px; }
+
+/* Layout editor */
+dialog.editor { width: min(1040px, 96vw); max-height: 94vh; padding: 16px 18px; }
+.editor-head { display: flex; align-items: center; gap: 14px; }
+.editor-head h2 { margin: 0; white-space: nowrap; }
+.editor-head input { flex: 1; }
+.editor-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.editor-controls label { flex-direction: row; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.editor-body { display: grid; grid-template-columns: 230px 1fr; gap: 14px; min-height: 360px; }
+.palette { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.palette ul { list-style: none; margin: 0; padding: 0; overflow: auto; max-height: 52vh; border: 1px solid var(--line); border-radius: 8px; }
+.palette li.group { padding: 6px 10px 3px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; cursor: default; }
+.palette li.cam {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 10px; font-size: 12.5px; cursor: grab; user-select: none;
+  border-top: 1px solid var(--line);
+}
+.palette li.cam:hover { background: var(--panel-3); }
+.palette li.cam.placed { color: var(--muted); }
+.palette li.cam.placed::after { content: "✓"; margin-left: auto; color: var(--live); }
+.palette li.cam small { color: var(--muted); }
+.stage { display: grid; place-items: center; background: #0c0e10; border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+.preview { position: relative; width: 100%; max-height: 54vh; background: #050607; outline: 1px solid var(--line-2); border-radius: 4px; }
+.cell {
+  position: absolute;
+  display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px;
+  padding: 4px; overflow: hidden; text-align: center;
+  background: #1a1f24; border: 1px dashed #3a434c; border-radius: 3px;
+  font-size: 12px;
+}
+.cell.filled { background: #23303b; border: 1px solid #3b5a74; cursor: grab; }
+.cell.over { border-color: var(--accent); background: var(--accent-soft); }
+.cell .n { position: absolute; left: 5px; top: 3px; font-size: 10px; color: var(--muted); }
+.cell .empty { color: var(--muted); font-size: 11px; }
+.cell b { font-weight: 500; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell small { color: var(--muted); font-size: 10.5px; }
+.cell select { font-size: 11px; padding: 1px 4px; max-width: 95%; }
+.cell .x { position: absolute; right: 3px; top: 2px; border: 0; background: transparent; padding: 0 5px; font-size: 13px; color: var(--muted); }
+.cell .x:hover:not(:disabled) { color: var(--bad); background: transparent; }
 
 /* Hover tips: one floating box, positioned by manager.js next to whatever has data-tip */
 .tip {

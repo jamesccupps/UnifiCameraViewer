@@ -364,13 +364,19 @@ function layoutEntry(key) {
   return out;
 }
 
-function putLayout(name, windows) {
+function putLayout(name, windows, { editor = undefined, replaceId = null } = {}) {
   const clean = String(name ?? "").trim().slice(0, 60);
   if (!clean) throw new Error("Give the layout a name.");
   if (!Object.keys(windows).length) throw new Error("There are no camera windows on screen to save.");
-  const existing = store.data.layouts.find((l) => l.name.toLowerCase() === clean.toLowerCase());
-  if (existing) Object.assign(existing, { name: clean, windows });
-  else store.data.layouts.push({ id: newId(), name: clean, windows });
+  const existing = store.data.layouts.find((l) => l.id === replaceId)
+    ?? store.data.layouts.find((l) => l.name.toLowerCase() === clean.toLowerCase());
+  if (existing) {
+    Object.assign(existing, { name: clean, windows });
+    if (editor) existing.editor = editor;
+    else delete existing.editor;
+  } else {
+    store.data.layouts.push({ id: newId(), name: clean, windows, ...(editor && { editor }) });
+  }
   store.save();
   updateTrayMenu();
   notifyManager();
@@ -458,6 +464,69 @@ function importLiveview(consoleId, liveviewId) {
     };
   });
   return putLayout(`${consoleName(consoleId)} · ${lv.name}`, windows);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Layout editor (camera list → Layouts → New layout…): a template on a chosen screen, with a camera
+// dragged into each cell. The renderer only sends ids; bounds are computed here with grid.js.
+
+const VIEW_MODES = ["quad", "single", "panorama", "off"];
+
+function screensForEditor() {
+  const primary = screen.getPrimaryDisplay().id;
+  const all = onScreenWindows();
+  // Physical pixels, for the label only. Electron rounds the DIP size (3440 px at 150% = 2293.33 →
+  // 2294 DIP → 3441), and nothing exposes the panel's own size. Panels are even-sized, so an odd
+  // result is that rounding: snap it to even. Layout math uses the exact work area, not this.
+  const even = (v) => (v % 2 ? v - 1 : v);
+  const px = (d) => ({ width: even(Math.round(d.size.width * d.scaleFactor)), height: even(Math.round(d.size.height * d.scaleFactor)) });
+  return screen.getAllDisplays()
+    .sort((a, b) => a.bounds.x - b.bounds.x || a.bounds.y - b.bounds.y)
+    .map((d, i) => ({
+      id: d.id,
+      label: `Screen ${i + 1}${d.id === primary ? " (main)" : ""} · ${px(d).width}×${px(d).height}`,
+      workArea: d.workArea,
+      scaleFactor: d.scaleFactor,
+      primary: d.id === primary,
+      onScreen: readingOrder(all.filter((cw) => screen.getDisplayMatching(cw.win.getBounds()).id === d.id), (cw) => cw.win.getBounds()).map((cw) => cw.key),
+    }));
+}
+
+/** Validate an editor submission and turn it into layout windows; returns the layout id. */
+function saveEditorLayout(input) {
+  const tpl = templateById(String(input?.templateId ?? ""));
+  if (!tpl?.cells) throw new Error("Pick a layout.");
+  const display = screen.getAllDisplays().find((d) => d.id === Number(input?.displayId)) ?? screen.getPrimaryDisplay();
+  const consoleIds = new Set(store.data.consoles.map((c) => c.id));
+  const rects = cellRects(tpl, display.workArea);
+  const cells = (Array.isArray(input?.cells) ? input.cells : []).slice(0, tpl.cells.length).map((c) => {
+    const key = typeof c?.key === "string" ? c.key : "";
+    if (!consoleIds.has(key.split("/")[0]) || !key.split("/")[1]) return null;
+    return { key, mode: VIEW_MODES.includes(c.mode) ? c.mode : "quad" };
+  });
+  const windows = {};
+  cells.forEach((c, i) => {
+    if (!c || windows[c.key]) return; // a camera goes in one cell only
+    const entry = layoutEntry(c.key);
+    const cw = camWins.get(c.key);
+    const bounds = fitAspect(rects[i], cw?.aspect ?? 16 / 9);
+    const out = { ...entry, bounds };
+    if (store.settings.arrangeQuality) out.channel = channelForTile(bounds.width * display.scaleFactor);
+    const cam = connections.get(c.key.split("/")[0])?.camera(c.key.split("/")[1]);
+    const fisheye = cam ? fisheyeInfo(cam).fisheye : !!entry.dewarp;
+    if (fisheye) {
+      const base = entry.dewarp ?? defaultDewarp(cam ? fisheyeInfo(cam).mount : "ceiling");
+      out.dewarp = { ...structuredClone(base), mode: c.mode === "single" ? "quad" : c.mode, focus: c.mode === "single" ? Math.max(0, base.focus ?? 0) : -1 };
+    }
+    windows[c.key] = out;
+  });
+  if (!Object.keys(windows).length) throw new Error("Drag at least one camera into the layout.");
+  const id = putLayout(input?.name, windows, {
+    replaceId: typeof input?.id === "string" ? input.id : null,
+    editor: { displayId: display.id, templateId: tpl.id, cells },
+  });
+  if (input?.apply) applyLayout(id);
+  return id;
 }
 
 function cameraTitle(key) {
@@ -1000,7 +1069,8 @@ function managerState() {
     settings: { ...store.settings },
     hiddenCount: hiddenKeys().length,
     shownCount: shown(),
-    layouts: store.data.layouts.map((l) => ({ id: l.id, name: l.name, count: Object.keys(l.windows).length })),
+    layouts: store.data.layouts.map((l) => ({ id: l.id, name: l.name, count: Object.keys(l.windows).length, editor: l.editor ?? null })),
+    screens: screensForEditor(),
     templates: TEMPLATES.map((t) => ({ id: t.id, label: t.label, cols: t.cols ?? null, rows: t.rows ?? null, cells: t.cells ?? null })),
     onScreenCount: onScreenWindows().length,
     update: { status: updater?.state.status, version: updater?.state.version, message: updater?.state.message, current: app.getVersion() },
@@ -1148,6 +1218,7 @@ function registerIpc() {
   handle("mgr:check-update", () => updater.check({ download: true }).then(() => undefined));
   handle("mgr:install-update", () => installUpdate());
   handle("mgr:save-layout", (name) => saveCurrentLayout(name));
+  handle("mgr:save-editor-layout", (input) => saveEditorLayout(input));
   handle("mgr:apply-layout", (id) => applyLayout(String(id)));
   handle("mgr:delete-layout", (id) => deleteLayout(String(id)));
   handle("mgr:import-liveview", ({ consoleId, liveviewId } = {}) => importLiveview(String(consoleId), String(liveviewId)));

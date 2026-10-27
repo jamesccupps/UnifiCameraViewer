@@ -726,6 +726,89 @@ async function arrangeSuite() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Layout editor: drag cameras into a template's tiles (synthetic DnD events on the real dialog),
+// pick a 360° view per tile, save and apply, reopen with Edit, fill from what's on screen.
+
+async function editorSuite() {
+  console.log("\nLayout editor suite (mock consoles + a 360 camera)");
+  const A = "aaaaaaaa-0000-4000-8000-000000000001";
+  const B = "bbbbbbbb-0000-4000-8000-000000000002";
+  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, fish: `${A}/aaaaaaaa-cam360`, ramp: `${B}/bbbbbbbb-cam0` };
+  const userData = tmpDir("editor");
+  const results = path.join(userData, "results");
+  fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [
+      { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock"] },
+      { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp"], mockFisheye: false },
+    ],
+    windows: {
+      [keys.lobby]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 },
+      [keys.dock]: { open: true, bounds: { x: 0, y: 290, width: 480, height: 270 }, channel: 2 },
+    },
+    settings: { startHidden: false },
+  }, null, 2));
+  const helpers = `
+    const drop = (i, key) => { const dt = new DataTransfer(); dt.setData("text/x-protect-panes-camera", key);
+      document.querySelector('[data-cell="' + i + '"]').dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true })); };
+    const cells = () => [...document.querySelectorAll("#editor-preview .cell")].map((c) => c.querySelector("b")?.textContent ?? null);`;
+  const build = `(() => { ${helpers}
+    document.querySelector('[data-tab="layouts"]').click();
+    document.getElementById("btn-new-layout").click();
+    document.getElementById("editor-name").value = "Wall";
+    const t = document.getElementById("editor-template"); t.value = "1+5"; t.dispatchEvent(new Event("change"));
+    drop(0, ${JSON.stringify(keys.fish)});
+    const v = document.querySelector('[data-cell="0"] select'); v.value = "panorama"; v.dispatchEvent(new Event("change"));
+    drop(3, ${JSON.stringify(keys.ramp)});
+    drop(5, ${JSON.stringify(keys.ramp)}); // dropping a placed camera again moves it
+    return cells(); })()`;
+  const apply = `(() => { document.getElementById("editor-form").requestSubmit(document.getElementById("editor-apply")); return true; })()`;
+  const reopen = `(() => { ${helpers}
+    const li = [...document.querySelectorAll("#layout-list li")].find((l) => l.querySelector("b")?.textContent === "Wall");
+    [...li.querySelectorAll("button")].find((b) => b.textContent === "Edit").click();
+    const out = { template: document.getElementById("editor-template").value, cells: cells(), view: document.querySelector('[data-cell="0"] select')?.value };
+    document.getElementById("editor-cancel").click();
+    return out; })()`;
+  const fill = `(() => { ${helpers}
+    document.getElementById("btn-new-layout").click();
+    document.getElementById("editor-fill").click();
+    const out = cells().filter(Boolean);
+    document.getElementById("editor-cancel").click();
+    return out; })()`;
+  const { result, config } = await runApp({
+    userData, results, seconds: 13, extraArgs: ["--mock"],
+    env: {
+      PANES_MOCK_FISHEYE: path.join(FIXTURES, "fisheye-ceiling.png"),
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 3000, do: "manager-js", js: build },
+        { at: 3600, do: "manager-js", js: apply },
+        { at: 9000, do: "manager-js", js: reopen },
+        { at: 9600, do: "manager-js", js: fill },
+      ]),
+    },
+  });
+  const [built, applied, reopened, filled] = result.actions.map((a) => a.value ?? { error: a.error });
+  const layout = config.layouts?.find((l) => l.name === "Wall");
+  check("dragging cameras into tiles places them (and re-dropping moves one)",
+    JSON.stringify(built) === JSON.stringify(["Building 360", null, null, null, null, "Garage Ramp"]), JSON.stringify(built));
+  check("Save and apply stored the layout with its editor settings",
+    applied === true && layout && Object.keys(layout.windows).sort().join() === [keys.fish, keys.ramp].sort().join() && layout.editor?.templateId === "1+5",
+    JSON.stringify(layout?.editor ?? layout ?? applied));
+  check("the 360° tile kept its chosen view (Panorama)", layout?.windows[keys.fish]?.dewarp?.mode === "panorama", JSON.stringify(layout?.windows[keys.fish]?.dewarp?.mode));
+  const end = last(result);
+  const big = end[keys.fish]?.bounds;
+  const small = end[keys.ramp]?.bounds;
+  check("applying opened exactly the layout's cameras, the first tile big",
+    Object.keys(end).sort().join() === [keys.fish, keys.ramp].sort().join() && big && small && big.width > 1.7 * small.width && big.x < small.x,
+    JSON.stringify({ open: Object.keys(end), big, small }));
+  check("the 360 window shows Panorama after apply", end[keys.fish]?.dewarp?.mode === "panorama" && end[keys.fish]?.status === "live", JSON.stringify(end[keys.fish]?.dewarp));
+  check("Edit reopens the editor with the saved grid, tiles and view",
+    reopened?.template === "1+5" && reopened?.cells?.[0] === "Building 360" && reopened?.cells?.[5] === "Garage Ramp" && reopened?.view === "panorama", JSON.stringify(reopened));
+  check("Use what's on screen fills tiles with the open windows in reading order", JSON.stringify(filled) === JSON.stringify(["Building 360", "Garage Ramp"]), JSON.stringify(filled));
+  console.log(`  results: ${results}`);
+}
+
+// ---------------------------------------------------------------------------------------------
 // Color range: several UniFi cameras send full-range luma without flagging it, and Chromium then
 // crushes everything below 16 to black. src/avc-range.js rewrites the SPS to say full range.
 
@@ -940,6 +1023,7 @@ try {
   if (suite === "range" || suite === "all") await runSuite(rangeSuite);
   if (suite === "layouts" || suite === "all") await runSuite(layoutsSuite);
   if (suite === "arrange" || suite === "all") await runSuite(arrangeSuite);
+  if (suite === "editor" || suite === "all") await runSuite(editorSuite);
   if (suite === "update" || suite === "all") await runSuite(updateSuite);
   if (suite === "e2e" || suite === "all") await runSuite(e2eSuite);
 } catch (err) {

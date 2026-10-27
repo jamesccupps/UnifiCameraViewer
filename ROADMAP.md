@@ -143,7 +143,11 @@ Open:
 
 ## 10. Layout editor (exacqVision-style)
 
-**Status:** next. Pick a screen and a layout, then drag cameras from the list into cells, or start from what's on screen. Each 360° camera gets a view choice per cell (Quad default, Single, Panorama, Fisheye). Saves a named layout, optionally applying it.
+**Status:** built (2026-10-27), unreleased.
+- Pick a screen and a layout, then drag cameras from the list into tiles (or double-click them), swap tiles by dragging, or start from what's on screen.
+- Each 360° camera gets a view per tile: Quad (default), Single, Panorama or Fisheye.
+- Save, or save and apply. Edit reopens it.
+- `npm run test:editor` covers it.
 
 ## 11. Easier camera list
 
