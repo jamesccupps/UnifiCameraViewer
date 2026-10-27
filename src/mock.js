@@ -80,7 +80,9 @@ class MockCamera {
   }
 
   livestream({ source, signal }) {
-    const restartSec = this.index === 0 ? Number(process.env.PANES_MOCK_RESTART_SEC || 0) : 0;
+    // Once per camera: a later subscription (quality change, Show cameras) must not be cut off again.
+    const restartSec = this.index === 0 && !this.restartUsed ? Number(process.env.PANES_MOCK_RESTART_SEC || 0) : 0;
+    if (restartSec) this.restartUsed = true;
     return new MockSubscription({ channel: source?.channel ?? 0, hue: this.index * 70, label: this.name, signal, restartSec, image: this.image, shadows: this.shadows });
   }
 }

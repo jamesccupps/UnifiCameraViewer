@@ -105,6 +105,22 @@ function renderConsole(c) {
           title: "Take this console's camera windows off the screen; Restore puts them back",
           onclick: () => panes.invoke("mgr:hide-cameras", c.id).then(refresh),
         }, "Hide all"),
+      el("select", {
+        class: "small", "aria-label": `Quality for every camera on ${c.name}`, "data-focus-key": `qa-${c.id}`,
+        disabled: c.state !== "connected",
+        title: "Set every camera on this console, open or not, to one quality",
+        onchange: async (e) => {
+          const channel = Number(e.target.value);
+          e.target.value = "";
+          if (!Number.isInteger(channel)) return;
+          if (channel === 0 && c.shownCount > 6
+            && !confirm(`Switch all ${c.cameras.length} cameras on ${c.name} to High? Decoding many High streams at once can overload integrated graphics.`)) return;
+          await panes.invoke("mgr:apply-all", { consoleId: c.id, changes: { channel } });
+          refresh();
+        },
+      },
+      el("option", { value: "", selected: true }, "Quality for all…"),
+      ...["High", "Medium", "Low"].map((n, id) => el("option", { value: String(id) }, n))),
       el("button", { class: "small", onclick: () => openDialog(c) }, "Edit"),
       el("button", { class: "small", onclick: () => panes.invoke("mgr:reconnect", c.id).then(refresh) }, "Reconnect"),
       el("button", {

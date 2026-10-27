@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, screen, Tray } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CameraStream } from "./camera-stream.js";
@@ -461,6 +461,106 @@ function setChannel(cw, channel) {
 }
 
 const RANGES = ["auto", "full", "limited"];
+const RANGE_LABELS = { auto: "Auto (recommended)", full: "Full (0-255)", limited: "Limited (16-235)" };
+const HIGH = 0;              // Protect's channel ids: 0 High, 1 Medium, 2 Low
+const HIGH_WARN_WINDOWS = 6; // more High streams than this can swamp integrated-graphics decode
+
+// ---------------------------------------------------------------------------------------------
+// Apply to all cameras: copy per-window settings to every camera, open or not, so cameras
+// opened later start with them too.
+
+function allCameraKeys(consoleId = null) {
+  const keys = new Set(Object.keys(store.data.windows).filter((k) => !consoleId || k.startsWith(`${consoleId}/`)));
+  for (const [id, conn] of connections) {
+    if (consoleId && id !== consoleId) continue;
+    for (const cam of conn.cameras()) keys.add(`${id}/${cam.id}`);
+  }
+  return [...keys];
+}
+
+/** Keep only known settings with valid values; the camera list sends these over IPC. */
+function cleanChanges(c) {
+  const out = {};
+  if (Number.isInteger(c?.channel) && c.channel >= 0 && c.channel < 10) out.channel = c.channel;
+  for (const k of ["onTop", "hideName", "clock"]) if (typeof c?.[k] === "boolean") out[k] = c[k];
+  if (RANGES.includes(c?.range)) out.range = c.range;
+  return out;
+}
+
+function applyToAll(changes, consoleId = null) {
+  changes = cleanChanges(changes);
+  for (const key of allCameraKeys(consoleId)) {
+    const entry = (store.data.windows[key] ??= { open: false, bounds: null, channel: null, onTop: false, name: "" });
+    const cw = camWins.get(key);
+    let restart = false;
+    if ("channel" in changes && entry.channel !== changes.channel) { entry.channel = changes.channel; restart = true; }
+    if ("range" in changes && (entry.range ?? "auto") !== changes.range) {
+      if (changes.range === "auto") delete entry.range;
+      else entry.range = changes.range;
+      restart = true;
+    }
+    if ("onTop" in changes) {
+      entry.onTop = changes.onTop;
+      cw?.win.setAlwaysOnTop(changes.onTop, "floating");
+    }
+    if ("hideName" in changes) {
+      if (changes.hideName) entry.hideName = true;
+      else delete entry.hideName;
+    }
+    if ("clock" in changes) entry.clock = changes.clock;
+    if (!cw || cw.win.isDestroyed()) continue;
+    if (restart) {
+      cw.stream.restart(); // a hidden window's paused stream stays paused and picks this up on Show
+      setTimeout(() => refreshCameraMeta(cw), 50);
+    } else {
+      refreshCameraMeta(cw);
+    }
+  }
+  store.save();
+  notifyManager();
+}
+
+const onScreenCount = () => [...camWins.values()].filter((cw) => !store.data.windows[cw.key]?.hidden).length;
+
+/** From a camera's right-click menu; asks first before putting many windows on High. */
+async function applyToAllFromWindow(cw, changes) {
+  if (changes.channel === HIGH && onScreenCount() > HIGH_WARN_WINDOWS) {
+    const { response } = await dialog.showMessageBox(cw.win, {
+      type: "warning",
+      buttons: ["Switch to High", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      message: `Switch all ${onScreenCount()} open cameras to High?`,
+      detail: "High streams are up to 4K. Decoding many at once can overload integrated graphics and make every window stutter.",
+    });
+    if (response !== 0) return;
+  }
+  applyToAll(changes);
+}
+
+function applyAllMenu(cw) {
+  const entry = store.data.windows[cw.key] ?? {};
+  const meta = cameraMeta(cw);
+  const chan = meta.channels.find((c) => c.id === meta.channel);
+  const onOff = (v) => (v ? "on" : "off");
+  const values = {
+    ...(chan ? { channel: chan.id } : {}),
+    onTop: !!entry.onTop,
+    hideName: !!entry.hideName,
+    clock: showClock(entry),
+    range: entry.range ?? "auto",
+  };
+  const item = (label, changes, extra = {}) => ({ label, click: () => applyToAllFromWindow(cw, changes), ...extra });
+  return [
+    ...(chan ? [item(`Quality: ${chan.label.split(" · ")[0]}`, { channel: chan.id })] : []),
+    item(`Always on top: ${onOff(values.onTop)}`, { onTop: values.onTop }),
+    item(`Show name: ${onOff(!values.hideName)}`, { hideName: values.hideName }),
+    item(`Show time: ${onOff(values.clock)}`, { clock: values.clock }),
+    item(`Color range: ${RANGE_LABELS[values.range].replace(" (recommended)", "")}`, { range: values.range }),
+    { type: "separator" },
+    item("All of the above", values),
+  ];
+}
 
 function setRange(cw, range) {
   const entry = store.data.windows[cw.key];
@@ -572,12 +672,9 @@ function cameraContextMenuTemplate(cw) {
     { label: meta.fisheye ? "360° view" : "360° view (fisheye lens)", submenu: dewarpMenu(cw) },
     {
       label: "Color range",
-      submenu: [
-        ["auto", "Auto (recommended)"],
-        ["full", "Full (0-255)"],
-        ["limited", "Limited (16-235)"],
-      ].map(([id, label]) => ({ label, type: "radio", checked: (entry.range ?? "auto") === id, click: () => setRange(cw, id) })),
+      submenu: RANGES.map((id) => ({ label: RANGE_LABELS[id], type: "radio", checked: (entry.range ?? "auto") === id, click: () => setRange(cw, id) })),
     },
+    { label: "Apply to all cameras", submenu: applyAllMenu(cw) },
     { type: "separator" },
     { label: "Always on top", type: "checkbox", checked: !!entry.onTop, click: () => toggleOnTop(cw) },
     { label: "Show name", type: "checkbox", checked: meta.showNames, enabled: !!store.settings.showNames, click: () => toggleName(cw) },
@@ -636,7 +733,7 @@ function showManager() {
     return;
   }
   managerWin = new BrowserWindow({
-    width: 760,
+    width: 860,
     height: 640,
     minWidth: 560,
     minHeight: 420,
@@ -798,6 +895,7 @@ function registerIpc() {
     store.save();
   });
   handle("mgr:set-setting", ({ name, value } = {}) => setSetting(String(name), value));
+  handle("mgr:apply-all", ({ consoleId, changes } = {}) => applyToAll(changes, consoleId ? String(consoleId) : null));
   handle("mgr:bring-to-front", () => bringAllToFront());
   handle("mgr:reset-positions", () => tileOpenWindows());
   handle("mgr:open-all", (consoleId) => {

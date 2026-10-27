@@ -27,6 +27,7 @@ Then, in Protect Panes, click **Add console**. Enter a name ("Building"), the co
 - In the camera list, flip a camera's switch to open its window. **Show all** opens every camera on that console.
 - **Move** a window by hovering over it and dragging the bar that appears at the top. **Resize** from any edge. With **Keep video shape** on, windows snap to the camera's aspect ratio so there are no black bars.
 - **Right-click** a camera for quality (High / Medium / Low), Always on top, Lock layout, Reconnect, or Close.
+- **Right-click → Apply to all cameras** copies that window's quality, always on top, name, time or color range to every camera on both consoles, including ones you haven't opened yet. In the camera list, **Quality for all…** sets one console's cameras at once.
 - **Hide cameras** (tray menu or the top of the camera list) takes every camera window off the screen and pauses its video. **Show cameras** puts exactly those windows back where they were, even after a restart. Each console also has **Hide all** / **Restore** for just its own cameras.
 - Small windows shrink the name label to just the status dot. **Right-click → Show name** turns the label off for one window; **Show camera names** in settings turns it off everywhere.
 - **Lock layout** (tray menu, right-click menu, or settings) stops windows from being moved or resized and hides the hover bar. Use it once everything is placed.

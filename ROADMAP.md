@@ -51,7 +51,13 @@ Recommend (a), on by default in dewarp modes only, with a per-window toggle and 
 
 ## 4. Apply to all cameras
 
-**Status:** not built. Today quality (`channel`), always-on-top and dewarp settings are per window, set from the right-click menu or the camera-list dropdown.
+**Status:** built (2026-10-27), unreleased.
+- Right-click → **Apply to all cameras** copies quality, always on top, show name, show time and color range, one at a time or all of them, to every camera on every console, including ones never opened.
+- The camera list has **Quality for all…** per console.
+- Applying High with more than 6 windows on screen asks first. Dewarp settings aren't copied, since they're per lens.
+- `npm test` covers it (mock and hide suites).
+
+Original notes: quality (`channel`), always-on-top and dewarp settings were per window only.
 
 - Add **Apply to all** at two scopes: per console (in its card) and global. Settings: quality, always on top, name label (once per-window exists, #2), and the clock (#3).
 - Guard: High on dozens of cameras will saturate Intel iGPU decode. A two-console site can easily have 50+ cameras. Show the count and confirm before applying High.

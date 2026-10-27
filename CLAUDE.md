@@ -69,7 +69,7 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
 
 - **Camera → main:** `cam:ready`, `cam:aspect {width,height}`, `cam:reset`, `cam:context-menu`, `cam:toggle-top`, `cam:close`, `cam:dewarp {views?, pano?, focus?, circle?}`
 - **Main → camera:** `cam:init`, `cam:media`, `cam:status`, `cam:meta`, `cam:highlight`, `cam:command {cmd: "calibrate" | "autodetect"}`
-- **Camera list (invoke):** `mgr:state`, `mgr:save-console`, `mgr:remove-console`, `mgr:reconnect`, `mgr:open-camera`, `mgr:close-camera`, `mgr:find-camera`, `mgr:set-channel`, `mgr:set-setting`, `mgr:bring-to-front`, `mgr:reset-positions`, `mgr:open-all`, `mgr:hide-cameras consoleId|null`, `mgr:show-cameras consoleId|null`, `mgr:quit`
+- **Camera list (invoke):** `mgr:state`, `mgr:save-console`, `mgr:remove-console`, `mgr:reconnect`, `mgr:open-camera`, `mgr:close-camera`, `mgr:find-camera`, `mgr:set-channel`, `mgr:set-setting`, `mgr:bring-to-front`, `mgr:reset-positions`, `mgr:open-all`, `mgr:hide-cameras consoleId|null`, `mgr:show-cameras consoleId|null`, `mgr:apply-all {consoleId|null, changes}`, `mgr:quit`. `changes` goes through `cleanChanges()`, which keeps only `channel`, `onTop`, `hideName`, `clock` and `range`.
 - **Main → camera list:** `mgr:changed` (throttled). The list also polls every 3 s while visible, for online/offline status.
 
 ## Config and logs
@@ -113,6 +113,11 @@ Passwords are DPAPI-encrypted (`safeStorage`) and tied to the Windows user. `enc
   - It shows only while the stream is live: a ticking clock over a frozen picture would claim it's live.
   - It hides when it would take more than 45% of the window width (below the label's 50%, so the two never overlap).
   - It's PC time, not NVR time.
+- **Apply to all.** There are two entry points:
+  - Right-click → Apply to all cameras copies this window's current value for quality, always on top, show name, show time and color range (one at a time or all of them) to every camera on every console.
+  - The camera list's per-console "Quality for all…" does the same for quality only.
+  - `allCameraKeys()` includes cameras that have never been opened. They get a window entry with `open: false`, so they open with the setting later.
+  - Applying High with more than 6 windows on screen asks first.
 - **Hidden vs closed vs minimized.**
   - Hide cameras (tray, list header) and Hide all (per console) apply to the windows on screen; minimized ones are skipped. Each window gets `win.hide()` plus `CameraStream.pause()`, so its renderer stays alive and Show only waits for a keyframe.
   - At launch, hidden windows aren't created at all. Show cameras creates them.

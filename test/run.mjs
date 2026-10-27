@@ -92,7 +92,7 @@ async function mockSuite() {
   fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
     version: 1,
     consoles: [
-      { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock"] },
+      { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Stair"] },
       { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp"] },
     ],
     windows: {
@@ -117,9 +117,11 @@ async function mockSuite() {
     { at: 9000, do: "menu-click", win: 3, label: "Show name" },
     { at: 9500, do: "menu-click", win: 0, label: "Show time" },
     { at: 9500, do: "menu-click", win: 1, label: "Show time" },
+    { at: 10500, do: "menu-click", win: 0, label: "Quality: Medium" },
+    { at: 11000, do: "menu-click", win: 0, label: "Show time: on" },
   ];
   const { result, config } = await runApp({
-    userData, results, seconds: 14, extraArgs: ["--mock"],
+    userData, results, seconds: 16, extraArgs: ["--mock"],
     env: { PANES_MOCK_FISHEYE: path.join(FIXTURES, "fisheye-ceiling.png"), PANES_MOCK_RESTART_SEC: "5", PANES_SELFTEST_ACTIONS: JSON.stringify(actions) },
   });
   const cams = last(result);
@@ -167,6 +169,16 @@ async function mockSuite() {
   check("normal cameras don't get the app's clock by default", beforeClock[keys.lobby]?.clock?.wanted === false && beforeClock[keys.ramp]?.clock?.shown === false, clk(beforeClock[keys.lobby]));
   check("Show time in the menu turns the clock on and saves it", clockOk(cams[keys.lobby]) && config.windows[keys.lobby]?.clock === true, `${clk(cams[keys.lobby])} clock=${config.windows[keys.lobby]?.clock}`);
   check("clock stays off on a window too small for it", cams[keys.dock]?.clock?.wanted === true && cams[keys.dock]?.clock?.shown === false, clk(cams[keys.dock]));
+
+  const applied = result.actions.filter((a) => a.act.label?.startsWith("Quality:") || a.act.label?.startsWith("Show time:"));
+  const stair = `${A}/aaaaaaaa-cam2`;
+  check("Apply to all menu items ran", applied.length === 2 && applied.every((a) => a.ok), JSON.stringify(applied.map((a) => a.error ?? a.act.label)));
+  check("Apply to all: Quality saved for every camera, including one never opened",
+    [...Object.values(keys), stair].every((k) => config.windows[k]?.channel === 1) && config.windows[stair]?.open === false,
+    JSON.stringify([...Object.values(keys), stair].map((k) => config.windows[k]?.channel)));
+  check("Apply to all: open windows switched to the Medium stream", Object.values(keys).every((k) => cams[k]?.videoWidth === 1280 && cams[k]?.status === "live"),
+    JSON.stringify(Object.values(keys).map((k) => `${cams[k]?.videoWidth}/${cams[k]?.status}`)));
+  check("Apply to all: Show time on for every window", Object.values(keys).every((k) => cams[k]?.clock?.wanted === true && config.windows[k]?.clock === true));
   console.log(`  results: ${results}`);
 }
 
@@ -201,6 +213,14 @@ async function hideSuite() {
     btn?.click();
     return !!btn;
   })()`;
+  const setQualityForAll = (consoleName, channel) => `(() => {
+    const card = [...document.querySelectorAll("article.panel")].find((a) => a.querySelector(".console-head b")?.textContent === ${JSON.stringify(consoleName)});
+    const sel = card?.querySelector(".console-head select");
+    if (!sel) return false;
+    sel.value = ${JSON.stringify(String(channel))};
+    sel.dispatchEvent(new Event("change"));
+    return true;
+  })()`;
   const readButtons = `(() => ({
     header: document.getElementById("btn-hide").textContent,
     garage: [...[...document.querySelectorAll("article.panel")].find((a) => a.querySelector(".console-head b")?.textContent === "Garage").querySelectorAll("button")].map((b) => b.textContent),
@@ -214,6 +234,7 @@ async function hideSuite() {
         { at: 3000, do: "manager-js", js: clickInCard("Garage", "Hide all") },
         { at: 4500, do: "manager-js", js: readButtons },
         { at: 5000, do: "tray-click", label: "Show cameras" },
+        { at: 6000, do: "manager-js", js: setQualityForAll("Garage", 1) },
         { at: 8500, do: "tray-click", label: "Hide cameras" },
         { at: 9500, do: "tray-click", label: "Bring cameras to front" },
       ]),
@@ -244,6 +265,10 @@ async function hideSuite() {
     `status=${afterShow[keys.ramp]?.status} ${JSON.stringify(afterShow[keys.ramp]?.bounds)} vs ${JSON.stringify(firstSample[keys.ramp]?.bounds)}`);
   check("Hide cameras hid every window, and Bring to front left them hidden",
     Object.values(keys).every((k) => end1[k]?.visible === false && end1[k]?.status === "paused"), vis(end1));
+  const qa = run1.result.actions.find((a) => a.act.js?.includes("console-head select"));
+  check("camera list Quality for all set only that console's cameras",
+    qa?.value === true && run1.config.windows[keys.ramp]?.channel === 1 && run1.config.windows[keys.lobby]?.channel === 2 && run1.config.windows[keys.dock]?.channel === 2,
+    qa?.error ?? JSON.stringify(Object.values(keys).map((k) => run1.config.windows[k]?.channel)));
   check("hidden windows saved as open + hidden", Object.values(keys).every((k) => run1.config.windows[k]?.open === true && run1.config.windows[k]?.hidden === true),
     JSON.stringify(Object.values(keys).map((k) => run1.config.windows[k])));
 

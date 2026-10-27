@@ -44,6 +44,8 @@ select {
   border-radius: 6px;
   padding: 3px 6px;
 }
+select.small { font-size: 12px; }
+select:disabled { opacity: 0.5; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .top, .bottom {
@@ -76,8 +78,9 @@ main { flex: 1; overflow: auto; padding: 16px 18px; display: flex; flex-directio
 
 /* Console card */
 .console-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.console-head .title { display: flex; align-items: baseline; gap: 8px; flex: 1; min-width: 0; }
-.console-head .title b { font-size: 14px; }
+/* The title keeps a floor so a narrow list wraps the buttons to a second row instead of eating the name. */
+.console-head .title { display: flex; align-items: baseline; gap: 8px; flex: 1; min-width: 160px; }
+.console-head .title b { font-size: 14px; white-space: nowrap; }
 .console-head .title span { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .console-head .buttons { display: flex; gap: 6px; }
 .console-msg { margin: 6px 0 0 18px; color: var(--muted); font-size: 12px; }
