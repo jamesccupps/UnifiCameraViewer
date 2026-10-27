@@ -35,8 +35,14 @@ let updater = null;
 let previews = null;
 
 const connections = new Map(); // consoleId -> ConsoleConnection
-const camWins = new Map();     // key "<consoleId>/<cameraId>" -> { key, consoleId, cameraId, win, stream, aspect }
-const senders = new Map();     // webContents.id -> key
+const camWins = new Map();     // key "<consoleId>/<cameraId>" -> player of that camera's window
+const senders = new Map();     // webContents.id -> player
+
+// A player is one camera page and its stream: { key, consoleId, cameraId, win, wc, stream, aspect }.
+// Per-camera settings (quality, 360° view, picture...) live in store.data.windows[key]; entryOf()
+// is the one place that knows where a player's settings are.
+const entryOf = (cw) => store.data.windows[cw.key];
+const players = () => [...camWins.values()];
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -115,7 +121,7 @@ function startConnection(cfg, MockConnection = null) {
     : new ConsoleConnection(cfg, () => decryptPassword(cfg.password, (plain) => reEncryptPassword(cfg, plain)), log.child(cfg.name || cfg.host));
   conn.on("state", () => {
     notifyManager();
-    for (const cw of camWins.values()) {
+    for (const cw of players()) {
       if (cw.consoleId !== cfg.id) continue;
       cw.stream?.kick();
       if (conn.state === "connected") refreshCameraMeta(cw);
@@ -230,9 +236,9 @@ function openCameraWindow(key, { focus = false, flash = true } = {}) {
   });
 
   const wcId = win.webContents.id;
-  const cw = { key, consoleId, cameraId, win, stream: null, aspect: null };
+  const cw = { key, consoleId, cameraId, win, wc: win.webContents, stream: null, aspect: null };
   camWins.set(key, cw);
-  senders.set(wcId, key);
+  senders.set(wcId, cw);
 
   cw.stream = new CameraStream({
     getConnection: () => connections.get(consoleId),
@@ -591,7 +597,7 @@ function consoleName(consoleId) {
 }
 
 function cameraMeta(cw) {
-  const entry = store.data.windows[cw.key] ?? {};
+  const entry = entryOf(cw) ?? {};
   const conn = connections.get(cw.consoleId);
   const cam = conn?.camera(cw.cameraId);
   const multi = store.data.consoles.length > 1;
@@ -641,7 +647,7 @@ function defaultDewarp(mount, mode = "quad") {
 
 /** First time a 360° camera is shown, switch it to quad view with the mount Protect reports. */
 function ensureDewarp(cw, cam) {
-  const entry = store.data.windows[cw.key];
+  const entry = entryOf(cw);
   if (!entry || entry.dewarp !== undefined || !cam) return;
   const info = fisheyeInfo(cam);
   entry.dewarp = info.fisheye ? defaultDewarp(info.mount) : null;
@@ -649,7 +655,7 @@ function ensureDewarp(cw, cam) {
 }
 
 function updateDewarp(cw, changes) {
-  const entry = store.data.windows[cw.key];
+  const entry = entryOf(cw);
   if (!entry) return;
   const cam = connections.get(cw.consoleId)?.camera(cw.cameraId);
   const d = entry.dewarp ?? defaultDewarp(cam ? fisheyeInfo(cam).mount : "ceiling", "off");
@@ -675,7 +681,7 @@ const angle = (v) => {
 
 /** Merge pan/tilt/zoom, focus and circle edits coming back from a camera window. */
 function saveDewarpFromRenderer(cw, patch) {
-  const d = store.data.windows[cw.key]?.dewarp;
+  const d = entryOf(cw)?.dewarp;
   if (!d || !patch || typeof patch !== "object") return;
   if (Array.isArray(patch.views) && patch.views.length === 4) {
     const views = patch.views.map((v) => ({ pan: angle(v?.pan), tilt: num(v?.tilt, -90, 90), fov: num(v?.fov, 10, 120) }));
@@ -709,7 +715,7 @@ function cleanPicture(p) {
 }
 
 function savePictureFromRenderer(cw, patch) {
-  const entry = store.data.windows[cw.key];
+  const entry = entryOf(cw);
   const pic = cleanPicture(patch);
   if (!entry || pic === undefined) return;
   if (pic) entry.picture = pic;
@@ -720,15 +726,15 @@ function savePictureFromRenderer(cw, patch) {
 const pictureLabel = (p) => (p ? `${Math.round(p.brightness * 100)}% brightness, ${Math.round(p.contrast * 100)}% contrast` : "normal");
 
 function sendCommand(cw, cmd) {
-  if (!cw.win.isDestroyed()) cw.win.webContents.send("cam:command", { cmd });
+  if (!cw.wc.isDestroyed()) cw.wc.send("cam:command", { cmd });
 }
 
 function dewarpMenu(cw) {
-  const d = store.data.windows[cw.key]?.dewarp ?? null;
+  const d = entryOf(cw)?.dewarp ?? null;
   const mode = d?.mode ?? "off";
   const setMode = (m) => updateDewarp(cw, { mode: m, focus: -1 });
   const needsConfig = (fn) => () => {
-    if (!store.data.windows[cw.key]?.dewarp) updateDewarp(cw, {});
+    if (!entryOf(cw)?.dewarp) updateDewarp(cw, {});
     fn();
   };
   // Single view is quad with one view enlarged (the same state double-click toggles).
@@ -764,18 +770,18 @@ function dewarpMenu(cw) {
 }
 
 function refreshCameraMeta(cw) {
-  if (cw.win.isDestroyed()) return;
+  if (cw.wc.isDestroyed()) return;
   const meta = cameraMeta(cw);
-  cw.win.setTitle(meta.title);
-  cw.win.webContents.send("cam:meta", meta);
+  if (camWins.get(cw.key) === cw) cw.win.setTitle(meta.title);
+  cw.wc.send("cam:meta", meta);
 }
 
 function highlight(cw) {
-  if (!cw.win.isDestroyed()) cw.win.webContents.send("cam:highlight");
+  if (!cw.wc.isDestroyed()) cw.wc.send("cam:highlight");
 }
 
 function setChannel(cw, channel) {
-  const entry = store.data.windows[cw.key];
+  const entry = entryOf(cw);
   if (!entry || !Number.isInteger(channel)) return;
   entry.channel = channel;
   store.save();
@@ -870,7 +876,7 @@ async function applyToAllFromWindow(cw, changes) {
 }
 
 function applyAllMenu(cw) {
-  const entry = store.data.windows[cw.key] ?? {};
+  const entry = entryOf(cw) ?? {};
   const meta = cameraMeta(cw);
   const chan = meta.channels.find((c) => c.id === meta.channel);
   const onOff = (v) => (v ? "on" : "off");
@@ -896,7 +902,7 @@ function applyAllMenu(cw) {
 }
 
 function setRange(cw, range) {
-  const entry = store.data.windows[cw.key];
+  const entry = entryOf(cw);
   if (!entry || !RANGES.includes(range)) return;
   if (range === "auto") delete entry.range;
   else entry.range = range;
@@ -905,7 +911,7 @@ function setRange(cw, range) {
 }
 
 function toggleOnTop(cw) {
-  const entry = store.data.windows[cw.key];
+  const entry = entryOf(cw);
   entry.onTop = !entry.onTop;
   cw.win.setAlwaysOnTop(entry.onTop, "floating");
   store.save();
@@ -918,14 +924,14 @@ function toggleOnTop(cw) {
 const showClock = (entry) => entry.clock ?? ["quad", "panorama"].includes(entry.dewarp?.mode);
 
 function toggleClock(cw) {
-  const entry = store.data.windows[cw.key];
+  const entry = entryOf(cw);
   entry.clock = !showClock(entry);
   store.save();
   refreshCameraMeta(cw);
 }
 
 function toggleName(cw) {
-  const entry = store.data.windows[cw.key];
+  const entry = entryOf(cw);
   entry.hideName = !entry.hideName;
   store.save();
   refreshCameraMeta(cw);
@@ -990,7 +996,7 @@ function cameraContextMenu(cw) {
 }
 
 function cameraContextMenuTemplate(cw) {
-  const entry = store.data.windows[cw.key] ?? {};
+  const entry = entryOf(cw) ?? {};
   const meta = cameraMeta(cw);
   const template = [
     { label: meta.consoleName ? `${meta.title} - ${meta.consoleName}` : meta.title, enabled: false },
@@ -1050,7 +1056,7 @@ function setSetting(name, value) {
       if (!value) previews.clear();
       break;
   }
-  for (const cw of camWins.values()) refreshCameraMeta(cw);
+  for (const cw of players()) refreshCameraMeta(cw);
   notifyManager();
 }
 
@@ -1241,10 +1247,7 @@ function updateTrayMenu() {
 // IPC
 
 function registerIpc() {
-  const fromCamera = (e) => {
-    const key = senders.get(e.sender.id);
-    return key ? camWins.get(key) : null;
-  };
+  const fromCamera = (e) => senders.get(e.sender.id) ?? null;
 
   ipcMain.on("cam:ready", (e) => {
     const cw = fromCamera(e);
