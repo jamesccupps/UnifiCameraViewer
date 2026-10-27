@@ -230,11 +230,15 @@ function openCameraWindow(key, { focus = false, flash = true } = {}) {
   if (process.env.PANES_DEVTOOLS === "1") win.webContents.openDevTools({ mode: "detach" });
   // Never steal focus from whatever the operator is using (exacqVision etc.).
   win.once("ready-to-show", () => { if (focus) win.show(); else win.showInactive(); });
+  // Arrange and the editor's "Use what's on screen" count only visible windows, per screen. The
+  // notify at the end of openCamera comes before ready-to-show, so tell the list on each change.
+  for (const ev of ["show", "hide", "minimize", "restore"]) win.on(ev, notifyManager);
 
   const saveBounds = debounce(() => {
     if (win.isDestroyed() || win.isMinimized() || win.isMaximized()) return;
     entry.bounds = win.getBounds();
     store.save();
+    notifyManager(); // it may be on another screen now
   }, 250);
   win.on("move", saveBounds);
   win.on("resize", saveBounds);
