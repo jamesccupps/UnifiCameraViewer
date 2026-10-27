@@ -7,6 +7,22 @@ import path from "node:path";
  * waits, then saves a screenshot of every window plus each camera window's playback stats
  * (lag behind live, decoded frames, rebuilds) to the folder, and exits.
  */
+
+/**
+ * Test windows keep their real places, sizes and rendering (screenshots, pixel levels and geometry
+ * checks depend on them) but are invisible, let clicks through, never take the focus and stay off
+ * the taskbar, so a test run doesn't get in the way of whoever is using the PC. PANES_TEST_SHOW=1
+ * shows them, to watch a run.
+ */
+export function keepWindowsOutOfTheWay() {
+  if (process.env.PANES_TEST_SHOW === "1") return;
+  app.on("browser-window-created", (_event, win) => {
+    win.setOpacity(0);
+    win.setIgnoreMouseEvents(true);
+    win.setFocusable(false);
+    win.setSkipTaskbar(true);
+  });
+}
 export function runSelfTest({ camWins, log, connections, hooks }) {
   const dir = process.env.PANES_SELFTEST_DIR;
   const waitMs = Number(process.env.PANES_SELFTEST_SEC || 20) * 1000;

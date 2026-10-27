@@ -26,6 +26,9 @@ if (IS_WIN) app.setAppUserModelId("protect-panes");
 // back to its CPU renderer (SwiftShader) instead of disabling WebGL. The "unsafe" in the name is
 // about running untrusted web pages through it; this app only renders its own local pages.
 app.commandLine.appendSwitch("enable-unsafe-swiftshader");
+// Self-test runs keep their windows invisible (selftest.js) and other windows cover them, so Chromium
+// mustn't treat covered windows as hidden: it would stop previews and throttle playback mid-test.
+if (process.env.PANES_SELFTEST_DIR) app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
 
 let store;
 let log;
@@ -59,6 +62,8 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function init() {
+  // Before any window exists, so none of them ever shows up on the screen of whoever runs the tests.
+  if (process.env.PANES_SELFTEST_DIR) (await import("./selftest.js")).keepWindowsOutOfTheWay();
   store = new Store();
   log = createLogger(path.join(app.getPath("userData"), "protect-panes.log"));
   log.info(`Protect Panes ${app.getVersion()} starting${MOCK ? " (mock mode)" : ""}`);
