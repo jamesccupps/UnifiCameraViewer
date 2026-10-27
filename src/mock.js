@@ -10,6 +10,10 @@ import { createRequire } from "node:module";
  * Set PANES_MOCK_RESTART_SEC to force a mid-stream reconnect (discontinuity) on the first camera
  * of each console. cfg.mockOffline lists camera names (without the console prefix) that are offline.
  * cfg.mockConnectMs delays "connected" (default 400 ms), like a console that's slow to log in.
+ * cfg.mockDropout { camera, offMs, onMs } takes that camera (by name, without the console prefix)
+ * offline offMs after connecting and back at onMs. Its streams stall the way the library's do: they
+ * park in "recovering" without ending, and pick up again (with a discontinuity) once it's back.
+ * Each camera counts its subscriptions, for the self-test result.
  */
 
 export function ffmpegPath() {
@@ -43,10 +47,18 @@ export class MockConnection extends EventEmitter {
   get controllerName() { return `${this.name} (mock)`; }
   /** Snapshot requests that reached the "console", for the self-test result. */
   get snapshotCount() { return this.#cams.reduce((n, c) => n + c.snapshots, 0); }
+  get subscriptionCounts() { return Object.fromEntries(this.#cams.map((c) => [c.id, c.subscriptions])); }
 
   start() {
     this.#set("connecting", "Connecting…");
-    setTimeout(() => this.#set("connected", ""), this.#cfg.mockConnectMs ?? 400);
+    const connectMs = this.#cfg.mockConnectMs ?? 400;
+    setTimeout(() => this.#set("connected", ""), connectMs);
+    const drop = this.#cfg.mockDropout;
+    const cam = drop && this.#cams.find((c) => c.name === `${this.#cfg.name || "Mock"} ${drop.camera}`);
+    if (cam) {
+      setTimeout(() => cam.setOnline(false), connectMs + drop.offMs);
+      if (drop.onMs) setTimeout(() => cam.setOnline(true), connectMs + drop.onMs);
+    }
   }
   async stop() { this.#set("idle", ""); }
   async restart(cfg) { if (cfg) this.#cfg = cfg; await this.stop(); this.start(); }
@@ -83,6 +95,8 @@ class MockCamera {
     this.shadows = /\bShadows\b/.test(name);
     this.isOnline = online;
     this.snapshots = 0;
+    this.subscriptions = 0;
+    this.live = new Set();
     const sizes = image ? SQUARE : SIZES;
     this.config = {
       marketName: image ? "AI 360" : "G5 Bullet",
@@ -111,11 +125,23 @@ class MockCamera {
     });
   }
 
+  setOnline(on) {
+    this.isOnline = on;
+    for (const sub of this.live) on ? sub.recover() : sub.stall();
+  }
+
   livestream({ source, signal }) {
     // Once per camera: a later subscription (quality change, Show cameras) must not be cut off again.
     const restartSec = this.index === 0 && !this.restartUsed ? Number(process.env.PANES_MOCK_RESTART_SEC || 0) : 0;
     if (restartSec) this.restartUsed = true;
-    return new MockSubscription({ channel: source?.channel ?? 0, hue: this.index * 70, label: this.name, signal, restartSec, image: this.image, shadows: this.shadows });
+    this.subscriptions++;
+    const sub = new MockSubscription({
+      channel: source?.channel ?? 0, hue: this.index * 70, label: this.name, signal, restartSec, image: this.image, shadows: this.shadows,
+      onDone: () => this.live.delete(sub),
+    });
+    this.live.add(sub);
+    if (!this.isOnline) sub.stall();
+    return sub;
   }
 }
 
@@ -147,6 +173,22 @@ class MockSubscription {
   }
 
   get codec() { return this.initSegment?.codec ?? ""; }
+
+  /** Camera unreachable: no more video, but the subscription parks in "recovering" instead of ending. */
+  stall() {
+    if (this.#done) return;
+    const proc = this.#proc;
+    this.#proc = null; // so its exit doesn't end the subscription
+    proc?.kill("SIGKILL");
+    this.state = "recovering";
+  }
+
+  /** Camera back: like the library's recovery, a new encoder whose timestamps restart at zero. */
+  recover() {
+    if (this.#done || this.#proc) return;
+    this.#pendingDiscontinuity = true;
+    this.#spawn();
+  }
 
   #spawn() {
     const image = this.#opts.image;
@@ -221,6 +263,7 @@ class MockSubscription {
     if (this.#done) return;
     this.#done = true;
     this.state = "closed";
+    this.#opts.onDone?.();
     clearTimeout(this.restartTimer);
     this.#proc?.kill("SIGKILL");
     for (const w of this.#waiters.splice(0)) {

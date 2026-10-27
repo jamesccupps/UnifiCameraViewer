@@ -1,5 +1,6 @@
 import { ProtectAuthorizationError, ProtectCodecChangeError, ProtectLivestreamUnavailableError } from "unifi-protect";
 import { applyRange } from "./avc-range.js";
+import { channelList } from "./console-connection.js";
 import { errorText } from "./util.js";
 
 // How long a live view tolerates no video before the library declares a stall and reconnects.
@@ -105,17 +106,28 @@ export class CameraStream {
       this.channel = this.#opts.resolveChannel(cam);
       this.#setStatus("connecting", "Connecting…");
 
+      const dropSub = new AbortController();
       const sub = cam.livestream({
         source: { type: "channel", channel: this.channel },
-        signal,
+        signal: AbortSignal.any([signal, dropSub.signal]),
         discardOnDispose: true,
         urgency: () => URGENCY_MS,
       });
 
-      // The library hides short stalls inside the iterator (it just parks). Surface them.
+      // The library hides short stalls inside the iterator (it just parks). Surface them. Its live
+      // recovery never gives up, though: for a camera that went offline, or a channel turned off in
+      // Protect, it would renegotiate every few seconds for as long as the window is open (about
+      // 1000 requests an hour, each counted by its per-console circuit breaker). So drop the
+      // subscription then, and let the loop wait for the camera or pick another channel.
+      let dropped = "";
       const monitor = setInterval(() => {
-        if (sub.state === "recovering") this.#setStatus("reconnecting", "Reconnecting…");
-        else if (sub.state === "live" && this.#status.state === "reconnecting") this.#setStatus("live", "");
+        if (sub.state === "recovering") {
+          const now = conn.camera(cameraId);
+          if (!now?.isOnline) dropped = "camera went offline";
+          else if (!channelList(now).some((c) => c.id === this.channel)) dropped = `channel ${this.channel} is no longer available`;
+          if (dropped) dropSub.abort();
+          else this.#setStatus("reconnecting", "Reconnecting…");
+        } else if (sub.state === "live" && this.#status.state === "reconnecting") this.#setStatus("live", "");
       }, 1_000);
 
       let sentInit = false;
@@ -143,9 +155,17 @@ export class CameraStream {
           this.#send("cam:media", new Uint8Array(seg.data));
         }
         if (signal.aborted) return;
+        if (dropped) {
+          log.info(`stopped recovering ${cameraId} ch${this.channel}: ${dropped}`);
+          continue;
+        }
         log.info(`stream for ${cameraId} ended; restarting`);
       } catch (err) {
         if (signal.aborted) return;
+        if (dropped) {
+          log.info(`stopped recovering ${cameraId} ch${this.channel}: ${dropped}`);
+          continue;
+        }
         if (err instanceof ProtectCodecChangeError) {
           log.info(`codec changed on ${cameraId}; restarting stream`);
           continue;

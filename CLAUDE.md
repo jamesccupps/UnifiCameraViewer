@@ -28,6 +28,7 @@ npm run test:mock         # mock cameras: playback, forced reconnect, 360° quad
 npm run test:hide         # Hide cameras / Show cameras / per-console Hide all, across two launches
 npm run test:bounds       # window and grid sizes stay put across three launches at a forced 150 % scale
 npm run test:connection   # ConsoleConnection unit checks with a fake library client (runs under Electron's Node)
+npm run test:streams      # stream recovery: a camera going offline while viewed
 npm run test:range        # SPS color-range rewrite (unit, ffmpeg fixtures) + displayed pixel levels in Chromium, Adjust picture
 npm run test:layouts      # save / apply named layouts, import a Protect liveview, switch from the tray
 npm run test:update       # signed manifest, verified download, the real swap helper (folder, installer, app.asar), camera-list Updates
@@ -67,7 +68,7 @@ src/renderer/camera.*       Camera page: MSE playback, live-edge tracking, codec
 src/renderer/dewarp.js      360°: WebGL fisheye dewarp (quad / panorama), PTZ input, circle auto-detect, calibration UI
 src/renderer/grid-window.*  The page under a grid window's tiles: empty-tile placeholders, right-click
 src/renderer/manager.*      Camera list: Cameras / Layouts / Settings tabs, previews, hover tips (data-tip), vanilla DOM, no innerHTML with camera/console names
-src/mock.js                 Dev-only fake consoles/cameras (--mock); PANES_MOCK_FISHEYE adds a 360 camera, cfg.mockOffline marks cameras offline
+src/mock.js                 Dev-only fake consoles/cameras (--mock); PANES_MOCK_FISHEYE adds a 360 camera, cfg.mockOffline marks cameras offline, cfg.mockDropout takes one offline and back mid-run
 src/selftest.js             Dev-only harness, active only when PANES_SELFTEST_DIR is set
 test/run.mjs                Test runner (all the suites above, with assertions)
 test/legacy-password.cjs    Writes a password the way 1.3.x did (sync safeStorage), for the e2e upgrade check
@@ -131,6 +132,7 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
 
 - **Single-instance lock is per settings folder.** `npm start` with the default folder just focuses the already-running installed app. Quit it first (tray → Quit), or set `PANES_USER_DATA=<folder>` to run separately.
 - **unifi-protect is v5.** Don't follow older examples that use `ProtectApi` / `ProtectLivestream` / `getBootstrap()`; those are v4. Read `node_modules/unifi-protect/dist/*.d.ts`. It needs Node ≥ 22.20 inside Electron; Electron 45 ships Node 24. Version is pinned on purpose. When Protect firmware breaks something, bump the library first, then run `npm test`.
+- **The library's live recovery never gives up.** With `urgency` set, a subscription whose camera went offline (or whose channel was turned off in Protect) stays `recovering` and renegotiates every few seconds for as long as the window is open: about 1000 requests an hour, each one counted by the library's per-console circuit breaker. `CameraStream`'s 1 s monitor drops the subscription when it's recovering and the camera is offline or the channel is gone. The loop then shows "Camera offline" and checks every 10 s, or picks another channel. The cost: a camera that comes back takes up to 10 s to show, not about 4. The mock's `cfg.mockDropout` stalls a stream the same way; the streams suite checks it.
 - **A refused login is retried.** The library turns every non-2xx login answer into `ProtectAuthError`, including the 502/503 UniFi OS gives while it boots. Before 1.4.3 that stopped the console for good at "Login failed", so after a power cut that brought the PC up first, every camera on it stayed dark until Reconnect. `ConsoleConnection` now retries refused logins (and "no access to Protect") after 15 s, 30 s, 1, 2, 5, then every 10 min, which keeps a real wrong password far from any lockout. The state stays `authfailed` in between. Saving the console retries at once.
 - **Unit checks that need unifi-protect** run under Electron's Node (`ELECTRON_RUN_AS_NODE=1`), since the library needs Node ≥ 22.20 and a plain `node` may be older. `test/connection-unit.mjs` is one: `ConsoleConnection` takes `{ connect, authRetryMs }` so a fake can stand in for `ProtectClient.connect`.
 - **Console host must be a bare IP/hostname.** The library rewrites the livestream WS hostname to the configured host, and `host:port` doesn't rewrite. The tests use ports only because they're local fakes.

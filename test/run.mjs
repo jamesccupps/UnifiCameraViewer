@@ -388,6 +388,39 @@ async function hideSuite() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Stream recovery (mock consoles): what a window does when its camera or its stream misbehaves.
+
+async function streamsSuite() {
+  console.log("\nStreams suite (mock consoles)");
+  const userData = tmpDir("streams");
+  const A = "aaaaaaaa-0000-4000-8000-000000000001";
+  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1` };
+  // Dock goes offline 4 s after the console connects and comes back at 10 s. The library would keep
+  // its stream "recovering" (renegotiating every few seconds) the whole time.
+  fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock"], mockDropout: { camera: "Dock", offMs: 4000, onMs: 10000 } }],
+    windows: {
+      [keys.lobby]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 },
+      [keys.dock]: { open: true, bounds: { x: 500, y: 0, width: 480, height: 270 }, channel: 2 },
+    },
+    settings: { startHidden: true },
+  }, null, 2));
+  const { result } = await runApp({ userData, results: path.join(userData, "results"), seconds: 22, extraArgs: ["--mock"] });
+  const states = (k) => result.samples.map((s) => s.cams[k]?.status).filter(Boolean);
+  const runs = (list) => list.filter((s, i) => s !== list[i - 1]);
+  const dock = runs(states(keys.dock));
+  const reconnectingSamples = states(keys.dock).filter((s) => s === "reconnecting").length;
+  check("a camera that goes offline while viewed reads \"offline\", not \"reconnecting\" for the whole outage",
+    dock.includes("offline") && reconnectingSamples <= 1, `${dock.join(" > ")} (reconnecting in ${reconnectingSamples} samples)`);
+  check("it comes back live when the camera is back", dock.at(-1) === "live" && dock.indexOf("live") < dock.indexOf("offline"), dock.join(" > "));
+  check("the other camera on the console stays live", runs(states(keys.lobby).slice(2)).join() === "live", runs(states(keys.lobby)).join(" > "));
+  const subs = result.connections[A]?.subscriptions?.["aaaaaaaa-cam1"];
+  check("the offline camera is subscribed again only once it's back", subs === 2, `subscriptions=${subs}`);
+  console.log(`  results: ${userData}`);
+}
+
+// ---------------------------------------------------------------------------------------------
 // ConsoleConnection unit checks (fake ProtectClient.connect), run under Electron's Node because
 // unifi-protect needs Node >= 22.20. test/connection-unit.mjs prints the results as JSON.
 
@@ -1607,6 +1640,7 @@ try {
   if (suite === "hide" || suite === "all") await runSuite(hideSuite);
   if (suite === "bounds" || suite === "all") await runSuite(boundsSuite);
   if (suite === "connection" || suite === "all") await runSuite(connectionSuite);
+  if (suite === "streams" || suite === "all") await runSuite(streamsSuite);
   if (suite === "range" || suite === "all") await runSuite(rangeSuite);
   if (suite === "layouts" || suite === "all") await runSuite(layoutsSuite);
   if (suite === "arrange" || suite === "all") await runSuite(arrangeSuite);
