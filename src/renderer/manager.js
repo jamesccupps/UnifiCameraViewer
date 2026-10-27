@@ -144,10 +144,14 @@ function reattachTip() {
 
 const PREVIEW_REFRESH_MS = 60_000;
 const PREVIEW_HOVER_MS = 15_000; // hovering asks for a fresher picture than the row keeps
+// "No picture" (console still connecting, camera just back online) is asked again sooner. Before a
+// console connects, its saved cameras are placeholder rows, and keeping that miss for a minute left
+// most rows empty on the real consoles.
+const PREVIEW_RETRY_MS = 10_000;
 const previewCache = new Map();  // key -> { url, at, fetched }
 const previewPending = new Set();
 const previewObserver = new IntersectionObserver((entries) => {
-  for (const e of entries) if (e.isIntersecting) loadPreview(e.target.dataset.previewKey);
+  for (const e of entries) if (e.isIntersecting && !e.target.hasAttribute("data-offline")) loadPreview(e.target.dataset.previewKey);
 });
 const pop = document.getElementById("preview-pop");
 let popFor = null;
@@ -156,7 +160,7 @@ let popTimer = null;
 async function loadPreview(key, maxAge = PREVIEW_REFRESH_MS) {
   if (!key || !state?.settings.showPreviews || document.hidden || previewPending.has(key)) return;
   const have = previewCache.get(key);
-  if (have && Date.now() - have.fetched < maxAge) return;
+  if (have && Date.now() - have.fetched < (have.url ? maxAge : Math.min(maxAge, PREVIEW_RETRY_MS))) return;
   previewPending.add(key);
   let p = null;
   try { p = await panes.invoke("mgr:preview", key); } catch { /* shown as no picture */ }

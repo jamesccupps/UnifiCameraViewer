@@ -9,6 +9,7 @@ import { createRequire } from "node:module";
  * Uses FFMPEG_PATH, else the ffmpeg-static dev dependency, else ffmpeg on PATH.
  * Set PANES_MOCK_RESTART_SEC to force a mid-stream reconnect (discontinuity) on the first camera
  * of each console. cfg.mockOffline lists camera names (without the console prefix) that are offline.
+ * cfg.mockConnectMs delays "connected" (default 400 ms), like a console that's slow to log in.
  */
 
 export function ffmpegPath() {
@@ -45,7 +46,7 @@ export class MockConnection extends EventEmitter {
 
   start() {
     this.#set("connecting", "Connecting…");
-    setTimeout(() => this.#set("connected", ""), 400);
+    setTimeout(() => this.#set("connected", ""), this.#cfg.mockConnectMs ?? 400);
   }
   async stop() { this.#set("idle", ""); }
   async restart(cfg) { if (cfg) this.#cfg = cfg; await this.stop(); this.start(); }

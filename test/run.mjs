@@ -1085,14 +1085,17 @@ async function listSuite() {
   console.log(`  results: ${results}`);
 
   // Second launch: previews. Garage Spare is offline; the list re-renders every 3 s throughout.
+  // The consoles take 1.5 s to connect, and Lobby and Ramp have saved (closed) windows, so until then
+  // the list shows them as placeholder rows ("offline"). Their pictures must still come once connected
+  // (on the real consoles, 7 of 9 rows stayed empty: the placeholder's "no picture" was kept 60 s).
   const pd = tmpDir("previews");
   fs.writeFileSync(path.join(pd, "config.json"), JSON.stringify({
     version: 1,
     consoles: [
-      { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock"] },
-      { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp", "Spare"], mockOffline: ["Spare"] },
+      { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock"], mockConnectMs: 1500 },
+      { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp", "Spare"], mockOffline: ["Spare"], mockConnectMs: 1500 },
     ],
-    windows: {},
+    windows: { [keys.lobby]: { open: false, name: "Building Lobby" }, [keys.ramp]: { open: false, name: "Garage Ramp" } },
     settings: { startHidden: false },
   }, null, 2));
   const readThumbs = `(() => Object.fromEntries([...document.querySelectorAll(".cams li")].map((li) => [
@@ -1122,8 +1125,8 @@ async function listSuite() {
     userData: pd, results: path.join(pd, "results"), seconds: 12, extraArgs: ["--mock"],
     env: {
       PANES_SELFTEST_ACTIONS: JSON.stringify([
-        { at: 3500, do: "manager-js", js: readThumbs },
-        { at: 4000, do: "manager-js", js: hover(`.thumb[data-preview-key="${keys.lobby}"]`) },
+        { at: 4500, do: "manager-js", js: readThumbs },
+        { at: 4800, do: "manager-js", js: hover(`.thumb[data-preview-key="${keys.lobby}"]`) },
         { at: 5500, do: "manager-js", js: hoverPalette },
         { at: 9000, do: "manager-js", js: previewsOff },
         { at: 10500, do: "manager-js", js: readThumbs },
