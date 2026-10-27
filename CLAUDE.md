@@ -13,7 +13,7 @@ Current version: **1.4.2**, released through the GitHub Actions release workflow
 - **1.3.1:** portable copies' in-app update fixed (the helper's working folder blocked the swap); Arrange / "Use what's on screen" missing just-shown windows.
 - **1.4.0:** grid windows, Hide from list, camera previews, Adjust picture (brightness / contrast), small app.asar-only updates, async safeStorage.
 - **1.4.1:** a click in the camera list brings it back above a camera opened from it. The first release 1.4.0 copies take as a small update.
-- **1.4.2:** Start with Windows touches the Run key only when it needs changing, never in test runs (a Defender ASEP alert).
+- **1.4.2:** an aspect ratio choice for 360° views (16:9, 4:3, 3:2, 1:1, 21:9, any shape). Start with Windows touches the Run key only when it needs changing, never in test runs (a Defender ASEP alert).
 
 The owner ran 1.0 to 1.2 on the real consoles, and their installed copy updated itself from 1.3.1 to 1.4.0 in the app (the installer path). Later versions are tested against the real consoles only through self-test runs from source on a copy of the config.
 
@@ -117,7 +117,8 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
 
 Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tied to the Windows user. `enc: "plain"` is base64 and only exists in tests and on Linux without a keyring. **Never print or log decrypted passwords.**
 
-`dewarp`: `{mode: "off" | "quad" | "panorama", mount: "ceiling" | "wall" | "desk", lensFov, circle: {x, y, r} | null, views: [{pan, tilt, fov} × 4], focus, pano: {pan, tilt}}`
+`dewarp`: `{mode: "off" | "quad" | "panorama", mount: "ceiling" | "wall" | "desk", lensFov, circle: {x, y, r} | null, views: [{pan, tilt, fov} × 4], focus, pano: {pan, tilt}, aspect?}`
+- `aspect` is the shape the window keeps in a dewarp mode: `"16:9"` (absent), `"4:3"`, `"3:2"`, `"1:1"`, `"21:9"` or `"free"` (no lock). The views fill whatever shape the canvas has, so this only changes the lock. `preferredAspect()` returns 0 for free, and the page reports it to main as `cam:aspect {0, 0}`, which clears `cw.aspect`. Grid tiles don't offer it.
 - Angles are degrees. `fov` is vertical FOV. Pan wraps to (-180, 180]; tilt clamps to ±90.
 - `circle` is normalized: `x` = center x / video width, `y` = center y / video height, `r` = radius / video height.
 - `undefined` means never decided. On first view, `ensureDewarp()` turns on quad for fisheye cameras. `null` means a normal camera.

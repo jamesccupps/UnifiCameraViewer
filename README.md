@@ -53,7 +53,7 @@ A fisheye camera opens in **quad view**: four virtual pan/tilt/zoom views of the
 
 - **Drag** inside a view to aim it, and **scroll** to zoom. Each view remembers where it's pointed.
 - **Double-click** a view to enlarge it to the whole window. Double-click again to return to the quad.
-- **Right-click → 360° view** to switch to **Single view** (one direction, whole window), **Panorama** (ceiling: the full 360° as two 180° strips; wall: one 180° strip) or back to the raw fisheye. The same menu has Mount, Lens field of view, Reset views and **Adjust image circle…**, for when the auto-detected circle is off: drag and scroll to fit the green circle to the edge of the round picture, then click Done.
+- **Right-click → 360° view** to switch to **Single view** (one direction, whole window), **Panorama** (ceiling: the full 360° as two 180° strips; wall: one 180° strip) or back to the raw fisheye. **Aspect ratio** in the same menu sets the window's shape: 16:9 (the default), 4:3, 3:2, 1:1, 21:9, or **Any shape** to size it freely. The views fill whatever shape you pick. In a grid window, the tile sets the shape instead. The same menu has Mount, Lens field of view, Reset views and **Adjust image circle…**, for when the auto-detected circle is off: drag and scroll to fit the green circle to the edge of the round picture, then click Done.
 - Quad and panorama views show the date and time in the corner, since the camera's own timestamp is cut out by the dewarp. It's this PC's clock, so keep the PC's time synced. **Right-click → Show time** turns it on or off for any window.
 - **Lock layout** also locks the views, so a wall display can't get nudged.
 
