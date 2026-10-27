@@ -19,6 +19,7 @@
 window.Dewarper = (() => {
   const DEG = Math.PI / 180;
   const GAP = 2; // device px between quad tiles
+  const LOST_GRACE_MS = 5_000; // a lost WebGL context not back by then: show the raw fisheye instead
 
   const VERT = `
     attribute vec2 aPos;
@@ -95,8 +96,15 @@ window.Dewarper = (() => {
       this.drag = null;
       this.calibrating = false;
       this.glTried = false; // the WebGL context is created only once a 360° view is turned on
+      this.glSetups = 0;
+      this.glLost = false;   // the GPU process dropped the context (driver update, GPU reset...)
+      this.glBroken = false; // ...and Chromium didn't give it back
+      this.lostTimer = null;
       this.#bindInput();
       new ResizeObserver(() => this.#resize()).observe(canvas);
+      // Once, here: registering these in #initGl, which a restore re-ran, doubled them on every restore.
+      canvas.addEventListener("webglcontextlost", (e) => this.#contextLost(e));
+      canvas.addEventListener("webglcontextrestored", () => this.#contextRestored());
     }
 
     get ok() { return !!this.gl; }
@@ -113,7 +121,12 @@ window.Dewarper = (() => {
       // No usable GPU driver: Chromium falls back to CPU rendering. Render at half resolution there.
       this.software = /swiftshader|llvmpipe|software|basic render/i.test(renderer);
       this.scale = this.software ? 0.5 : 1;
+      this.#setupGl(gl);
+    }
 
+    /** Program, quad and texture: everything a lost context takes with it. */
+    #setupGl(gl) {
+      this.glSetups++;
       const compile = (type, src) => {
         const s = gl.createShader(type);
         gl.shaderSource(s, src);
@@ -151,8 +164,31 @@ window.Dewarper = (() => {
         this.gl = null;
         this.onError(`WebGL setup failed: ${err.message}`);
       }
-      this.canvas.addEventListener("webglcontextlost", (e) => { e.preventDefault(); this.hasFrame = false; });
-      this.canvas.addEventListener("webglcontextrestored", () => { this.#initGl(); this.#draw(); });
+    }
+
+    // Chromium normally restores a lost context, but not once it has blocked WebGL after repeated GPU
+    // crashes. Then the opaque canvas would sit black over the playing video, so after a grace period
+    // the window falls back to the raw fisheye picture until the context comes back.
+    #contextLost(e) {
+      e.preventDefault(); // allows the restore
+      this.hasFrame = false;
+      this.glLost = true;
+      clearTimeout(this.lostTimer);
+      this.lostTimer = setTimeout(() => {
+        if (!this.glLost) return;
+        this.glBroken = true;
+        this.setConfig(this.cfg);
+        this.onError("The 360° view lost its graphics context. Showing the raw fisheye image until it's back.");
+      }, LOST_GRACE_MS);
+    }
+
+    #contextRestored() {
+      clearTimeout(this.lostTimer);
+      this.glLost = false;
+      this.glBroken = false;
+      const gl = this.canvas.getContext("webgl"); // the same context object, now empty
+      if (gl) this.#setupGl(gl);
+      this.setConfig(this.cfg);
     }
 
     // ------------------------------------------------------------------ public
@@ -171,7 +207,7 @@ window.Dewarper = (() => {
       if (on && !this.gl) {
         this.onError("Dewarping needs WebGL, which isn't available on this PC. Showing the raw fisheye image.");
       }
-      this.active = on && !!this.gl;
+      this.active = on && !!this.gl && !this.glBroken;
       this.canvas.classList.toggle("hidden", !this.active || this.calibrating);
       if (this.active) this.#startFrames();
       else this.#stopFrames();
@@ -204,7 +240,7 @@ window.Dewarper = (() => {
     }
 
     stats() {
-      return { active: this.active, gl: !!this.gl, renderer: this.renderer, software: this.software, circle: this.cfg?.circle ?? this.detectedCircle, mode: this.cfg?.mode, focus: this.cfg?.focus, aspect: this.cfg?.aspect ?? "16:9" };
+      return { active: this.active, gl: !!this.gl, glSetups: this.glSetups, glLost: this.glLost, glBroken: this.glBroken, renderer: this.renderer, software: this.software, circle: this.cfg?.circle ?? this.detectedCircle, mode: this.cfg?.mode, focus: this.cfg?.focus, aspect: this.cfg?.aspect ?? "16:9" };
     }
 
     // ------------------------------------------------------------------ frames
@@ -241,7 +277,7 @@ window.Dewarper = (() => {
     #upload() {
       const gl = this.gl;
       const v = this.video;
-      if (!gl || v.readyState < 2 || !v.videoWidth) return;
+      if (!gl || this.glLost || v.readyState < 2 || !v.videoWidth) return;
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, v);
       this.hasFrame = true;
       this.#maybeAutoDetect();

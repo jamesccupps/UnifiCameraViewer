@@ -392,14 +392,23 @@ async function hideSuite() {
 
 async function streamsSuite() {
   console.log("\nStreams suite (mock consoles)");
+  // Lose the 360° canvas's WebGL context, then restore it `times` times, or (0) leave it lost.
+  const loseContext = (times) => `(async () => {
+    const ext = document.getElementById("dewarp").getContext("webgl").getExtension("WEBGL_lose_context");
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    if (!${times}) { ext.loseContext(); return true; }
+    for (let i = 0; i < ${times}; i++) { ext.loseContext(); await wait(300); ext.restoreContext(); await wait(500); }
+    return window.__panesStats().dewarp;
+  })()`;
   const userData = tmpDir("streams");
   const A = "aaaaaaaa-0000-4000-8000-000000000001";
-  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, broken: `${A}/aaaaaaaa-cam2`, rewind: `${A}/aaaaaaaa-cam3`, stair: `${A}/aaaaaaaa-cam4` };
+  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, broken: `${A}/aaaaaaaa-cam2`, rewind: `${A}/aaaaaaaa-cam3`, stair: `${A}/aaaaaaaa-cam4`, fish: `${A}/aaaaaaaa-cam360` };
   // Dock goes offline 4 s after the console connects and comes back at 10 s. The library would keep
   // its stream "recovering" (renegotiating every few seconds) the whole time. Broken's fragments
   // fail to decode every time. Rewind's encoder restarts 12 s in without flagging the discontinuity:
   // its picture would freeze until the new timestamps caught up with the playhead, another 12 s.
-  // Stair's window and a grid tile of Lobby have their renderers crashed 8 s in.
+  // Stair's window and a grid tile of Lobby have their renderers crashed 8 s in. The 360° window's
+  // WebGL context is lost and restored three times at 6 s, then lost for good at 12 s.
   fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
     version: 1,
     consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Broken", "Rewind", "Stair"], mockDropout: { camera: "Dock", offMs: 4000, onMs: 10000 } }],
@@ -409,13 +418,22 @@ async function streamsSuite() {
       [keys.broken]: { open: true, bounds: { x: 0, y: 300, width: 480, height: 270 }, channel: 2 },
       [keys.rewind]: { open: true, bounds: { x: 500, y: 300, width: 480, height: 270 }, channel: 2, clock: true },
       [keys.stair]: { open: true, bounds: { x: 1000, y: 0, width: 480, height: 270 }, channel: 2 },
+      [keys.fish]: { open: true, bounds: { x: 0, y: 600, width: 480, height: 270 }, channel: 2 },
     },
     grids: [{ id: "grid-1", name: "G", templateId: "2x2", bounds: { x: 1000, y: 300, width: 640, height: 400 }, open: true, tiles: [{ key: keys.lobby, channel: 2 }, null, null, null] }],
     settings: { startHidden: true },
   }, null, 2));
   const { result } = await runApp({
     userData, results: path.join(userData, "results"), seconds: 30, extraArgs: ["--mock"],
-    env: { PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 8000, do: "crash", win: 4 }, { at: 8000, do: "crash", tile: "G#0" }]) },
+    env: {
+      PANES_MOCK_FISHEYE: path.join(FIXTURES, "fisheye-ceiling.png"),
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 8000, do: "crash", win: 4 },
+        { at: 8000, do: "crash", tile: "G#0" },
+        { at: 6000, do: "camera-js", win: 5, js: loseContext(3) },
+        { at: 12000, do: "camera-js", win: 5, js: loseContext(0) },
+      ]),
+    },
   });
   const states = (k) => result.samples.map((s) => s.cams[k]?.status).filter(Boolean);
   const runs = (list) => list.filter((s, i) => s !== list[i - 1]);
@@ -461,6 +479,11 @@ async function streamsSuite() {
         && live.length >= 2 && live.at(-1).decodedFrames > live.at(-2).decodedFrames,
       JSON.stringify(result.samples.map((s) => [s.t > crashAt, s.cams[id]?.error ? "error" : s.cams[id]?.decodedFrames])));
   }
+  const restored = result.actions.find((a) => a.act.do === "camera-js" && a.act.js.includes("i < 3"))?.value;
+  check("a 360° view whose WebGL context is lost and restored 3 times draws again, set up once per restore",
+    restored?.active && !restored.glLost && restored.glSetups === 4, JSON.stringify(restored));
+  const fishEnd = result.samples.at(-1)?.cams[keys.fish]?.dewarp;
+  check("a context that never comes back falls back to the raw fisheye picture", fishEnd?.glBroken && fishEnd.active === false, JSON.stringify(fishEnd));
   check("the crashes are logged", (appLog.match(/camera page for \S+ gone \(crashed/g) ?? []).length === 2,
     appLog.split(/\r?\n/).filter((l) => l.includes("gone")).join(" | "));
   console.log(`  results: ${userData}`);
