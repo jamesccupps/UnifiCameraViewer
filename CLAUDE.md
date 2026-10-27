@@ -28,7 +28,7 @@ npm run test:mock         # mock cameras: playback, forced reconnect, 360° quad
 npm run test:hide         # Hide cameras / Show cameras / per-console Hide all, across two launches
 npm run test:bounds       # window and grid sizes stay put across three launches at a forced 150 % scale
 npm run test:connection   # ConsoleConnection unit checks with a fake library client (runs under Electron's Node)
-npm run test:streams      # stream recovery: a camera going offline while viewed, a stream that never decodes, a frozen picture
+npm run test:streams      # stream recovery: a camera going offline while viewed, a stream that never decodes, a frozen picture, a crashed camera page
 npm run test:range        # SPS color-range rewrite (unit, ffmpeg fixtures) + displayed pixel levels in Chromium, Adjust picture
 npm run test:layouts      # save / apply named layouts, import a Protect liveview, switch from the tray
 npm run test:update       # signed manifest, verified download, the real swap helper (folder, installer, app.asar), camera-list Updates
@@ -223,6 +223,7 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
   - At launch, hidden windows aren't created at all. Show cameras creates them.
   - Any explicit open (switch, Find, Show all, Show cameras) clears `hidden`. Bring to front and Reset window positions leave hidden windows hidden.
   - If nothing is on screen at launch, the camera list opens even with Start hidden on.
+- **Crashed camera pages** are reloaded (`reloadOnCrash()`, windows and tiles): on `render-process-gone` the stream stops and the page reloads after 1 s, doubling up to 60 s while it keeps crashing within a minute. The reloaded page's `cam:ready` restarts the stream, or leaves it paused. `clean-exit` and pages no longer in `senders` (closed on purpose) are left alone. Before this a crashed page stayed black for good while its stream kept pulling video. `unresponsive` and GPU `child-process-gone` are logged.
 - **Players** (main.js): a player is one camera page and its stream, `{key, consoleId, cameraId, win, wc, stream, aspect}`. It's either a camera window (`camWins`) or a grid tile, which also has `{gw, tile, index, autoChannel}`. Per-camera functions find settings through `entryOf(cw)`: the tile for a tile, `store.data.windows[key]` for a window. Send to the page with `cw.wc`, never `cw.win.webContents`; a tile's `win` is its grid window. Window-only things (aspect lock, bounds, Close this camera, Always on top) check `cw.gw` first.
 - **Grid windows** (grid-window.js).
   - One framed BrowserWindow, plus a `WebContentsView` per tile loading `camera.html?tile=1`. Tile mode only hides the hover bar; everything else in the camera page works unchanged. The frame is the native one, so move, resize, maximize and full screen come for free.
@@ -279,6 +280,7 @@ When adding a test, extend `test/run.mjs`. `PANES_SELFTEST_ACTIONS` (JSON) drive
 - `resize` `{win, size: [w, h]}`
 - `menu-click` `{win, label}`: runs that context-menu item's click handler (searches submenus too)
 - `camera-js` `{win, js}`: runs JS in a camera page and stores the result as `value`
+- `crash` `{win}`: `forcefullyCrashRenderer()` on that camera page
 - `tray-click` `{label}`: same, for the tray menu (no `win`)
 - `manager-js` `{js}`: runs JS in the camera list window and stores the result as `value` (no `win`). The list must be open (`startHidden: false`).
 - `grid-menu-click` `{grid, index, label}`: a grid window's own menu (an empty tile's, with `index`)

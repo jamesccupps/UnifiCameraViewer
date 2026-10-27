@@ -56,6 +56,8 @@ if (!app.requestSingleInstanceLock()) {
   app.on("second-instance", () => showManager());
   app.on("window-all-closed", () => { /* keep running in the tray */ });
   app.on("before-quit", () => { quitting = true; store?.flush(); });
+  // After repeated GPU process crashes Chromium quietly falls back to software decoding; leave a trace.
+  app.on("child-process-gone", (_e, d) => { if (d.type === "GPU") log?.warn(`GPU process gone (${d.reason}, exit ${d.exitCode})`); });
   app.whenReady().then(init).catch((err) => {
     console.error(err);
     app.exit(1);
@@ -268,6 +270,7 @@ function openCameraWindow(key, { focus = false, flash = true } = {}) {
   const cw = { key, consoleId, cameraId, win, wc: win.webContents, stream: null, aspect: null };
   camWins.set(key, cw);
   senders.set(wcId, cw);
+  reloadOnCrash(cw);
 
   cw.stream = new CameraStream({
     getConnection: () => connections.get(consoleId),
@@ -310,6 +313,26 @@ function openCameraWindow(key, { focus = false, flash = true } = {}) {
   });
   updateTrayMenu();
   notifyManager();
+}
+
+// A camera page whose renderer died (out of memory, a crash) stayed black for good while its stream
+// kept pulling video into nothing. Stop the stream and reload the page; the new page's cam:ready
+// starts the stream again (or leaves it paused). A page that keeps dying is reloaded less often.
+function reloadOnCrash(cw) {
+  let crashes = 0;
+  let lastCrash = 0;
+  cw.wc.on("render-process-gone", (_e, { reason, exitCode }) => {
+    if (reason === "clean-exit" || senders.get(cw.wc.id) !== cw) return; // closed on purpose
+    log.warn(`camera page for ${cw.cameraId} gone (${reason}, exit ${exitCode}); reloading`);
+    cw.stream.stop();
+    crashes = Date.now() - lastCrash > 60_000 ? 1 : crashes + 1;
+    lastCrash = Date.now();
+    setTimeout(() => {
+      if (!cw.wc.isDestroyed() && senders.get(cw.wc.id) === cw) cw.wc.reload();
+    }, Math.min(1_000 * 2 ** (crashes - 1), 60_000));
+  });
+  cw.wc.on("unresponsive", () => log.warn(`camera page for ${cw.cameraId} isn't responding`));
+  cw.wc.on("responsive", () => log.info(`camera page for ${cw.cameraId} is responding again`));
 }
 
 function closeCamera(key) {
@@ -740,6 +763,7 @@ function makeTilePlayer({ gw, index, tile, wc }) {
     log: log.child(`grid ${cameraId.slice(-6)}`),
   });
   senders.set(wc.id, cw);
+  reloadOnCrash(cw);
   return cw;
 }
 

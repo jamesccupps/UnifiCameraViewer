@@ -159,6 +159,9 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
           case "camera-js":
             value = await wc.executeJavaScript(act.js);
             break;
+          case "crash":
+            wc.forcefullyCrashRenderer();
+            break;
           case "menu-click": {
             const item = findItem(hooks.cameraContextMenuTemplate(cw), act.label);
             if (!item?.click) throw new Error(`no menu item "${act.label}"`);

@@ -394,23 +394,29 @@ async function streamsSuite() {
   console.log("\nStreams suite (mock consoles)");
   const userData = tmpDir("streams");
   const A = "aaaaaaaa-0000-4000-8000-000000000001";
-  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, broken: `${A}/aaaaaaaa-cam2`, rewind: `${A}/aaaaaaaa-cam3` };
+  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, broken: `${A}/aaaaaaaa-cam2`, rewind: `${A}/aaaaaaaa-cam3`, stair: `${A}/aaaaaaaa-cam4` };
   // Dock goes offline 4 s after the console connects and comes back at 10 s. The library would keep
   // its stream "recovering" (renegotiating every few seconds) the whole time. Broken's fragments
   // fail to decode every time. Rewind's encoder restarts 12 s in without flagging the discontinuity:
   // its picture would freeze until the new timestamps caught up with the playhead, another 12 s.
+  // Stair's window and a grid tile of Lobby have their renderers crashed 8 s in.
   fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
     version: 1,
-    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Broken", "Rewind"], mockDropout: { camera: "Dock", offMs: 4000, onMs: 10000 } }],
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Broken", "Rewind", "Stair"], mockDropout: { camera: "Dock", offMs: 4000, onMs: 10000 } }],
     windows: {
       [keys.lobby]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 },
       [keys.dock]: { open: true, bounds: { x: 500, y: 0, width: 480, height: 270 }, channel: 2 },
       [keys.broken]: { open: true, bounds: { x: 0, y: 300, width: 480, height: 270 }, channel: 2 },
       [keys.rewind]: { open: true, bounds: { x: 500, y: 300, width: 480, height: 270 }, channel: 2, clock: true },
+      [keys.stair]: { open: true, bounds: { x: 1000, y: 0, width: 480, height: 270 }, channel: 2 },
     },
+    grids: [{ id: "grid-1", name: "G", templateId: "2x2", bounds: { x: 1000, y: 300, width: 640, height: 400 }, open: true, tiles: [{ key: keys.lobby, channel: 2 }, null, null, null] }],
     settings: { startHidden: true },
   }, null, 2));
-  const { result } = await runApp({ userData, results: path.join(userData, "results"), seconds: 30, extraArgs: ["--mock"] });
+  const { result } = await runApp({
+    userData, results: path.join(userData, "results"), seconds: 30, extraArgs: ["--mock"],
+    env: { PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 8000, do: "crash", win: 4 }, { at: 8000, do: "crash", tile: "G#0" }]) },
+  });
   const states = (k) => result.samples.map((s) => s.cams[k]?.status).filter(Boolean);
   const runs = (list) => list.filter((s, i) => s !== list[i - 1]);
   const dock = runs(states(keys.dock));
@@ -442,6 +448,21 @@ async function streamsSuite() {
   const frozen = rw.filter((c, i) => i > 0 && c.status === "live" && c.decodedFrames === rw[i - 1].decodedFrames && c.decodedFrames > 0);
   check("no clock over the frozen picture", frozen.length >= 1 && frozen.every((c) => !c.clock.shown) && rwEnd?.clock?.shown,
     JSON.stringify(rw.map((c) => [c.decodedFrames, c.clock.shown])));
+
+  // A crashed camera page (window or grid tile) is reloaded and plays again.
+  const crashAt = result.actions.find((a) => a.act.do === "crash")?.t ?? Infinity;
+  const appLog = fs.readFileSync(path.join(userData, "protect-panes.log"), "utf8");
+  for (const [name, id] of [["window", keys.stair], ["grid tile", "grid:G#0"]]) {
+    const after = result.samples.filter((s) => s.t > crashAt).map((s) => s.cams[id]);
+    const live = after.filter((c) => c && !c.error && c.status === "live");
+    const before = result.samples.filter((s) => s.t < crashAt).at(-1)?.cams[id]?.decodedFrames ?? 0;
+    check(`a crashed camera page (${name}) is reloaded and plays again`,
+      result.actions.filter((a) => a.act.do === "crash").every((a) => a.ok) && after.some((c) => !c || c.error || c.decodedFrames < before)
+        && live.length >= 2 && live.at(-1).decodedFrames > live.at(-2).decodedFrames,
+      JSON.stringify(result.samples.map((s) => [s.t > crashAt, s.cams[id]?.error ? "error" : s.cams[id]?.decodedFrames])));
+  }
+  check("the crashes are logged", (appLog.match(/camera page for \S+ gone \(crashed/g) ?? []).length === 2,
+    appLog.split(/\r?\n/).filter((l) => l.includes("gone")).join(" | "));
   console.log(`  results: ${userData}`);
 }
 
