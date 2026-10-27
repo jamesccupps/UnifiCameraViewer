@@ -1144,6 +1144,13 @@ async function gridSuite() {
     document.getElementById("editor-form").requestSubmit(document.getElementById("editor-apply"));
     return apply;
   })()`;
+  // Save the open grid again from the editor, as it is but with tile 0's 360° view switched to Quad.
+  const resaveWall = `(async () => {
+    const g = (await panes.invoke("mgr:state")).grids.find((x) => x.name === "Wall");
+    const cells = g.editor.cells.map((c, i) => (c && i === 0 ? { ...c, mode: "quad" } : c));
+    await panes.invoke("mgr:save-editor-layout", { id: g.id, as: "grid", name: "Wall", displayId: g.editor.displayId, templateId: g.editor.templateId, cells, apply: false });
+    return true;
+  })()`;
   const readRow = `(() => {
     const li = [...document.querySelectorAll("#layout-list li.grid-row")].find((l) => l.querySelector("b")?.textContent === "Wall");
     return li ? { text: li.querySelector("small").textContent, buttons: [...li.querySelectorAll("button")].map((b) => b.textContent) } : null;
@@ -1209,14 +1216,23 @@ async function gridSuite() {
         { at: 3000, do: "grid-menu-click", grid: "Wall", index: 2, label: "Building Lobby" },
         { at: 4000, do: "menu-click", tile: "Wall#0", label: "1 + 5" },
         { at: 6500, do: "camera-js", tile: "Wall#0", js: "window.__marker ?? null" },
+        { at: 6600, do: "camera-js", tile: "Wall#1", js: "window.__marker = 43" },
+        { at: 7000, do: "manager-js", js: resaveWall },
+        { at: 8200, do: "camera-js", tile: "Wall#0", js: "[window.__marker ?? null, window.__panesStats().dewarp.mode]" },
+        { at: 8200, do: "camera-js", tile: "Wall#1", js: "window.__marker ?? null" },
         { at: 9000, do: "menu-click", tile: "Wall#0", label: "Close grid" },
       ]),
     },
   });
   const a2 = run2.result.actions;
+  const closeAct = a2.find((a) => a.act.label === "Close grid");
   const first2 = run2.result.samples[0]?.cams ?? {};
   check("an open grid window reopens at launch", !!tile(first2, 0) && !!tile(first2, 3), JSON.stringify(Object.keys(first2)));
-  const mid = run2.result.samples.filter((s) => s.t > a2[2]?.t && s.t < a2[4]?.t).at(-1)?.cams ?? {};
+  const mid = run2.result.samples.filter((s) => s.t > a2[2]?.t && s.t < closeAct?.t).at(-1)?.cams ?? {};
+  const afterResave = a2.filter((a) => a.act.do === "camera-js" && a.t > (a2.find((x) => x.act.js === resaveWall)?.t ?? Infinity)).map((a) => a.value);
+  check("saving an open grid from the editor keeps its tiles' pages, and applies a changed view",
+    a2.find((x) => x.act.js === resaveWall)?.value === true && afterResave.map((v) => JSON.stringify(v)).sort().join() === [JSON.stringify([42, "quad"]), "43"].sort().join(),
+    JSON.stringify({ resave: a2.find((x) => x.act.js === resaveWall), afterResave }));
   check("an empty tile's menu puts a camera in it", a2[1]?.ok && run2.config.grids[0].tiles.some((t) => t?.key === keys.lobby) && Object.keys(mid).filter((k) => k.startsWith("grid:")).length === 4,
     `${a2[1]?.error ?? ""} ${JSON.stringify(Object.keys(mid))}`);
   const big = tile(mid, 0)?.bounds;
@@ -1224,8 +1240,8 @@ async function gridSuite() {
   check("Layout → 1 + 5 from a tile's menu: the first camera gets the big tile", big && small && big.width > 1.7 * small.width && run2.config.grids[0].templateId === "1+5",
     JSON.stringify({ big, small }));
   check("switching the layout keeps the tiles' pages (no reload)", a2[3]?.value === 42, JSON.stringify(a2[3]));
-  check("Close grid closes it, and it stays closed", a2[4]?.ok && run2.config.grids[0].open === false && !Object.keys(last(run2.result)).some((k) => k.startsWith("grid:")),
-    `${a2[4]?.error ?? ""} open=${run2.config.grids[0].open}`);
+  check("Close grid closes it, and it stays closed", closeAct?.ok && run2.config.grids[0].open === false && !Object.keys(last(run2.result)).some((k) => k.startsWith("grid:")),
+    `${closeAct?.error ?? ""} open=${run2.config.grids[0].open}`);
   console.log(`  results: ${userData}`);
 }
 

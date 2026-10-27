@@ -690,8 +690,10 @@ function saveEditorGrid(input, tpl, display, cells) {
   const tiles = cells.map((c) => {
     if (!c) return null;
     // The same camera already in this grid keeps its tile settings; a new tile starts from its window's.
+    // The same object, too: an open grid matches pages to tiles by identity, so a copy closed and
+    // reopened every tile's page and stream on each save.
     const kept = existing?.tiles.find((t) => t?.key === c.key);
-    const tile = kept ? { ...kept } : { key: c.key };
+    const tile = kept ?? { key: c.key };
     if (!kept) for (const f of TILE_FIELDS) if (store.data.windows[c.key]?.[f] !== undefined) tile[f] = structuredClone(store.data.windows[c.key][f]);
     const dewarp = dewarpForView(c.key, c.mode, kept?.dewarp ?? store.data.windows[c.key]?.dewarp);
     if (dewarp) tile.dewarp = dewarp;
@@ -706,7 +708,9 @@ function saveEditorGrid(input, tpl, display, cells) {
     store.data.grids.push(grid);
   }
   store.save();
-  gridWins.get(grid.id)?.sync();
+  const gw = gridWins.get(grid.id);
+  gw?.sync();
+  for (const cw of gw?.players ?? []) refreshCameraMeta(cw); // a kept tile's 360° view may have changed
   if (input?.apply) openGrid(grid.id);
   updateTrayMenu();
   notifyManager();

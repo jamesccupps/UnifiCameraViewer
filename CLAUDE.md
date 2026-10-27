@@ -229,7 +229,7 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
 - **Grid windows** (grid-window.js).
   - One framed BrowserWindow, plus a `WebContentsView` per tile loading `camera.html?tile=1`. Tile mode only hides the hover bar; everything else in the camera page works unchanged. The frame is the native one, so move, resize, maximize and full screen come for free.
   - A view's webContents isn't closed with its window: `#drop()` closes it, or its renderer lingers.
-  - `sync()` matches views to `grid.tiles` by tile object identity, so a layout switch or a new camera keeps the other tiles' pages and streams. The test checks a JS marker survives a switch.
+  - `sync()` matches views to `grid.tiles` by tile object identity, so a layout switch or a new camera keeps the other tiles' pages and streams. Anything that rebuilds `tiles` must reuse the existing tile objects: `saveEditorGrid()` once copied them (`{ ...kept }`), so every editor save of an open grid closed and reopened all its pages and streams. It now mutates the kept tile and refreshes each player's meta (a changed 360° view). The grid suite checks JS markers survive both a layout switch and an editor save.
   - Tile quality: `tileQuality()` sets `autoChannel` from the tile's physical width (debounced 600 ms after a resize, so a drag doesn't restart streams). A tile `channel` set from its menu overrides it.
   - `page-title-updated` is prevented, or the page's `<title>` renames the window.
   - Hide / Show cameras (global only) hide grids too; per-console Hide all doesn't, since a grid mixes consoles.
