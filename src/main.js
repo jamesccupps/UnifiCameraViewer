@@ -11,7 +11,7 @@ import { Previews } from "./previews.js";
 import { decryptPassword, DEFAULT_SETTINGS, encryptPassword, newId, Store } from "./store.js";
 import { UPDATE_PUBLIC_KEY } from "./update-key.js";
 import { sourceKind, Updater } from "./updater.js";
-import { debounce, normalizeHost, throttle } from "./util.js";
+import { debounce, normalizeHost, syncLoginItem, throttle } from "./util.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS = path.join(__dirname, "..", "assets");
@@ -1442,9 +1442,18 @@ function installUpdate() {
   app.quit();
 }
 
+// Start with Windows. Test runs and scratch-config runs (PANES_SELFTEST_DIR / PANES_USER_DATA) leave
+// the PC's real startup entries alone. Otherwise the Run key is written or cleared only when it
+// doesn't match the setting already: doing it on every launch tripped Defender's ASEP anomaly alert.
+// Known gap: an entry left by a copy in another folder isn't seen as "on", so it isn't cleared here.
 function applyLoginItem() {
   if (!IS_WIN && process.platform !== "darwin") return;
-  app.setLoginItemSettings({ openAtLogin: !!store.settings.launchAtLogin, path: process.execPath });
+  if (process.env.PANES_SELFTEST_DIR || process.env.PANES_USER_DATA) return;
+  const opts = { path: process.execPath };
+  const changed = syncLoginItem(store.settings.launchAtLogin,
+    () => app.getLoginItemSettings(opts),
+    (on) => app.setLoginItemSettings({ ...opts, openAtLogin: on }));
+  if (changed) log.info(`Start with Windows turned ${store.settings.launchAtLogin ? "on" : "off"}`);
 }
 
 // ---------------------------------------------------------------------------------------------

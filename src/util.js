@@ -42,6 +42,18 @@ export function normalizeHost(input) {
   return h;
 }
 
+/**
+ * Make "start at login" match `wanted`, touching the OS only when it doesn't already. `read()` returns
+ * the current { openAtLogin }, `write(on)` changes it. Returns true if it wrote. On Windows every write
+ * or delete under HKCU\...\Run is an autostart (ASEP) change, which Microsoft Defender flagged as an
+ * anomaly when the app did it on every launch.
+ */
+export function syncLoginItem(wanted, read, write) {
+  if (!!read().openAtLogin === !!wanted) return false;
+  write(!!wanted);
+  return true;
+}
+
 export function errorText(err) {
   if (!err) return "Unknown error";
   return err.message || String(err);

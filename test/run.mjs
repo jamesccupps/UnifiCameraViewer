@@ -127,6 +127,17 @@ async function mockSuite() {
     check("mock camera without ffmpeg fails its stream instead of crashing", /needs ffmpeg/.test(outcome), outcome);
   }
 
+  // Start with Windows: the Run key is only written or cleared when it doesn't match the setting.
+  // (The app itself skips this in test runs, so these fakes are the only way it's exercised here.)
+  {
+    const { syncLoginItem } = await import(new URL("../src/util.js", import.meta.url).href);
+    const calls = [];
+    const run = (wanted, current) => syncLoginItem(wanted, () => ({ openAtLogin: current }), (on) => calls.push(on));
+    const results = [run(false, false), run(true, true), run(true, false), run(false, true)];
+    check("Start with Windows touches the Run key only when it doesn't match (off/off, on/on: no; off->on, on->off: yes)",
+      JSON.stringify(results) === "[false,false,true,true]" && JSON.stringify(calls) === "[true,false]", JSON.stringify({ results, calls }));
+  }
+
   const userData = tmpDir("mock");
   const results = path.join(userData, "results");
   const A = "aaaaaaaa-0000-4000-8000-000000000001";
