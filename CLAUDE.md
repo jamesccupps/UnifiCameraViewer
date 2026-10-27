@@ -7,11 +7,13 @@ Hard requirements, all deliberate:
 - **Direct login by IP** with a local account. No ui.com/cloud, no MFA.
 - **Low resource use.** Medium channel by default, GPU decode via MSE, minimized windows stop streaming, WebGL only for 360° windows.
 
-Current version: **1.3.0**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
+Current version: **1.4.0**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
 - **1.2.0:** color-range fix for crushed shadows, name label collapse and per-window hide, clock on 360° views, Apply to all, Hide / Show cameras, named layouts with Protect liveview import, signed in-place updates.
 - **1.3.0:** the Setup.exe installer, Arrange and Close all, the layout editor, the tabbed camera list with hover tips, 360° Single view, and undici patched for security.
+- **1.3.1:** portable copies' in-app update fixed (the helper's working folder blocked the swap); Arrange / "Use what's on screen" missing just-shown windows.
+- **1.4.0:** grid windows, Hide from list, camera previews, Adjust picture (brightness / contrast), small app.asar-only updates, async safeStorage.
 
-The owner ran 1.0 and 1.1 on the real consoles. 1.2.0 and 1.3.0 are tested against them only through self-test runs from source on a copy of the config.
+The owner ran 1.0 to 1.2 on the real consoles and has 1.3.1 installed from Setup.exe. Later versions are tested against the real consoles only through self-test runs from source on a copy of the config.
 
 ## Commands
 
@@ -19,47 +21,56 @@ The owner ran 1.0 and 1.1 on the real consoles. 1.2.0 and 1.3.0 are tested again
 npm install
 npm start                 # run from source (uses the real config - quit the installed app first, see Gotchas)
 npm run mock              # fake consoles with ffmpeg test patterns, no network
-npm test                  # all test suites below (~1.5 min, windows flash on screen)
-npm run test:mock         # mock cameras: playback, forced reconnect, 360° quad/panorama, real mouse PTZ input, name label
+npm test                  # all test suites below (~6 min; windows are invisible, PANES_TEST_SHOW=1 to watch)
+npm run test:mock         # mock cameras: playback, forced reconnect, 360° quad/panorama, real mouse PTZ input, name label, Apply to all
 npm run test:hide         # Hide cameras / Show cameras / per-console Hide all, across two launches
-npm run test:range        # SPS color-range rewrite (unit, ffmpeg fixtures) + displayed pixel levels in Chromium
+npm run test:range        # SPS color-range rewrite (unit, ffmpeg fixtures) + displayed pixel levels in Chromium, Adjust picture
 npm run test:layouts      # save / apply named layouts, import a Protect liveview, switch from the tray
-npm run test:update       # signed manifest, verified download, the real folder-swap helper, camera-list Updates
+npm run test:update       # signed manifest, verified download, the real swap helper (folder, installer, app.asar), camera-list Updates
 npm run test:arrange      # layout geometry (unit) + Arrange / Close all on real windows
 npm run test:editor       # layout editor: synthetic drag-and-drop into tiles, 360° view per tile, Edit, fill from screen
-npm run test:e2e          # fake UniFi OS consoles over HTTPS/WSS through the real unifi-protect library
-npm run build:win         # dist/Protect Panes-win32-x64/ + ProtectPanes-win32-x64.zip + ProtectPanes-Setup.exe + latest.json (signed)
+npm run test:list         # camera list: Hide from list, previews (thumbnails, hover, request caching, setting)
+npm run test:grid         # grid windows: built in the editor, tiles live, tile/grid menus, Hide/Show, relaunch, layout switch
+npm run test:e2e          # fake UniFi OS consoles over HTTPS/WSS through the real unifi-protect library (incl. snapshots, 1.3.x passwords)
+npm run build:win         # dist/Protect Panes-win32-x64/ + zip + ProtectPanes-Setup.exe + ProtectPanes-app.asar.gz + latest.json (signed)
 ```
 
 **Run `npm test` after any change and before building.** It prints PASS/FAIL per check, and keeps screenshots of every window plus `result.json` (per-window playback stats) in the printed results folder. **Look at the screenshots** for anything visual. Tests use their own temp settings folder, so they never touch the real config and can run while the app is open.
+
+Test windows are real windows at their real places and sizes, but `keepWindowsOutOfTheWay()` (selftest.js) makes every window invisible, click-through, unfocusable and taskbar-less from the moment it's created. The owner works on this PC while tests run, and visible test windows kept taking the focus. Screenshots (`capturePage`) and pixel checks are unaffected. Self-test runs also turn off Chromium's `CalculateNativeWinOcclusion`. Otherwise a test window covered by the user's windows counts as hidden: `document.hidden` stops the camera list's previews, which once failed the e2e preview check while the owner worked. `PANES_TEST_SHOW=1` keeps the windows visible.
 
 `PANES_DEVTOOLS=1 npm start` opens detached DevTools for every window. `PANES_DEBUG=1` adds debug lines to the log.
 
 ## Layout
 
 ```
-src/main.js                 App lifecycle, camera windows, camera list window, tray, context menu, IPC, settings, dewarp settings
+src/main.js                 App lifecycle, camera windows and grid windows' players, camera list window, tray, context menus, IPC, settings, dewarp settings
 src/console-connection.js   One logged-in console (ProtectClient), connect/backoff, state; channelList / resolveChannel / fisheyeInfo
-src/camera-stream.js        Pumps one camera's livestream subscription to its window (init/media/status), reconnect handling
+src/camera-stream.js        Pumps one camera's livestream subscription to its page (init/media/status), reconnect handling
 src/avc-range.js            Rewrites the H.264 SPS in the init segment to declare full color range (see Gotchas)
 src/grid.js                 Screen layouts (1, 2x2, 1+5 … 5x5, Auto), cell rects, aspect fit, reading order, quality-for-tile-size (no Electron imports)
-src/updater.js              In-place updates: verify signed latest.json, verified download, folder-swap helper (no Electron imports)
+src/grid-window.js          Grid windows: one framed window, a WebContentsView per tile running camera.html?tile=1, tile geometry
+src/previews.js             Camera-list stills: Protect snapshot → data: URL, 30 s cache, 3 requests at a time (no Electron imports)
+src/updater.js              In-place updates: verify signed latest.json, verified download, swap helper for folder / installer / app.asar (no Electron imports)
 src/update-key.js           Release-signing PUBLIC key (generated by scripts/make-signing-key.js)
-src/store.js                config.json load/save (debounced, atomic), DPAPI password encryption via safeStorage
+src/store.js                config.json load/save (debounced, atomic), DPAPI password encryption via async safeStorage
 src/log.js, src/util.js     File logger (rolls at 2 MB); sleep/debounce/throttle/normalizeHost
-src/preload-camera.cjs      Camera window bridge - IN/OUT channel allowlists
+src/preload-camera.cjs      Camera page bridge (windows and tiles) - IN/OUT channel allowlists
+src/preload-grid.cjs        Grid window's own page bridge: grid:layout in, grid:context-menu out
 src/preload-manager.cjs     Camera list bridge - invoke allowlist
-src/renderer/camera.*       Camera window: MSE playback, live-edge tracking, codec fallback, hover bar, status, notices
+src/renderer/camera.*       Camera page: MSE playback, live-edge tracking, codec fallback, hover bar, status, notices, Adjust picture panel
 src/renderer/dewarp.js      360°: WebGL fisheye dewarp (quad / panorama), PTZ input, circle auto-detect, calibration UI
-src/renderer/manager.*      Camera list: Cameras / Layouts / Settings tabs, hover tips (data-tip), vanilla DOM, no innerHTML with camera/console names
-src/mock.js                 Dev-only fake consoles/cameras (--mock); PANES_MOCK_FISHEYE adds a 360 camera
+src/renderer/grid-window.*  The page under a grid window's tiles: empty-tile placeholders, right-click
+src/renderer/manager.*      Camera list: Cameras / Layouts / Settings tabs, previews, hover tips (data-tip), vanilla DOM, no innerHTML with camera/console names
+src/mock.js                 Dev-only fake consoles/cameras (--mock); PANES_MOCK_FISHEYE adds a 360 camera, cfg.mockOffline marks cameras offline
 src/selftest.js             Dev-only harness, active only when PANES_SELFTEST_DIR is set
-test/run.mjs                Test runner (mock, hide, range, layouts and e2e suites with assertions)
-test/fake-console/          Fake UniFi OS console (HTTPS + WSS) and its throwaway self-signed cert
+test/run.mjs                Test runner (all the suites above, with assertions)
+test/legacy-password.cjs    Writes a password the way 1.3.x did (sync safeStorage), for the e2e upgrade check
+test/fake-console/          Fake UniFi OS console (HTTPS + WSS + snapshots) and its throwaway self-signed cert
 test/fixtures/              Synthetic fisheye frames with known geometry (ceiling circle truth: x .513, y .4938, r .4818)
 scripts/build-win.js        @electron/packager folder + zip, then electron-builder NSIS --prepackaged on that same folder -> Setup.exe; signs latest.json if the key exists
 .github/workflows/test.yml  CI: npm test on windows-latest, plus a real Setup.exe install / start / uninstall on the runner
-scripts/sign-release.js     Writes latest.json {payload, signature} for a zip (Ed25519, private key outside the repo)
+scripts/sign-release.js     Writes latest.json {payload, signature} for a zip, installer and app.asar.gz (Ed25519, private key outside the repo)
 scripts/make-signing-key.js One-time: create the signing key pair (refuses to overwrite)
 scripts/verify-release.mjs  Check a release folder like installed copies will (signature, sizes, hashes); the release workflow gates on it
 .github/workflows/release.yml  Tag vX.Y.Z -> test, sign with the UPDATE_SIGNING_KEY secret, verify, smoke-test the installer, publish
@@ -82,12 +93,13 @@ release-notes/vX.Y.Z.md     Release text the workflow publishes
 
 ## IPC
 
-Adding a channel means editing **both** the preload allowlist and `registerIpc()` in main.js. Main identifies camera windows by `event.sender.id`, never by anything the renderer sends.
+Adding a channel means editing **both** the preload allowlist and `registerIpc()` in main.js. Main identifies camera pages (windows and grid tiles) by `event.sender.id` → `senders` → player, never by anything the renderer sends.
 
-- **Camera → main:** `cam:ready`, `cam:aspect {width,height}`, `cam:reset`, `cam:context-menu`, `cam:toggle-top`, `cam:close`, `cam:dewarp {views?, pano?, focus?, circle?}`
-- **Main → camera:** `cam:init`, `cam:media`, `cam:status`, `cam:meta`, `cam:highlight`, `cam:command {cmd: "calibrate" | "autodetect"}`
-- **Camera list (invoke):** `mgr:state`, `mgr:save-console`, `mgr:remove-console`, `mgr:reconnect`, `mgr:open-camera`, `mgr:close-camera`, `mgr:find-camera`, `mgr:set-channel`, `mgr:set-setting`, `mgr:bring-to-front`, `mgr:reset-positions`, `mgr:open-all`, `mgr:hide-cameras consoleId|null`, `mgr:show-cameras consoleId|null`, `mgr:apply-all {consoleId|null, changes}`, `mgr:save-layout name`, `mgr:apply-layout id`, `mgr:delete-layout id`, `mgr:import-liveview {consoleId, liveviewId}`, `mgr:set-update-source`, `mgr:check-update`, `mgr:install-update`, `mgr:close-all consoleId`, `mgr:arrange {templateId}`, `mgr:save-editor-layout {id?, name, displayId, templateId, cells: [{key, mode} | null], apply}`, `mgr:open-log-folder`, `mgr:open-project` (a fixed URL; the renderer can't pass one), `mgr:quit`. `changes` goes through `cleanChanges()`, which keeps only `channel`, `onTop`, `hideName`, `clock` and `range`.
-- **Main → camera list:** `mgr:changed` (throttled). The list also polls every 3 s while visible, for online/offline status.
+- **Camera → main:** `cam:ready`, `cam:aspect {width,height}`, `cam:reset`, `cam:context-menu`, `cam:toggle-top`, `cam:close`, `cam:dewarp {views?, pano?, focus?, circle?}`, `cam:picture {brightness, contrast}`
+- **Main → camera:** `cam:init`, `cam:media`, `cam:status`, `cam:meta`, `cam:highlight`, `cam:command {cmd: "calibrate" | "autodetect" | "picture"}`
+- **Grid window page:** in `grid:layout {rects, filled}`, out `grid:context-menu tileIndex|null`.
+- **Camera list (invoke):** `mgr:state`, `mgr:save-console`, `mgr:remove-console`, `mgr:reconnect`, `mgr:open-camera`, `mgr:close-camera`, `mgr:find-camera`, `mgr:set-channel`, `mgr:set-setting`, `mgr:bring-to-front`, `mgr:reset-positions`, `mgr:open-all`, `mgr:hide-cameras consoleId|null`, `mgr:show-cameras consoleId|null`, `mgr:apply-all {consoleId|null, changes}`, `mgr:save-layout name`, `mgr:apply-layout id`, `mgr:delete-layout id`, `mgr:import-liveview {consoleId, liveviewId}`, `mgr:set-update-source`, `mgr:check-update`, `mgr:install-update`, `mgr:close-all consoleId`, `mgr:arrange {templateId}`, `mgr:save-editor-layout {id?, as: "windows" | "grid", name, displayId, templateId, cells: [{key, mode} | null], apply}`, `mgr:set-list-hidden {key, hidden}`, `mgr:preview key` (→ `{url, at}` or null), `mgr:open-grid id`, `mgr:close-grid id`, `mgr:delete-grid id`, `mgr:open-log-folder`, `mgr:open-project` (a fixed URL; the renderer can't pass one), `mgr:quit`. `changes` goes through `cleanChanges()`, which keeps only `channel`, `onTop`, `hideName`, `clock`, `range` and `picture`.
+- **Main → camera list:** `mgr:changed` (throttled). The list also polls every 3 s while visible, for online/offline status. `mgr:state` carries `openEditor: gridId` once when a tile's menu asked for Edit grid….
 
 ## Config and logs
 
@@ -95,12 +107,13 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
 
 - `config.json`:
   - `consoles[]`: `{id, name, host, username, password: {enc: "safe" | "plain", data}}`
-  - `windows["<consoleId>/<cameraId>"]`: `{open, bounds, channel, onTop, name, hideName, hidden, clock, range, dewarp}`. `range` is `"full" | "limited"` (absent = auto). `clock` true/false overrides the default (on in quad/panorama, off otherwise). `hideName` hides one window's label; `settings.showNames` off hides all of them. `hidden` (with `open: true`) means taken off screen by Hide cameras / Hide all.
-  - `settings`: `{lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin, arrangeQuality, updateSource}`. `arrangeQuality` (default on) lets Arrange set each camera's channel from its tile's physical width: up to 700 px Low, up to 1400 px Medium, above that High. `updateSource` is an `https://` base URL or a folder (UNC or drive path) holding `latest.json` and the zip. Plain http is refused. It defaults to `https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download`, and blank turns checks off. `runApp()` in the tests blanks it unless a suite sets one, so tests never touch the network.
-  - `layouts[]`: `{id, name, windows: {"<consoleId>/<cameraId>": {bounds, channel, onTop, hideName, clock, range, dewarp}}, editor?}`. Saving under an existing name (case-insensitive) replaces it. `editor: {displayId, templateId, cells}` is present only on layouts built in the layout editor, and is what its Edit button reopens.
+  - `windows["<consoleId>/<cameraId>"]`: `{open, bounds, channel, onTop, name, hideName, hidden, listHidden, clock, range, picture, dewarp}`. `range` is `"full" | "limited"` (absent = auto). `clock` true/false overrides the default (on in quad/panorama, off otherwise). `hideName` hides one window's label; `settings.showNames` off hides all of them. `hidden` (with `open: true`) means taken off screen by Hide cameras / Hide all. `listHidden` is Hide from list. `picture` is `{brightness, contrast}` (0.5-2, absent = both 1).
+  - `settings`: `{lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin, arrangeQuality, showPreviews, updateSource}`. `arrangeQuality` (default on) lets Arrange set each camera's channel from its tile's physical width: up to 700 px Low, up to 1400 px Medium, above that High. `updateSource` is an `https://` base URL or a folder (UNC or drive path) holding `latest.json` and the zip. Plain http is refused. It defaults to `https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download`, and blank turns checks off. `runApp()` in the tests blanks it unless a suite sets one, so tests never touch the network.
+  - `layouts[]`: `{id, name, windows: {"<consoleId>/<cameraId>": {bounds, channel, onTop, hideName, clock, range, picture, dewarp}}, editor?}`. Saving under an existing name (case-insensitive) replaces it. `editor: {displayId, templateId, cells}` is present only on layouts built in the layout editor, and is what its Edit button reopens.
+  - `grids[]`: `{id, name, templateId, bounds, open, hidden?, onTop?, editor: {displayId}, tiles: [{key, channel?, range?, picture?, hideName?, clock?, dewarp?} | null]}`. A tile has its own settings, separate from the camera's window, so a 360° camera can be Panorama in a grid and Quad in its window. A tile with no `channel` follows its tile size.
 - `protect-panes.log`: connection log. Rolls to `.log.1` at 2 MB.
 
-Passwords are DPAPI-encrypted (`safeStorage`) and tied to the Windows user. `enc: "plain"` is base64 and only exists in tests and on Linux without a keyring. **Never print or log decrypted passwords.**
+Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tied to the Windows user. `enc: "plain"` is base64 and only exists in tests and on Linux without a keyring. **Never print or log decrypted passwords.**
 
 `dewarp`: `{mode: "off" | "quad" | "panorama", mount: "ceiling" | "wall" | "desk", lensFov, circle: {x, y, r} | null, views: [{pan, tilt, fov} × 4], focus, pano: {pan, tilt}}`
 - Angles are degrees. `fov` is vertical FOV. Pan wraps to (-180, 180]; tilt clamps to ±90.
@@ -193,6 +206,26 @@ Passwords are DPAPI-encrypted (`safeStorage`) and tied to the Windows user. `enc
   - At launch, hidden windows aren't created at all. Show cameras creates them.
   - Any explicit open (switch, Find, Show all, Show cameras) clears `hidden`. Bring to front and Reset window positions leave hidden windows hidden.
   - If nothing is on screen at launch, the camera list opens even with Start hidden on.
+- **Players** (main.js): a player is one camera page and its stream, `{key, consoleId, cameraId, win, wc, stream, aspect}`. It's either a camera window (`camWins`) or a grid tile, which also has `{gw, tile, index, autoChannel}`. Per-camera functions find settings through `entryOf(cw)`: the tile for a tile, `store.data.windows[key]` for a window. Send to the page with `cw.wc`, never `cw.win.webContents`; a tile's `win` is its grid window. Window-only things (aspect lock, bounds, Close this camera, Always on top) check `cw.gw` first.
+- **Grid windows** (grid-window.js).
+  - One framed BrowserWindow, plus a `WebContentsView` per tile loading `camera.html?tile=1`. Tile mode only hides the hover bar; everything else in the camera page works unchanged. The frame is the native one, so move, resize, maximize and full screen come for free.
+  - A view's webContents isn't closed with its window: `#drop()` closes it, or its renderer lingers.
+  - `sync()` matches views to `grid.tiles` by tile object identity, so a layout switch or a new camera keeps the other tiles' pages and streams. The test checks a JS marker survives a switch.
+  - Tile quality: `tileQuality()` sets `autoChannel` from the tile's physical width (debounced 600 ms after a resize, so a drag doesn't restart streams). A tile `channel` set from its menu overrides it.
+  - `page-title-updated` is prevented, or the page's `<title>` renames the window.
+  - Hide / Show cameras (global only) hide grids too; per-console Hide all doesn't, since a grid mixes consoles.
+  - The base page (`grid-window.*`) draws empty tiles and sends `grid:context-menu` with the tile index. An empty tile's menu offers "Put a camera here".
+- **Hide from list** (`windows[key].listHidden`): the camera moves to the collapsed section at the bottom of its console, `openAllCameras()` and the editor palette skip it, and its window closes. A hidden window's status in the list reads "window hidden" so the two kinds of hiding don't read the same.
+- **Camera previews** (previews.js): `Camera.snapshot({ width: 480 })`, the library's GET `/proxy/protect/api/cameras/<id>/snapshot?w=`, the read-only endpoint the web UI uses.
+  - Kept 30 s per camera, failures too, so an offline or refusing camera isn't asked again on every re-render. At most 3 requests at a time. Offline cameras are never asked.
+  - The list asks only for rows on screen (IntersectionObserver) while visible, and refreshes after 60 s; hovering asks for one under 15 s old.
+  - The hover picture is a `popover="manual"`: a plain fixed div can't sit above a modal `<dialog>` (top layer). Opening a modal makes Chromium send its own `pointerover` for what's now under the real cursor, which clears the hover; tests wait 300 ms after opening the editor before hovering.
+- **Adjust picture** is a CSS `filter: brightness() contrast()` on `<video>` and the dewarp canvas; `capturePage` includes it, which is how the range suite measures it. While the panel is open, `cam:meta` doesn't overwrite the sliders.
+- **safeStorage is async** (store.js). On Windows the sync and async APIs share the DPAPI-wrapped key in `Local State` and the "v10" format, so each reads what the other wrote (checked on the owner's real config, and in e2e via `test/legacy-password.cjs`). Chromium writes a newly created key to `Local State` only on a normal shutdown or ~10 s later: a script that encrypts and then calls `app.exit()` loses the key, and with it the password. Use `app.quit()`.
+- **Small updates.** A release also carries `ProtectPanes-app.asar.gz`; `latest.json`'s signed `asar` entry has its `electron` version and the unpacked size/SHA-256. A copy on that same Electron, installed or portable, downloads only that; the helper's `-AsarGz` mode gunzips next to `resources\app.asar`, checks the unpacked hash, swaps the one file and rolls back on failure.
+  - It's `.gz`, not `.asar`, so Electron's patched `fs` never treats the download as an archive.
+  - Everything the app is lives in app.asar (no native modules, nothing unpacked). **A release that changes anything else in the folder** (Electron, packager or builder options, the icon) **must leave the .gz out** (delete it before signing), so every copy takes the full update.
+  - An installed copy's Settings → Apps version stays at what Setup.exe last wrote until the next full update.
 - **Windows never steal focus.** Use `showInactive()`, never `show()`/`focus()` for camera windows: exacqVision is in use on the same screen.
 - **Moving vs aiming.** The window drag region is only the hover bar (`-webkit-app-region: drag`). The picture itself takes right-click (context menu) and, in 360° views, drag/scroll for PTZ. Lock layout disables both window moves and PTZ.
 - `src/mock.js` and `src/selftest.js` ship inside the build but do nothing unless `--mock` or `PANES_SELFTEST_DIR` is set.
@@ -219,8 +252,12 @@ When adding a test, extend `test/run.mjs`. `PANES_SELFTEST_ACTIONS` (JSON) drive
 - `key` `{win, key}`
 - `resize` `{win, size: [w, h]}`
 - `menu-click` `{win, label}`: runs that context-menu item's click handler (searches submenus too)
+- `camera-js` `{win, js}`: runs JS in a camera page and stores the result as `value`
 - `tray-click` `{label}`: same, for the tray menu (no `win`)
 - `manager-js` `{js}`: runs JS in the camera list window and stores the result as `value` (no `win`). The list must be open (`startHidden: false`).
+- `grid-menu-click` `{grid, index, label}`: a grid window's own menu (an empty tile's, with `index`)
+
+Any camera action takes `tile: "<grid name>#<index>"` instead of `win` to drive a grid tile. Tiles appear in samples as `grid:<grid name>#<index>`, with the view's `bounds` and the grid window's `visible`.
 
 `PANES_SELFTEST_DUMP_SEC=n` saves the first n seconds of each window's stream as `<cameraId>.mp4` in the results folder. That's how the color-range finding was measured (`ffmpeg -i` for flags, `signalstats` for levels). Against real consoles it records real video, so delete the dumps afterwards.
 
@@ -244,7 +281,7 @@ The workflow:
 5. Deletes the key.
 6. Runs `scripts/verify-release.mjs`: the signature against the public key built into the app, then each file's size and SHA-256. A wrong secret stops here.
 7. Smoke-tests that exact installer (install, version, uninstall).
-8. Runs `gh release create` with all three files.
+8. Runs `gh release create` with all four files (Setup.exe, the zip, `ProtectPanes-app.asar.gz`, `latest.json`).
 
 Installed copies find the release through `releases/latest/download/latest.json`.
 
@@ -252,7 +289,7 @@ The signing key:
 - The private key is `%USERPROFILE%\.protect-panes\update-signing-key.pem` on the maintainer's PC, and the same content is in the repo secret `UPDATE_SIGNING_KEY`.
 - Never commit it. Back it up: without it, installed copies can't update in place.
 - `scripts/make-signing-key.js` refuses to replace an existing key.
-- A local `npm run build:win` signs with the file, so a release can still be built by hand if CI is down. Attach the same three files.
+- A local `npm run build:win` signs with the file, so a release can still be built by hand if CI is down. Attach the same four files.
 
 For a first install, or a copy older than 1.2.0, use the Setup.exe or replace the folder with the zip. Settings in `%APPDATA%` carry over.
 
@@ -278,7 +315,8 @@ Owner-requested features, with findings and open questions, are in `ROADMAP.md`.
 
 - Live view only: no playback, timeline, events, audio or two-way talk.
 - PTZ cameras can't be steered; only the 360° virtual PTZ exists.
-- One window per camera: the same camera can't be open twice.
-- Imported Protect liveviews become even grids. Uneven layouts and slot cycling aren't reproduced.
+- One window per camera: the same camera can't have two floating windows (it can be in a window and in grid tiles).
+- Imported Protect liveviews become even grids of separate windows. Uneven layouts and slot cycling aren't reproduced, and they don't import as grid windows.
+- Grid windows have no per-tile cycling, and no "enlarge this tile" (switch the layout, or open the camera's own window).
 - Doorbell package-camera lens isn't exposed (the library supports `source: {type: "lens"}`).
 - Desk-mount panorama and lens FOV > 180° are implemented but have only light test coverage.

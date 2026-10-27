@@ -1,6 +1,6 @@
 # Roadmap
 
-Owner requests after running 1.1.0 on the real consoles (2026-10-26). Each item records what's already known from the code and the live run, the likely approach, and what's still open. All eleven are built: 1-7 shipped in 1.2.0, 8-11 in 1.3.0.
+Owner requests after running 1.1.0 on the real consoles (2026-10-26), and later. Each item records what's already known from the code and the live run, the likely approach, and what's still open. Items 1-7 shipped in 1.2.0 and 8-11 in 1.3.0. The follow-ups built for 1.4.0 are: #1's brightness/contrast, #5's grid window, #6's small updates, the housekeeping item, and the new #12 and #13.
 
 Evidence from that session: self-test run against both real consoles (scratch copy of the config). It covered the 4 saved windows, 3 normal and one 360° camera in quad, all on channel 2 (Low, 640×360 / 640×640). All 4 were live at 0.35-0.44 s lag with 0-1 dropped frames over 20 s, and the quad ran on hardware GL (Iris Xe, D3D11).
 
@@ -12,7 +12,7 @@ Evidence from that session: self-test run against both real consoles (scratch co
 - Every measured camera sends full-range luma, but three of the four don't flag it. Chromium reads those as limited range and turns everything below Y=16 solid black. One camera's picture in the app was 6.0% pure black, against 0.1% for a correct PC-range decode.
 - The app now rewrites the SPS to declare full range (`src/avc-range.js`). Afterwards it measured 0.02%. Shadows keep their detail; mid-tones barely move.
 - Right-click → **Color range** overrides per camera.
-- Not built: the brightness/contrast control. It's only worth doing if pictures still look dark next to Protect's own viewer. Test 1 below (side by side with Protect's web view) still needs the owner.
+- Brightness/contrast: built for 1.4.0 at the owner's request (2026-10-27). Right-click → **Adjust picture…** has Brightness and Contrast sliders (50-200 %), saved per window as `picture`. It's a CSS filter on the video and the dewarp canvas. The range suite measures it on screen: brightness 200 % shows Y=24 as ~48, and contrast 50 % lifts black to ~64. It's cosmetic and can't recover shadow detail the encoder dropped. Test 1 below (side by side with Protect's web view) still needs the owner.
 
 Original notes:
 
@@ -68,8 +68,13 @@ Original notes: quality (`channel`), always-on-top and dewarp settings were per 
 **Status:** built (2026-10-27) as (a) plus Protect liveview import, shipped in 1.2.0.
 - Named layouts are saved from the camera list and switched from the list or the tray.
 - Import tiles a liveview's slots as an even grid, using the first camera of each slot. Uneven layouts and slot cycling aren't reproduced.
-- (b), a grid window, isn't built.
 - `npm run test:layouts` and the e2e suite cover it; the e2e suite checks the real library's `client.liveviews`.
+- (b), the grid window: built for 1.4.0 at the owner's request.
+  - The layout editor's **Open as → One grid window** makes one framed window with a WebContentsView per tile running the ordinary camera page. Each tile keeps 360° dewarp and PTZ, the clock, picture and the right-click menu.
+  - Tiles have their own settings, so a camera can look different in a grid and in its window. Quality follows the tile's size unless the tile picks one.
+  - Grids are managed from the tile menu (Layout, Edit grid…, Full screen, Close grid, Remove from grid; "Put a camera here" on an empty tile), the Layouts tab and the tray.
+  - They reopen at launch and hide with Hide cameras. `npm run test:grid` covers it.
+  - Not built: slot cycling, importing a Protect liveview as a grid, and "enlarge this tile".
 
 Original notes:
 
@@ -88,7 +93,11 @@ Recommend (a) first, plus importing Protect liveviews as named layouts. Do (b) o
 - A PowerShell helper swaps the folder, with rollback, then relaunches.
 - `npm run test:update` covers it, including the real helper.
 - Signing key: `%USERPROFILE%\.protect-panes\update-signing-key.pem`, public half in `src/update-key.js`.
-- Not built: the asar-only delta. Every update is the full zip.
+- The asar-only delta: built for 1.4.0.
+  - A release also carries `ProtectPanes-app.asar.gz` (~1.5 MB). The signed manifest gives it the Electron version it needs and the size/SHA-256 of the unpacked file.
+  - Copies on that Electron, installed or portable, download only that. The helper checks the unpacked hash and swaps `resources\app.asar` with rollback.
+  - Everything else falls back to the full installer or zip.
+  - Tradeoff: an installed copy's Settings → Apps version lags until the next full update.
 - Default update location: this repo's latest GitHub release (`releases/latest/download`).
 - Portable copies of 1.2.0 and 1.3.0 started from Explorer or a shortcut could not install: the helper inherited the install folder as its working folder, which blocks renaming it. Fixed in 1.3.1. Installed copies were not affected.
 
@@ -157,8 +166,31 @@ Open:
 - A camera filter, and a per-console "⋯" menu for the rarely used actions.
 - An About section with the version, the project page and the log folder.
 
+## 12. Hide unused cameras in the camera list
+
+Requested 2026-10-27: "a few cameras that are offline because they aren't being used right now".
+
+**Status:** built for 1.4.0.
+- **Hide** on a camera's row (`windows[key].listHidden`) moves it into a collapsed **Hidden from list (N)** section at the bottom of its console, with **Show in list** to put it back.
+- Show all and the layout editor skip it, its window closes, and the camera count leaves it out.
+- `npm run test:list` covers it.
+
+## 13. Previews in the camera list
+
+Requested 2026-10-27: "a way to show a preview or screenshot in the camera selection window".
+
+**Status:** built for 1.4.0.
+- Each camera row has a still from Protect's snapshot endpoint (the read-only one its web UI uses for thumbnails, through the library's `Camera.snapshot()`). Hovering it, or a camera in the layout editor, shows a bigger one with its age.
+- Requests are limited:
+  - each picture is kept 30 s;
+  - at most 3 requests run at once;
+  - offline cameras are never asked;
+  - only rows on screen while the list is visible are fetched, refreshed about once a minute.
+- Settings → **Show camera previews** turns it off.
+- `npm run test:list` and the e2e suite cover it; e2e checks a real JPEG through the library.
+
 ---
 
 ## Housekeeping found along the way
 
-- Electron 45 warns that `safeStorage.decryptString` (sync) is deprecated in favor of `decryptStringAsync`. It works today, but it will break on a future Electron bump. Move store.js to the async API before upgrading Electron.
+- Done for 1.4.0: store.js uses safeStorage's async API (the sync one is deprecated in Electron 45 and would break on a later upgrade). On the owner's real config, the async API reads passwords the sync one saved, and the reverse also works, so going back to 1.3.x still works. e2e checks a password saved the 1.3.x way.

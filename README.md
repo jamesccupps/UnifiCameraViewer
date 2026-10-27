@@ -31,12 +31,16 @@ Then, in Protect Panes, click **Add console**. Enter a name ("Building"), the co
 
 - The camera list has three tabs: **Cameras**, **Layouts** and **Settings**. Hover over any button for a short explanation.
 - On **Cameras**, flip a camera's switch to open its window. **Show all** opens every camera on that console, and **Close all** closes them. Each camera remembers its place. Type in **Find a camera…** to narrow a long list.
+- Each camera in the list shows a **preview**, a still from the camera refreshed about once a minute while the list is open. Hover it for a bigger one. Cameras in the layout editor show theirs on hover too. Turn them off in **Settings → Show camera previews**.
+- **Hide** on a camera's row tucks a camera you don't use into **Hidden from list** at the bottom of its console, for example cameras that are offline for now. **Show all** and the layout editor skip it. Expand the section and click **Show in list** to bring it back.
 - **Arrange** tiles the camera windows on your screen. Cameras tab → **Arrange** picks the best-fitting grid for that screen's size and shape; **Layouts** has fixed choices (2×2, 1+5, 1+7, 3×3, 2+8, 1+12, 4×4, 5×5). The camera at the top left gets the big tile. With **Match each camera's quality to its tile size** on, small tiles get the Low stream and big ones Medium or High. The tray menu has **Arrange windows** too.
 - **Move** a window by hovering over it and dragging the bar that appears at the top. **Resize** from any edge. With **Keep video shape** on, windows snap to the camera's aspect ratio so there are no black bars.
 - **Right-click** a camera for quality (High / Medium / Low), Always on top, Lock layout, Reconnect, or Close.
-- **Right-click → Apply to all cameras** copies that window's quality, always on top, name, time or color range to every camera on both consoles, including ones you haven't opened yet. In the camera list, **Quality for all…** sets one console's cameras at once.
+- **Right-click → Adjust picture…** opens Brightness and Contrast sliders for that camera. It changes how the picture is shown, not what the camera records, and can't bring back detail lost in very dark areas.
+- **Right-click → Apply to all cameras** copies that window's quality, always on top, name, time, color range or picture to every camera on both consoles, including ones you haven't opened yet. In the camera list, **Quality for all…** sets one console's cameras at once.
 - **Hide cameras** (tray menu or the top of the camera list) takes every camera window off the screen and pauses its video. **Show cameras** puts exactly those windows back where they were, even after a restart. Each console also has **Hide all** / **Restore** for just its own cameras.
 - **New layout…** (Layouts tab) opens the layout editor: pick a screen and a grid, then drag cameras from the list onto the tiles. Double-click a camera to fill the next tile, or drag tiles onto each other to swap them. **Use what's on screen** starts from the windows you have open. Each 360° camera can show as Quad (the default), Single view, Panorama or raw Fisheye in its tile. **Save and apply** puts it on screen; **Edit** on a saved layout reopens it.
+- **Grid windows**: in the layout editor, set **Open as → One grid window** to put all the cameras in tiles of a single window, like a Protect liveview. Move it, resize it, maximize it or put it in full screen (right-click → **Full screen**) like any window. Its tiles follow its size, and each tile picks its stream quality from its size. Right-click a tile for that camera's options in this grid (quality, 360° view, color range, picture, name, time, **Remove from grid**) and the grid's own (**Layout**, **Edit grid…**, Always on top, **Close grid**). Right-click an empty tile to **Put a camera here**. Grid windows are listed on the Layouts tab and in the tray's **Grid windows**, reopen where they were at the next start, and hide with **Hide cameras**. A camera can be in its own window and in a grid at the same time, with different settings in each.
 - **Layouts**: you can also arrange the windows by hand, then **Save current arrangement…** in the camera list. Switch between layouts from the camera list or the tray menu's **Layouts**. **Import a Protect liveview…** turns one of the console's saved liveviews into a layout: its cameras are tiled as a grid on the screen the camera list is on.
 - Small windows shrink the name label to just the status dot. **Right-click → Show name** turns the label off for one window; **Show camera names** in settings turns it off everywhere.
 - **Lock layout** (tray menu, right-click menu, or settings) stops windows from being moved or resized and hides the hover bar. Use it once everything is placed.
@@ -81,6 +85,8 @@ Installed copies (from `ProtectPanes-Setup.exe`, 1.3.0 on) and portable copies f
 2. Click **Check for updates**. A newer version is downloaded and checked first: it has to carry the release signature this copy of the app trusts, and match its signed checksum. Anything else is refused.
 3. Click **Install … and restart**. The app closes, installs the new version and opens again. Installer copies run the new installer silently; portable copies swap their folder. Settings and layouts carry over.
 
+From 1.4.0 on, most updates are small. When a release uses the same Electron as the copy you're running, only the app's own file changes, so the download is a couple of MB instead of 120-160 MB. Releases that move to a new Electron still come as the full installer or zip. One side effect on installed copies: Settings → Apps keeps showing the version the installer last wrote until the next full update. The app's own About section always shows the real version.
+
 The folder the app lives in has to be one you can write to, e.g. `C:\Tools\Protect Panes`, not `C:\Program Files`. When an update location is set, the app also checks once at startup (one small request for `latest.json`) and says so in the list and the tray menu. It never downloads without a click.
 
 Portable copies older than 1.3.1 can't update themselves. 1.2.0 and 1.3.0 download the update, then fail with *a file in it is still in use* and reopen the old version. Install once by hand: quit the app (tray → **Quit**) and run `ProtectPanes-Setup.exe` (your settings carry over), or replace the folder with the latest zip.
@@ -103,9 +109,11 @@ The new build lands in `dist\`. Your settings in `%APPDATA%` carry over.
 npm install
 npm start              # run from source (quit the installed app first)
 npm run mock           # fake consoles with test patterns
-npm test               # regression tests: mock cameras + fake UniFi OS consoles
+npm test               # regression tests: mock cameras + fake UniFi OS consoles (~6 min)
 npm run build:win      # portable Windows build + zip in dist\
 ```
+
+The tests run the real app. Its windows stay invisible and click-through, and never take the focus, so you can keep working while they run. Set `PANES_TEST_SHOW=1` to watch them.
 
 See `CLAUDE.md` for architecture, gotchas and the test harness, and `ROADMAP.md` for what's been asked for and how each item was investigated.
 
