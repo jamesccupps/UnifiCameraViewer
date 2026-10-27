@@ -1,6 +1,7 @@
 import { BrowserWindow, WebContentsView } from "electron";
 import { cellRects, templateById } from "./grid.js";
 import { debounce } from "./util.js";
+import { placeWindow, windowBounds } from "./window-bounds.js";
 
 /*
  * Grid windows: one framed window holding several cameras in a layout's tiles, like a Protect
@@ -39,8 +40,9 @@ export class GridWindow {
     if (this.isOpen) return;
     const d = this.#deps;
     const s = d.settings();
+    const bounds = d.fitBounds(this.grid.bounds) ?? d.defaultBounds();
     const win = new BrowserWindow({
-      ...(d.fitBounds(this.grid.bounds) ?? d.defaultBounds()),
+      ...bounds,
       show: false,
       title: this.grid.name,
       backgroundColor: "#000000",
@@ -54,6 +56,7 @@ export class GridWindow {
       resizable: !s.lockLayout,
       webPreferences: { preload: d.gridPreload, contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
     });
+    placeWindow(win, bounds); // constructor bounds alone come out a few DIP off (window-bounds.js)
     this.win = win;
     win.loadFile(d.gridPage);
     win.on("page-title-updated", (e) => e.preventDefault()); // the window is called what the grid is
@@ -62,7 +65,7 @@ export class GridWindow {
     win.webContents.on("did-finish-load", () => this.#layout());
     const saveBounds = debounce(() => {
       if (!this.isOpen || win.isMinimized() || win.isMaximized() || win.isFullScreen()) return;
-      this.grid.bounds = win.getBounds();
+      this.grid.bounds = windowBounds(win);
       d.save();
     }, 250);
     win.on("move", saveBounds);

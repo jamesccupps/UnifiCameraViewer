@@ -33,6 +33,13 @@ function check(name, ok, detail = "") {
   if (!ok) failures++;
 }
 
+// Same position, and the same size give or take the one-off 1-2 DIP that setAspectRatio trims when a
+// window's video (and so its aspect lock) arrives. A sample from before that compares fine with one
+// after. Exact sizes across launches are the bounds suite's job.
+function samePlace(a, b) {
+  return !!(a && b && a.x === b.x && a.y === b.y && Math.abs(a.width - b.width) <= 2 && Math.abs(a.height - b.height) <= 2);
+}
+
 function tmpDir(label) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `protect-panes-${label}-`));
 }
@@ -336,7 +343,6 @@ async function hideSuite() {
   const end1 = last(run1.result);
   const buttons = run1.result.actions.find((a) => a.act.js === readButtons)?.value;
   const vis = (cams) => JSON.stringify(Object.fromEntries(Object.entries(keys).map(([n, k]) => [n, cams[k]?.visible])));
-  const sameBounds = (a, b) => a && b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 
   check("Garage Hide all clicked in the camera list", hideB?.value === true, hideB?.error);
   check("Hide all hid only Garage's window and paused its stream",
@@ -346,7 +352,7 @@ async function hideSuite() {
     buttons?.garage?.includes("Restore") && !buttons.garage.includes("Hide all") && buttons.header === "Show cameras" && buttons.rampStatus?.includes("hidden"),
     JSON.stringify(buttons));
   check("Show cameras brought the window back live at the same place",
-    afterShow[keys.ramp]?.visible === true && afterShow[keys.ramp]?.status === "live" && sameBounds(afterShow[keys.ramp]?.bounds, firstSample[keys.ramp]?.bounds),
+    afterShow[keys.ramp]?.visible === true && afterShow[keys.ramp]?.status === "live" && samePlace(afterShow[keys.ramp]?.bounds, firstSample[keys.ramp]?.bounds),
     `status=${afterShow[keys.ramp]?.status} ${JSON.stringify(afterShow[keys.ramp]?.bounds)} vs ${JSON.stringify(firstSample[keys.ramp]?.bounds)}`);
   check("Hide cameras hid every window, and Bring to front left them hidden",
     Object.values(keys).every((k) => end1[k]?.visible === false && end1[k]?.status === "paused"), vis(end1));
@@ -374,10 +380,55 @@ async function hideSuite() {
   for (const [name, key] of Object.entries(keys)) {
     const c = end2[key];
     check(`after relaunch, Show cameras restored ${name} live at its saved place`,
-      c?.visible && c.status === "live" && c.decodedFrames >= 30 && sameBounds(c.bounds, firstSample[key]?.bounds),
+      c?.visible && c.status === "live" && c.decodedFrames >= 30 && samePlace(c.bounds, firstSample[key]?.bounds),
       c && `status=${c.status} frames=${c.decodedFrames} ${JSON.stringify(c.bounds)} vs ${JSON.stringify(firstSample[key]?.bounds)}`);
   }
   check("hidden flags cleared after Show cameras", Object.values(keys).every((k) => run2.config.windows[k]?.open === true && !run2.config.windows[k]?.hidden));
+  console.log(`  results: ${userData}`);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Window sizes across launches (mock consoles): at 150 % scaling Electron reads a window back up to
+// 1 DIP bigger than it was set (4 DIP for constructor bounds), and saving that made every window
+// grow on each launch. Odd sizes and positions, aspect lock off so nothing snaps the size back.
+// The scale is forced to 1.5 so this reproduces on any display, CI's 100 % included.
+
+async function boundsSuite() {
+  console.log("\nWindow bounds suite (mock consoles, three launches)");
+  const userData = tmpDir("bounds");
+  const A = "aaaaaaaa-0000-4000-8000-000000000001";
+  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1` };
+  const start = {
+    [keys.lobby]: { x: 37, y: 211, width: 641, height: 361 },
+    [keys.dock]: { x: 733, y: 77, width: 577, height: 355 },
+    grid: { x: 101, y: 451, width: 801, height: 451 },
+  };
+  fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock"] }],
+    windows: {
+      [keys.lobby]: { open: true, bounds: start[keys.lobby], channel: 2 },
+      [keys.dock]: { open: true, bounds: start[keys.dock], channel: 2 },
+    },
+    grids: [{ id: "grid-1", name: "Odd", templateId: "2x2", bounds: start.grid, open: true, tiles: [{ key: keys.lobby, channel: 2 }, null, null, null] }],
+    settings: { startHidden: true, lockAspect: false },
+  }, null, 2));
+
+  const runs = [];
+  for (let i = 1; i <= 3; i++) {
+    runs.push(await runApp({ userData, results: path.join(userData, `results-${i}`), seconds: 6, extraArgs: ["--mock", "--force-device-scale-factor=1.5"] }));
+  }
+  const saved = (r) => ({ [keys.lobby]: r.config.windows[keys.lobby]?.bounds, [keys.dock]: r.config.windows[keys.dock]?.bounds, grid: r.config.grids[0]?.bounds });
+  const sameBounds = (a, b) => a && b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+  const scale = runs[0].result.displays?.[0]?.scaleFactor;
+  check(`saved window and grid bounds unchanged after three launches (display scale ${scale})`,
+    runs.every((r) => Object.entries(saved(r)).every(([k, b]) => sameBounds(b, start[k]))),
+    JSON.stringify(runs.map(saved)));
+  // What's on screen may read a DIP bigger than what was set, but it must be the same every launch.
+  const onScreen = (r) => [keys.lobby, keys.dock].map((k) => r.result.samples.at(-1)?.cams[k]?.bounds)
+    .concat(Object.entries(r.result.windows).find(([n]) => n.includes("Odd"))?.[1]);
+  check("on-screen bounds identical on every launch", runs.every((r) => JSON.stringify(onScreen(r)) === JSON.stringify(onScreen(runs[0]))) && onScreen(runs[0]).every(Boolean),
+    JSON.stringify(runs.map(onScreen)));
   console.log(`  results: ${userData}`);
 }
 
@@ -445,7 +496,6 @@ async function layoutsSuite() {
   const mid = result.samples.filter((s) => s.t > applyAct?.t && s.t < trayAct?.t).at(-1)?.cams ?? {};
   const end = last(result);
   const openSet = (cams) => Object.keys(cams).map((k) => Object.entries(keys).find(([, v]) => v === k)?.[0] ?? k).sort().join(",");
-  const sameBounds = (a, b) => a && b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
   const names = config.layouts?.map((l) => l.name) ?? [];
 
   check("Save current layout stored the on-screen windows", names.includes("Everything") && Object.keys(config.layouts.find((l) => l.name === "Everything").windows).length === 3, JSON.stringify(names));
@@ -459,7 +509,7 @@ async function layoutsSuite() {
   check("liveview layout windows live", ["lobby", "stair", "dock"].every((n) => mid[keys[n]]?.status === "live"),
     JSON.stringify(["lobby", "stair", "dock"].map((n) => mid[keys[n]]?.status)));
   check("tray Layouts switched back: same windows at the same places",
-    openSet(end) === "dock,lobby,ramp" && ["lobby", "dock", "ramp"].every((n) => sameBounds(end[keys[n]]?.bounds, first[keys[n]]?.bounds) && end[keys[n]]?.status === "live"),
+    openSet(end) === "dock,lobby,ramp" && ["lobby", "dock", "ramp"].every((n) => samePlace(end[keys[n]]?.bounds, first[keys[n]]?.bounds) && end[keys[n]]?.status === "live"),
     `${openSet(end)} ${JSON.stringify(["lobby", "dock", "ramp"].map((n) => [end[keys[n]]?.bounds, first[keys[n]]?.bounds]))}`);
   check("window left out of the layout is closed in config", config.windows[keys.stair]?.open === false);
   console.log(`  results: ${results}`);
@@ -1538,6 +1588,7 @@ async function e2eSuite() {
 try {
   if (suite === "mock" || suite === "all") await runSuite(mockSuite);
   if (suite === "hide" || suite === "all") await runSuite(hideSuite);
+  if (suite === "bounds" || suite === "all") await runSuite(boundsSuite);
   if (suite === "range" || suite === "all") await runSuite(rangeSuite);
   if (suite === "layouts" || suite === "all") await runSuite(layoutsSuite);
   if (suite === "arrange" || suite === "all") await runSuite(arrangeSuite);

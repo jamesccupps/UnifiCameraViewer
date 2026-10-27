@@ -12,6 +12,7 @@ import { decryptPassword, DEFAULT_SETTINGS, encryptPassword, newId, Store } from
 import { UPDATE_PUBLIC_KEY } from "./update-key.js";
 import { sourceKind, Updater } from "./updater.js";
 import { debounce, normalizeHost, syncLoginItem, throttle } from "./util.js";
+import { placeWindow, windowBounds } from "./window-bounds.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS = path.join(__dirname, "..", "assets");
@@ -261,6 +262,7 @@ function openCameraWindow(key, { focus = false, flash = true } = {}) {
       spellcheck: false,
     },
   });
+  placeWindow(win, bounds); // constructor bounds alone come out a few DIP off (window-bounds.js)
 
   const wcId = win.webContents.id;
   const cw = { key, consoleId, cameraId, win, wc: win.webContents, stream: null, aspect: null };
@@ -286,7 +288,7 @@ function openCameraWindow(key, { focus = false, flash = true } = {}) {
 
   const saveBounds = debounce(() => {
     if (win.isDestroyed() || win.isMinimized() || win.isMaximized()) return;
-    entry.bounds = win.getBounds();
+    entry.bounds = windowBounds(win);
     store.save();
     notifyManager(); // it may be on another screen now
   }, 250);
@@ -437,7 +439,7 @@ function arrangeWindows(templateId = "auto", display = arrangeDisplay(false)) {
     const cw = wins[i];
     const b = fitAspect(rects[i], cw.aspect ?? 16 / 9);
     if (cw.win.isMaximized()) cw.win.unmaximize();
-    cw.win.setBounds(b);
+    placeWindow(cw.win, b);
     if (store.settings.arrangeQuality) {
       const ch = channelForTile(b.width * display.scaleFactor);
       if (store.data.windows[cw.key]?.channel !== ch) setChannel(cw, ch);
@@ -459,7 +461,7 @@ function layoutEntry(key) {
   const cw = camWins.get(key);
   const out = {};
   for (const f of LAYOUT_FIELDS) if (entry[f] !== undefined) out[f] = structuredClone(entry[f]);
-  if (cw && !cw.win.isDestroyed() && !cw.win.isMinimized() && !cw.win.isMaximized()) out.bounds = cw.win.getBounds();
+  if (cw && !cw.win.isDestroyed() && !cw.win.isMinimized() && !cw.win.isMaximized()) out.bounds = windowBounds(cw.win);
   return out;
 }
 
@@ -509,7 +511,7 @@ function applyLayout(id) {
     if (cw && !cw.win.isDestroyed()) {
       if (cw.win.isMaximized()) cw.win.unmaximize();
       const b = fitBounds(entry.bounds);
-      if (b) cw.win.setBounds(b);
+      if (b) placeWindow(cw.win, b);
       applyAspect(cw);
       cw.win.setAlwaysOnTop(!!entry.onTop, "floating");
       if (restart) cw.stream.restart();
@@ -1279,9 +1281,9 @@ function applyAspect(cw) {
   cw.win.setAspectRatio(cw.aspect);
   if (cw.win.isMaximized()) return;
   // Snap the current size to the video's shape so there are no black bars.
-  const b = cw.win.getBounds();
+  const b = windowBounds(cw.win);
   const h = Math.round(b.width / cw.aspect);
-  if (Math.abs(h - b.height) > 2) cw.win.setBounds({ ...b, height: Math.max(90, h) });
+  if (Math.abs(h - b.height) > 2) placeWindow(cw.win, { ...b, height: Math.max(90, h) });
 }
 
 function fitBounds(b) {
@@ -1309,7 +1311,7 @@ function tileOpenWindows() {
   for (const cw of camWins.values()) {
     const b = nextDefaultBounds();
     if (cw.win.isMaximized()) cw.win.unmaximize();
-    cw.win.setBounds(b);
+    placeWindow(cw.win, b);
     applyAspect(cw);
     if (!store.data.windows[cw.key]?.hidden) cw.win.showInactive();
   }
@@ -1318,7 +1320,7 @@ function tileOpenWindows() {
     if (!gw.isOpen) continue;
     if (gw.win.isFullScreen()) gw.win.setFullScreen(false);
     if (gw.win.isMaximized()) gw.win.unmaximize();
-    gw.win.setBounds({ x: a.x + 40, y: a.y + 40, width: Math.round(a.width * 0.7), height: Math.round(a.height * 0.7) });
+    placeWindow(gw.win, { x: a.x + 40, y: a.y + 40, width: Math.round(a.width * 0.7), height: Math.round(a.height * 0.7) });
   }
 }
 
