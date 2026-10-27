@@ -295,7 +295,14 @@ For a first install, or a copy older than 1.2.0, use the Setup.exe or replace th
 
 The exe is unsigned, so SmartScreen shows "Run anyway" on first launch.
 
-**Checking that a packaged build really updates itself** (done for 1.2.0; repeat when updater.js or the helper changes):
+**Checking that a packaged build really updates itself** (done for 1.2.0, and for 1.4.0's small update; repeat when updater.js or the helper changes).
+
+For the small update, N+1 needn't be a second build. Unpack N's `app.asar` with `@electron/asar`, bump `version` in its package.json, repack and gzip it, and sign it with `signRelease({ zip, asar: { gz, unpacked, electron } })`. Start N from inside its folder (`Start-Process -WorkingDirectory`), as Explorer does. 1.4.0 → 1.4.1 that way:
+- the log shows "1.4.1 (asar) downloaded and verified (1329732 bytes)", then "1.4.1 starting";
+- `resources\` keeps only `app.asar` (plus electron-builder's `elevate.exe`);
+- the exe's file version stays 1.4.0.
+
+For a full update:
 1. Build version N+1 and move its zip and `latest.json` to a scratch release folder. Delete that folder afterwards: it's validly signed.
 2. Build N and copy `dist/Protect Panes-win32-x64` to a scratch `Tools\Protect Panes`.
 3. Run that exe with these settings:
