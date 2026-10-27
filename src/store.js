@@ -25,6 +25,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   hideFromTaskbar: true,
   startHidden: true,
   launchAtLogin: false,
+  updateSource: "", // https:// base URL or folder holding latest.json + the release zip (see updater.js)
 });
 
 function defaults() {

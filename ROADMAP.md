@@ -82,7 +82,16 @@ Recommend (a) first, plus importing Protect liveviews as named layouts. Do (b) o
 
 ## 6. Update in place instead of downloading a new zip
 
-**Status:** not built. Releases are an unsigned portable zip (~159 MB), and the owner replaces the folder by hand.
+**Status:** built (2026-10-27) as the recommended in-app updater, unreleased.
+- Settings → Updates takes an https:// URL or a folder holding a release.
+- Install requires an Ed25519-signed `latest.json` and a zip that matches its signed checksum.
+- A PowerShell helper swaps the folder, with rollback, then relaunches.
+- `npm run test:update` covers it, including the real helper.
+- Signing key: `%USERPROFILE%\.protect-panes\update-signing-key.pem`, public half in `src/update-key.js`.
+- Not built: the asar-only delta. Every update is the full zip.
+- Open: the default update location, which waits on the GitHub repo.
+
+Original notes: releases were an unsigned portable zip (~159 MB), and the owner replaced the folder by hand.
 
 Options:
 - **Squirrel / electron `autoUpdater`.** Needs an installer, an update feed, and realistically code signing. That's a lot of process for a single-site tool.

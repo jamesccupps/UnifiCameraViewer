@@ -15,6 +15,8 @@
     "test:hide": "node test/run.mjs hide",
     "test:range": "node test/run.mjs range",
     "test:layouts": "node test/run.mjs layouts",
+    "test:update": "node test/run.mjs update",
+    "sign-release": "node scripts/sign-release.js",
     "test:e2e": "node test/run.mjs e2e"
   },
   "dependencies": {

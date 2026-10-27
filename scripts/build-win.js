@@ -6,6 +6,7 @@ import { packager } from "@electron/packager";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { DEFAULT_KEY_FILE, signRelease } from "./sign-release.js";
 
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
 
@@ -27,7 +28,7 @@ const [appPath] = await packager({
     ProductName: "Protect Panes",
     InternalName: "ProtectPanes",
   },
-  ignore: [/^\/dist($|\/)/, /^\/scripts($|\/)/, /^\/test($|\/)/, /^\/\.git/, /^\/CLAUDE\.md$/, /^\/\.gitignore$/, /\.log$/],
+  ignore: [/^\/dist($|\/)/, /^\/scripts($|\/)/, /^\/test($|\/)/, /^\/\.git/, /^\/CLAUDE\.md$/, /^\/ROADMAP\.md$/, /^\/\.gitignore$/, /\.log$/],
   // Optional: use a pre-downloaded electron-vX-win32-x64.zip instead of fetching it.
   ...(process.env.ELECTRON_ZIP_DIR && { electronZipDir: process.env.ELECTRON_ZIP_DIR }),
 });
@@ -43,3 +44,7 @@ if (process.platform === "win32") {
   execFileSync("zip", ["-qr9", zip, path.basename(appPath)], { cwd: path.dirname(appPath), stdio: "inherit" });
 }
 console.log("zipped:", zip);
+
+// latest.json lets installed copies update in place (Settings -> Updates). Publish it with the zip.
+if (fs.existsSync(DEFAULT_KEY_FILE)) console.log("signed:", signRelease({ zip, version: pkg.version }));
+else console.warn(`not signed: no key at ${DEFAULT_KEY_FILE} (run node scripts/make-signing-key.js once)`);

@@ -1,10 +1,13 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, screen, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, screen, Tray } from "electron";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CameraStream } from "./camera-stream.js";
 import { ConsoleConnection, channelList, fisheyeInfo, resolveChannel } from "./console-connection.js";
 import { createLogger } from "./log.js";
 import { decryptPassword, DEFAULT_SETTINGS, encryptPassword, newId, Store } from "./store.js";
+import { UPDATE_PUBLIC_KEY } from "./update-key.js";
+import { sourceKind, Updater } from "./updater.js";
 import { debounce, normalizeHost, throttle } from "./util.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -25,6 +28,7 @@ let log;
 let tray = null;
 let managerWin = null;
 let quitting = false;
+let updater = null;
 
 const connections = new Map(); // consoleId -> ConsoleConnection
 const camWins = new Map();     // key "<consoleId>/<cameraId>" -> { key, consoleId, cameraId, win, stream, aspect }
@@ -62,9 +66,21 @@ async function init() {
     if (!consoleIds.has(key.split("/")[0])) delete store.data.windows[key];
   }
 
+  updater = new Updater({
+    currentVersion: app.getVersion(),
+    getSource: () => store.settings.updateSource,
+    publicKey: updatePublicKey(),
+    stageDir: updateStageDir(),
+    fetch: (url, init) => net.fetch(url, init), // Chromium networking: Windows proxy settings and certificate store
+    log: log.child("update"),
+  });
+  updater.on("state", () => { notifyManager(); updateTrayMenu(); });
+
   createTray();
   applyLoginItem();
   registerIpc();
+  // At startup only say whether there's an update; downloading waits for a click.
+  if (sourceKind(store.settings.updateSource)) updater.check({ download: false });
 
   const MockConnection = MOCK ? (await import("./mock.js")).MockConnection : null;
   for (const cfg of store.data.consoles) startConnection(cfg, MockConnection);
@@ -828,6 +844,37 @@ function setSetting(name, value) {
   notifyManager();
 }
 
+// ---------------------------------------------------------------------------------------------
+// Updates (src/updater.js). Only the packaged app installs them; from source the key can be
+// swapped for tests via PANES_UPDATE_PUBKEY_FILE, which a packaged build ignores.
+
+function updatePublicKey() {
+  if (!app.isPackaged && process.env.PANES_UPDATE_PUBKEY_FILE) return fs.readFileSync(process.env.PANES_UPDATE_PUBKEY_FILE, "utf8");
+  return UPDATE_PUBLIC_KEY;
+}
+
+// Not in the roaming %APPDATA% profile: a 150 MB download shouldn't roam.
+function updateStageDir() {
+  if (process.env.PANES_USER_DATA || !process.env.LOCALAPPDATA) return path.join(app.getPath("userData"), "updates");
+  return path.join(process.env.LOCALAPPDATA, "Protect Panes", "updates");
+}
+
+function setUpdateSource(value) {
+  const v = String(value ?? "").trim();
+  if (v && !sourceKind(v)) throw new Error("Use an https:// address or a folder path, for example \\\\server\\share\\Protect Panes.");
+  store.settings.updateSource = v;
+  store.save();
+  notifyManager();
+}
+
+function installUpdate() {
+  if (!app.isPackaged) throw new Error("Updates install only into the packaged app, not when running from source.");
+  updater.install({ installDir: path.dirname(process.execPath), exeName: path.basename(process.execPath), pid: process.pid });
+  log.info(`installing update ${updater.state.version}; quitting so the helper can swap the folder`);
+  quitting = true;
+  app.quit();
+}
+
 function applyLoginItem() {
   if (!IS_WIN && process.platform !== "darwin") return;
   app.setLoginItemSettings({ openAtLogin: !!store.settings.launchAtLogin, path: process.execPath });
@@ -887,6 +934,7 @@ function managerState() {
     hiddenCount: hiddenKeys().length,
     shownCount: shown(),
     layouts: store.data.layouts.map((l) => ({ id: l.id, name: l.name, count: Object.keys(l.windows).length })),
+    update: { status: updater?.state.status, version: updater?.state.version, message: updater?.state.message, current: app.getVersion() },
     consoles: store.data.consoles.map((c) => {
       const conn = connections.get(c.id);
       const live = conn?.cameras() ?? [];
@@ -942,6 +990,12 @@ function trayMenuTemplate() {
       : []),
     { label: "Lock layout", type: "checkbox", checked: !!store.settings.lockLayout, click: (item) => setSetting("lockLayout", item.checked) },
     { type: "separator" },
+    ...(updater?.state.status === "ready"
+      ? [{
+        label: `Install update ${updater.state.version} and restart`,
+        click: () => { try { installUpdate(); } catch (err) { dialog.showMessageBox({ type: "error", message: err.message }); } },
+      }]
+      : updater?.state.status === "available" ? [{ label: `Update ${updater.state.version} available…`, click: () => showManager() }] : []),
     { label: "Quit Protect Panes", click: () => { quitting = true; app.quit(); } },
   ];
 }
@@ -1012,6 +1066,9 @@ function registerIpc() {
   });
   handle("mgr:set-setting", ({ name, value } = {}) => setSetting(String(name), value));
   handle("mgr:apply-all", ({ consoleId, changes } = {}) => applyToAll(changes, consoleId ? String(consoleId) : null));
+  handle("mgr:set-update-source", (value) => setUpdateSource(value));
+  handle("mgr:check-update", () => updater.check({ download: true }).then(() => undefined));
+  handle("mgr:install-update", () => installUpdate());
   handle("mgr:save-layout", (name) => saveCurrentLayout(name));
   handle("mgr:apply-layout", (id) => applyLayout(String(id)));
   handle("mgr:delete-layout", (id) => deleteLayout(String(id)));

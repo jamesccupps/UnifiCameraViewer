@@ -65,6 +65,16 @@ Dewarping is done by the graphics chip on the one stream that's already being de
 | Picture behind / choppy | Right-click → pick **Medium** or **Low**. High (4K) streams cost the most GPU. |
 | Shadows look crushed / washed out | Many UniFi cameras send full-range video without saying so; the app corrects this automatically. If one camera still looks wrong, try **Right-click → Color range → Full** or **Limited**. |
 
+## Updating the app
+
+From 1.2.0 on, Protect Panes can update itself.
+
+1. In the camera list, under **Settings → Updates**, enter the **update location**. That's the web address (`https://…`) or folder (for example `\\server\share\Protect Panes`) where new releases are published as `ProtectPanes-win32-x64.zip` plus `latest.json`.
+2. Click **Check for updates**. A newer version is downloaded and checked first: it has to carry the release signature this copy of the app trusts, and match its signed checksum. Anything else is refused.
+3. Click **Install … and restart**. The app closes, swaps in the new version and opens again, in about a minute. Settings and layouts carry over.
+
+The folder the app lives in has to be one you can write to, e.g. `C:\Tools\Protect Panes`, not `C:\Program Files`. When an update location is set, the app also checks once at startup and says so in the list and the tray menu. It never downloads without a click.
+
 ## Keeping up with new Protect versions
 
 Protect Panes talks to Protect through the [unifi-protect](https://github.com/hjdhjd/unifi-protect) library, the same one homebridge-unifi-protect uses. It tracks Protect firmware changes. If a future Protect update breaks login or video, rebuild with the latest library (needs Node.js 22.20+):

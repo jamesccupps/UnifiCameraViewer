@@ -75,6 +75,7 @@ function render() {
 
   consolesEl.replaceChildren(...(state.consoles.length ? state.consoles.map(renderConsole) : [renderEmpty()]));
   renderLayouts();
+  renderUpdate();
 
   if (focusedKey) document.querySelector(`[data-focus-key="${CSS.escape(focusedKey)}"]`)?.focus();
   document.querySelector("main").scrollTop = scroll;
@@ -257,6 +258,52 @@ layoutForm.addEventListener("submit", async (e) => {
   } catch (err) {
     layoutError.textContent = String(err?.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
   }
+});
+
+// ---------------------------------------------------------------------------------------------
+// Updates
+
+const updateSource = document.getElementById("update-source");
+const updateStatus = document.getElementById("update-status");
+const checkBtn = document.getElementById("btn-check-update");
+const installBtn = document.getElementById("btn-install-update");
+let updateError = "";
+
+function renderUpdate() {
+  const u = state.update ?? {};
+  if (document.activeElement !== updateSource) updateSource.value = state.settings.updateSource ?? "";
+  const busy = u.status === "checking" || u.status === "downloading";
+  checkBtn.disabled = busy;
+  checkBtn.textContent = u.status === "available" ? `Download ${u.version}` : "Check for updates";
+  installBtn.classList.toggle("hidden", u.status !== "ready");
+  installBtn.textContent = `Install ${u.version ?? ""} and restart`;
+  const text = updateError || (u.status && u.status !== "idle" ? u.message : `This is version ${u.current}.`);
+  updateStatus.textContent = text;
+  updateStatus.classList.toggle("bad", !!updateError || u.status === "error");
+}
+
+const rpcError = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+
+updateSource.addEventListener("change", async () => {
+  updateError = "";
+  try { await panes.invoke("mgr:set-update-source", updateSource.value); } catch (err) { updateError = rpcError(err); }
+  refresh();
+});
+checkBtn.addEventListener("click", async () => {
+  updateError = "";
+  try {
+    await panes.invoke("mgr:set-update-source", updateSource.value);
+    const pending = panes.invoke("mgr:check-update");
+    refresh(); // shows "checking" right away; the result arrives through mgr:changed
+    await pending;
+  } catch (err) { updateError = rpcError(err); }
+  refresh();
+});
+installBtn.addEventListener("click", async () => {
+  updateError = "";
+  if (!confirm("Protect Panes will close, install the update and open again. That takes about a minute. Continue?")) return;
+  try { await panes.invoke("mgr:install-update"); } catch (err) { updateError = rpcError(err); }
+  refresh();
 });
 
 // ---------------------------------------------------------------------------------------------

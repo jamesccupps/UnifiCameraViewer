@@ -1,0 +1,269 @@
+import { spawn } from "node:child_process";
+import crypto from "node:crypto";
+import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import path from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+
+/*
+ * In-place updates from a release folder: an https:// base URL or a folder path (LAN share).
+ * The folder holds latest.json and the zip it names (scripts/build-win.js writes both).
+ *
+ * The exe isn't code-signed, so the Ed25519 signature on latest.json is the only thing between
+ * this download path and running someone else's code. Order matters: verify the manifest's
+ * signature, only then download, check the zip's size and SHA-256 against the signed values, and
+ * only then hand it to the swap helper. Older or equal versions are never installed, so a
+ * replayed old manifest can't downgrade the app.
+ *
+ * No Electron imports here, so test/run.mjs can drive it under plain Node.
+ */
+
+export const MANIFEST = "latest.json";
+const MAX_MANIFEST_BYTES = 64 * 1024;
+const MAX_ZIP_BYTES = 1024 * 1024 * 1024;
+
+/** Numeric x.y.z compare: 1 if a > b, -1 if a < b, 0 if equal. */
+export function compareVersions(a, b) {
+  const pa = String(a).split(".").map((n) => Number.parseInt(n, 10) || 0);
+  const pb = String(b).split(".").map((n) => Number.parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+/** "https" or "path" for a usable update location, null otherwise (plain http is refused). */
+export function sourceKind(source) {
+  const s = String(source ?? "").trim();
+  if (/^https:\/\/[^\s/]+/i.test(s)) return "https";
+  if (/^(?:[a-zA-Z]:[\\/]|\\\\[^\\]+\\[^\\]+)/.test(s)) return "path";
+  return null;
+}
+
+/** Check latest.json's signature and shape. Returns the signed payload; throws on anything off. */
+export function verifyManifest(text, publicKeyPem) {
+  let doc;
+  try { doc = JSON.parse(text); } catch { throw new Error("The update manifest isn't valid JSON."); }
+  const payload = Buffer.from(String(doc?.payload ?? ""), "base64");
+  const signature = Buffer.from(String(doc?.signature ?? ""), "base64");
+  if (!payload.length || signature.length !== 64) throw new Error("The update manifest isn't signed.");
+  let ok = false;
+  try { ok = crypto.verify(null, payload, crypto.createPublicKey(publicKeyPem), signature); } catch { ok = false; }
+  if (!ok) throw new Error("The update manifest's signature doesn't match this app's key - not installing it.");
+  let p;
+  try { p = JSON.parse(payload.toString("utf8")); } catch { throw new Error("The update manifest is malformed."); }
+  const valid = p?.app === "protect-panes"
+    && /^\d+\.\d+\.\d+$/.test(p.version)
+    && /^[0-9a-f]{64}$/.test(p.sha256)
+    && Number.isInteger(p.size) && p.size > 0 && p.size <= MAX_ZIP_BYTES
+    && /^[\w.-]+\.zip$/.test(p.file); // a bare file name: no paths, nothing to traverse
+  if (!valid) throw new Error("The update manifest is malformed.");
+  return p;
+}
+
+function join(source, name) {
+  return sourceKind(source) === "https"
+    ? new URL(name, source.endsWith("/") ? source : `${source}/`).href
+    : path.join(source, name);
+}
+
+async function readSmall(source, name, fetchImpl) {
+  const where = join(source, name);
+  if (sourceKind(source) === "path") {
+    const st = await fs.promises.stat(where);
+    if (st.size > MAX_MANIFEST_BYTES) throw new Error("The update manifest is too large.");
+    return fs.promises.readFile(where, "utf8");
+  }
+  const res = await fetchImpl(where, { redirect: "follow", cache: "no-store" });
+  if (!res.ok) throw new Error(`${where}: HTTP ${res.status}`);
+  const text = await res.text();
+  if (text.length > MAX_MANIFEST_BYTES) throw new Error("The update manifest is too large.");
+  return text;
+}
+
+/**
+ * Copy/download a release file to `dest`, hashing as it goes. Returns { size, sha256 }. On failure
+ * the file is closed before returning, so the caller can delete it (Windows keeps listing a file
+ * deleted while still open).
+ */
+async function fetchTo(source, name, dest, limit, fetchImpl) {
+  const where = join(source, name);
+  let input;
+  if (sourceKind(source) === "path") {
+    input = fs.createReadStream(where);
+  } else {
+    const res = await fetchImpl(where, { redirect: "follow", cache: "no-store" });
+    if (!res.ok || !res.body) throw new Error(`${where}: HTTP ${res.status}`);
+    input = Readable.fromWeb(res.body);
+  }
+  const hash = crypto.createHash("sha256");
+  let size = 0;
+  const out = fs.createWriteStream(dest);
+  try {
+    await pipeline(input, async function* (chunks) {
+      for await (const chunk of chunks) {
+        size += chunk.length;
+        if (size > limit) throw new Error("The update download is larger than the signed size.");
+        hash.update(chunk);
+        yield chunk;
+      }
+    }, out);
+  } catch (err) {
+    if (!out.closed) await new Promise((resolve) => out.once("close", resolve));
+    throw err;
+  }
+  return { size, sha256: hash.digest("hex") };
+}
+
+/**
+ * state.status: "idle" | "checking" | "current" | "available" | "downloading" | "ready" | "error"
+ * events: "state"
+ */
+export class Updater extends EventEmitter {
+  #opts;
+  #busy = false;
+  state = { status: "idle", version: null, message: "" };
+
+  /**
+   * @param {object} opts
+   * @param {string} opts.currentVersion
+   * @param {() => string} opts.getSource
+   * @param {string} opts.publicKey     - PEM
+   * @param {string} opts.stageDir      - where downloads are kept until installed
+   * @param {typeof fetch} [opts.fetch]
+   * @param {object} opts.log
+   */
+  constructor(opts) {
+    super();
+    this.#opts = { fetch: globalThis.fetch, ...opts };
+  }
+
+  #set(status, extra = {}) {
+    this.state = { status, version: null, message: "", ...extra };
+    this.emit("state", this.state);
+  }
+
+  /** Read and verify latest.json; with download, also fetch and verify the zip. */
+  async check({ download = true } = {}) {
+    if (this.#busy) return this.state;
+    this.#busy = true;
+    const { getSource, publicKey, currentVersion, stageDir, log } = this.#opts;
+    const source = String(getSource() ?? "").trim();
+    try {
+      if (!sourceKind(source)) throw new Error("Set an update location first: an https:// address or a folder.");
+      this.#set("checking");
+      const manifest = verifyManifest(await readSmall(source, MANIFEST, this.#opts.fetch), publicKey);
+      if (compareVersions(manifest.version, currentVersion) <= 0) {
+        this.#set("current", { version: manifest.version, message: `Up to date (${currentVersion}).` });
+        return this.state;
+      }
+      if (!download) {
+        this.#set("available", { version: manifest.version, message: `Version ${manifest.version} is available.` });
+        return this.state;
+      }
+      this.#set("downloading", { version: manifest.version, message: `Downloading ${manifest.version}…` });
+      fs.mkdirSync(stageDir, { recursive: true });
+      const zip = path.join(stageDir, `ProtectPanes-${manifest.version}.zip`);
+      const part = `${zip}.part`;
+      fs.rmSync(part, { force: true });
+      let got;
+      try {
+        got = await fetchTo(source, manifest.file, part, manifest.size, this.#opts.fetch);
+        if (got.size !== manifest.size || got.sha256 !== manifest.sha256) {
+          throw new Error("The downloaded update doesn't match its signed checksum - not installing it.");
+        }
+      } catch (err) {
+        fs.rmSync(part, { force: true }); // never leave unverified bytes where they could be mistaken for the update
+        throw err;
+      }
+      fs.renameSync(part, zip);
+      log?.info(`update ${manifest.version} downloaded and verified (${got.size} bytes, sha256 ${got.sha256.slice(0, 12)}…)`);
+      this.#set("ready", { version: manifest.version, zip, message: `Version ${manifest.version} is ready to install.` });
+    } catch (err) {
+      log?.warn(`update check: ${err.message}`);
+      this.#set("error", { message: err.message });
+    } finally {
+      this.#busy = false;
+    }
+    return this.state;
+  }
+
+  /**
+   * Hand the verified zip to the swap helper, which waits for `pid` to exit, replaces installDir
+   * and relaunches. The caller quits the app right after this returns.
+   */
+  install({ installDir, exeName, pid, noLaunch = false }) {
+    if (this.state.status !== "ready" || !this.state.zip) throw new Error("No verified update is ready.");
+    const parent = path.dirname(installDir);
+    try {
+      fs.rmSync(fs.mkdtempSync(path.join(parent, ".pp-write-test-")), { recursive: true, force: true });
+    } catch {
+      throw new Error(`Can't write to ${parent}. Move Protect Panes to a folder you can write to (for example C:\\Tools\\Protect Panes), or replace the folder by hand.`);
+    }
+    const script = path.join(this.#opts.stageDir, "apply-update.ps1");
+    const log = path.join(this.#opts.stageDir, "apply-update.log");
+    fs.writeFileSync(script, HELPER_PS1, "utf8");
+    fs.rmSync(log, { force: true });
+    const q = (s) => `'${String(s).replace(/['‘’‚‛]/g, "$&$&")}'`; // PowerShell single-quoted literal
+    const invoke = `& ${q(script)} -WaitPid ${Number(pid)} -Zip ${q(this.state.zip)} -Target ${q(installDir)} -Exe ${q(exeName)} -Log ${q(log)}${noLaunch ? " -NoLaunch" : ""}`;
+    /*
+     * Measured on Windows 11: a detached powershell.exe (DETACHED_PROCESS, no console) exits 0 at
+     * once without running anything, and a non-detached child sits in libuv's kill-on-close job, so
+     * it would die with the app. A detached cmd.exe running "start" gives PowerShell its own console
+     * outside that job. Nothing on cmd's line is a path: the call travels base64-encoded, so no
+     * "&" or "%" in a user or folder name can be read by cmd.
+     */
+    const encoded = Buffer.from(invoke, "utf16le").toString("base64");
+    const child = spawn(process.env.ComSpec || "cmd.exe", ["/d", "/c", "start", "/min", "powershell.exe", "-NoProfile", "-NonInteractive",
+      "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], { detached: true, stdio: "ignore", windowsHide: true });
+    child.unref();
+    return { script, log };
+  }
+}
+
+/*
+ * Runs after the app exits. Unpacks next to the install folder (same volume, so the swap is a
+ * rename), checks the new folder has the exe, renames the old folder aside, moves the new one in,
+ * and rolls back if that fails. Relaunches whichever version ended up in place.
+ */
+export const HELPER_PS1 = String.raw`param(
+  [int]$WaitPid, [string]$Zip, [string]$Target, [string]$Exe, [string]$Log, [switch]$NoLaunch
+)
+$ErrorActionPreference = 'Stop'
+function Say([string]$m) { Add-Content -LiteralPath $Log -Value ("{0:s} {1}" -f (Get-Date), $m) }
+$stamp = Get-Date -Format 'yyyyMMddHHmmss'
+$work = "$Target.new-$stamp"
+$old = "$Target.old-$stamp"
+try {
+  Say "update: waiting for process $WaitPid to exit"
+  for ($i = 0; $i -lt 60 -and (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Seconds 1 }
+  if (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue) { throw "the app didn't exit" }
+  Expand-Archive -LiteralPath $Zip -DestinationPath $work -Force
+  $new = Get-ChildItem -LiteralPath $work -Directory | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName $Exe) } | Select-Object -First 1
+  if ($new) { $new = $new.FullName } elseif (Test-Path -LiteralPath (Join-Path $work $Exe)) { $new = $work } else { throw "the update has no $Exe" }
+  $moved = $false
+  for ($i = 0; $i -lt 10 -and -not $moved; $i++) {
+    try { Rename-Item -LiteralPath $Target -NewName (Split-Path $old -Leaf); $moved = $true } catch { Start-Sleep -Seconds 1 }
+  }
+  if (-not $moved) { throw "couldn't move $Target aside (a file in it is still in use)" }
+  try {
+    Move-Item -LiteralPath $new -Destination $Target
+  } catch {
+    Say "update: move failed, restoring the old version: $_"
+    if (Test-Path -LiteralPath $Target) { Remove-Item -LiteralPath $Target -Recurse -Force }
+    Rename-Item -LiteralPath $old -NewName (Split-Path $Target -Leaf)
+    throw
+  }
+  Say "update: installed into $Target"
+  Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $Zip -Force -ErrorAction SilentlyContinue
+} catch {
+  Say "update failed: $_"
+} finally {
+  if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
+}
+if (-not $NoLaunch) { Start-Process -FilePath (Join-Path $Target $Exe) }
+Say "update: done"
+`;

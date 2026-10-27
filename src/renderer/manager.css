@@ -146,6 +146,21 @@ main { flex: 1; overflow: auto; padding: 16px 18px; display: flex; flex-directio
 .check b { font-weight: 500; }
 .check small { color: var(--muted); font-size: 11.5px; }
 
+.updates { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.update-row { display: flex; gap: 8px; align-items: center; }
+.update-row input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 9px;
+  color: var(--text);
+  font-size: 12px;
+}
+.updates p { margin: 8px 0 0; }
+.updates p.bad { color: var(--bad); }
+
 .hint { color: var(--muted); font-size: 12px; margin: 0 2px; }
 
 .empty-state { text-align: center; padding: 34px 16px; }

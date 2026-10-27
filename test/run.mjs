@@ -381,6 +381,152 @@ async function layoutsSuite() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// In-place updates: signed manifest, verified download, the folder-swap helper, and the camera
+// list's Updates section. Uses a throwaway key; the app's real key must reject what it signs.
+
+async function updateSuite() {
+  console.log("\nUpdate suite (signatures, verified download, swap helper, camera list)");
+  const { compareVersions, sourceKind, verifyManifest, Updater } = await import(new URL("../src/updater.js", import.meta.url).href);
+  const { UPDATE_PUBLIC_KEY } = await import(new URL("../src/update-key.js", import.meta.url).href);
+  const { signRelease } = await import(new URL("../scripts/sign-release.js", import.meta.url).href);
+  const crypto = await import("node:crypto");
+  const dir = tmpDir("update");
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  const pubPem = publicKey.export({ type: "spki", format: "pem" });
+  const privFile = path.join(dir, "test-key.pem");
+  const pubFile = path.join(dir, "test-key.pub.pem");
+  fs.writeFileSync(privFile, privateKey.export({ type: "pkcs8", format: "pem" }));
+  fs.writeFileSync(pubFile, pubPem);
+
+  // A release folder like build-win.js makes: zip with a top folder holding ProtectPanes.exe.
+  const makeRelease = (name, files, version = "9.9.9") => {
+    const rel = path.join(dir, name);
+    const app = path.join(rel, "build", "Protect Panes-win32-x64");
+    for (const [f, body] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(app, f)), { recursive: true });
+      fs.writeFileSync(path.join(app, f), body);
+    }
+    const zip = path.join(rel, "ProtectPanes-win32-x64.zip");
+    spawnSync("powershell", ["-NoProfile", "-Command", `Compress-Archive -Path '${app}' -DestinationPath '${zip}'`]);
+    fs.rmSync(path.join(rel, "build"), { recursive: true, force: true });
+    signRelease({ zip, version, keyFile: privFile });
+    return rel;
+  };
+  const good = makeRelease("good", { "ProtectPanes.exe": "v2", "resources/app.asar": "v2" });
+  const manifestText = fs.readFileSync(path.join(good, "latest.json"), "utf8");
+
+  check("compareVersions orders numerically", compareVersions("1.10.0", "1.9.9") === 1 && compareVersions("1.2.0", "1.2.0") === 0 && compareVersions("1.2.0", "1.2.1") === -1);
+  check("update locations: https and folders only",
+    sourceKind("https://github.com/x/y/releases/latest/download") === "https" && sourceKind("\\\\server\\share\\pp") === "path" && sourceKind("C:\\Releases") === "path"
+    && sourceKind("http://lan/pp") === null && sourceKind("file:///c:/x") === null && sourceKind("releases") === null);
+  check("manifest signed by the release key verifies", verifyManifest(manifestText, pubPem).version === "9.9.9");
+  const throws = (fn) => { try { fn(); return false; } catch { return true; } };
+  check("the app's real key rejects a manifest signed by another key", throws(() => verifyManifest(manifestText, UPDATE_PUBLIC_KEY)));
+  const doc = JSON.parse(manifestText);
+  const signed = JSON.parse(Buffer.from(doc.payload, "base64").toString());
+  const edited = { ...signed, sha256: "0".repeat(64) };
+  check("an edited manifest fails its signature", throws(() => verifyManifest(JSON.stringify({ ...doc, payload: Buffer.from(JSON.stringify(edited)).toString("base64") }), pubPem)));
+  check("an unsigned manifest is refused", throws(() => verifyManifest(JSON.stringify({ payload: doc.payload }), pubPem)));
+
+  let stages = 0;
+  const mk = (source, current = "1.2.0", extra = {}) => {
+    const stageDir = path.join(dir, `stage-${stages++}`);
+    return Object.assign(new Updater({ currentVersion: current, getSource: () => source, publicKey: pubPem, stageDir, ...extra }), { stageDir });
+  };
+  const zipsIn = (d) => (fs.existsSync(d) ? fs.readdirSync(d).filter((f) => f.endsWith(".zip") || f.endsWith(".part")) : []);
+  const u1 = mk(good);
+  await u1.check();
+  const staged = u1.state.zip && crypto.createHash("sha256").update(fs.readFileSync(u1.state.zip)).digest("hex");
+  check("newer signed release from a folder: downloaded and verified", u1.state.status === "ready" && staged === signed.sha256, JSON.stringify(u1.state));
+  const same = mk(good, "9.9.9");
+  await same.check();
+  check("same version isn't offered", same.state.status === "current", JSON.stringify(same.state));
+
+  // Tampered zip: the signed manifest is fine, the bytes aren't.
+  const tampered = path.join(dir, "tampered");
+  fs.cpSync(good, tampered, { recursive: true });
+  fs.appendFileSync(path.join(tampered, "ProtectPanes-win32-x64.zip"), "x");
+  const u2 = mk(tampered);
+  await u2.check();
+  check("a zip that doesn't match the signed checksum is refused and not kept",
+    u2.state.status === "error" && /checksum|larger/.test(u2.state.message) && !u2.state.zip && zipsIn(u2.stageDir).length === 0,
+    `${JSON.stringify(u2.state)} left: ${JSON.stringify(zipsIn(u2.stageDir))}`);
+
+  // https path, through an injected fetch.
+  const fakeFetch = async (url) => {
+    const name = decodeURIComponent(new URL(url).pathname.split("/").pop());
+    const file = path.join(good, name);
+    return fs.existsSync(file) ? new Response(fs.readFileSync(file)) : new Response("nope", { status: 404 });
+  };
+  const u3 = mk("https://releases.example.test/pp", "1.2.0", { fetch: fakeFetch });
+  await u3.check();
+  check("https release: manifest and zip fetched and verified", u3.state.status === "ready", JSON.stringify(u3.state));
+
+  if (process.platform === "win32") {
+    // The swap helper, for real, on throwaway folders. noLaunch keeps it from starting the "exe".
+    const exited = spawnSync(process.execPath, ["-e", ""]).pid;
+    // install() launches the helper fully detached (it must outlive the app), so wait on its log.
+    const runHelper = async (updater, installDir) => {
+      const { log } = updater.install({ installDir, exeName: "ProtectPanes.exe", pid: exited, noLaunch: true });
+      const read = () => (fs.existsSync(log) ? fs.readFileSync(log, "utf8") : "");
+      for (let i = 0; i < 120 && !/update: done/.test(read()); i++) await new Promise((r) => setTimeout(r, 500));
+      return read();
+    };
+    // "&" and "%" mean something to cmd.exe and "'" to PowerShell; the helper must not care.
+    const installRoot = path.join(dir, "Tools & 100% O'Brien");
+    const installDir = path.join(installRoot, "Protect Panes");
+    fs.mkdirSync(path.join(installDir, "resources"), { recursive: true });
+    fs.writeFileSync(path.join(installDir, "ProtectPanes.exe"), "v1");
+    fs.writeFileSync(path.join(installDir, "resources", "app.asar"), "v1");
+    const log1 = await runHelper(u1, installDir);
+    check("swap helper replaced the install folder with the new version",
+      fs.readFileSync(path.join(installDir, "ProtectPanes.exe"), "utf8") === "v2" && fs.readFileSync(path.join(installDir, "resources", "app.asar"), "utf8") === "v2" && /installed/.test(log1),
+      log1.trim());
+    check("swap helper cleaned up (no .old / .new folders left)", fs.readdirSync(installRoot).length === 1, JSON.stringify(fs.readdirSync(installRoot)));
+
+    const broken = makeRelease("broken", { "NotTheApp.exe": "?" });
+    const u4 = mk(broken);
+    await u4.check();
+    const log2 = await runHelper(u4, installDir);
+    check("an update without ProtectPanes.exe is refused and the old version stays",
+      u4.state.status === "ready" && fs.readFileSync(path.join(installDir, "ProtectPanes.exe"), "utf8") === "v2" && /update failed: the update has no/.test(log2) && fs.readdirSync(installRoot).length === 1,
+      log2.trim());
+  }
+
+  // In the app: the camera list's Updates section, with the test key swapped in (dev builds only).
+  const A = "aaaaaaaa-0000-4000-8000-000000000001";
+  const launch = async (label, env, actions) => {
+    const userData = tmpDir(`update-app-${label}`);
+    fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
+      version: 1,
+      consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby"] }],
+      windows: {},
+      settings: { startHidden: false, updateSource: good },
+    }, null, 2));
+    const run = await runApp({ userData, results: path.join(userData, "results"), seconds: 8, extraArgs: ["--mock"], env: { ...env, PANES_SELFTEST_ACTIONS: JSON.stringify(actions) } });
+    return { ...run, userData };
+  };
+  const read = `(() => ({ status: document.getElementById("update-status").textContent, check: document.getElementById("btn-check-update").textContent, install: document.getElementById("btn-install-update").classList.contains("hidden") ? null : document.getElementById("btn-install-update").textContent }))()`;
+  const app1 = await launch("testkey", { PANES_UPDATE_PUBKEY_FILE: pubFile }, [
+    { at: 2500, do: "manager-js", js: read },
+    { at: 3000, do: "manager-js", js: `document.getElementById("btn-check-update").click(), true` },
+    { at: 6000, do: "manager-js", js: read },
+    { at: 6500, do: "manager-js", js: `panes.invoke("mgr:install-update").then(() => "installed?!", (e) => String(e.message))` },
+    { at: 7000, do: "manager-js", js: `document.querySelector(".updates").scrollIntoView(), true` }, // for the screenshot
+  ]);
+  const [startup, , afterCheck, installTry] = app1.result.actions.map((a) => a.value ?? a.error);
+  check("startup check finds the update without downloading it", /9\.9\.9 is available/.test(startup?.status) && startup?.check === "Download 9.9.9", JSON.stringify(startup));
+  check("Check for updates downloads, verifies and offers Install", /ready to install/.test(afterCheck?.status) && afterCheck?.install === "Install 9.9.9 and restart"
+    && fs.readdirSync(path.join(app1.userData, "updates")).some((f) => f === "ProtectPanes-9.9.9.zip"), JSON.stringify(afterCheck));
+  check("running from source refuses to install", /packaged app/.test(String(installTry)), String(installTry));
+
+  const app2 = await launch("realkey", {}, [{ at: 2500, do: "manager-js", js: read }]);
+  const real = app2.result.actions[0]?.value;
+  check("with its real key the app refuses a release signed by another key", /signature doesn't match/.test(real?.status) && !fs.existsSync(path.join(app2.userData, "updates", "ProtectPanes-9.9.9.zip")), JSON.stringify(real));
+  console.log(`  results: ${dir}`);
+}
+
+// ---------------------------------------------------------------------------------------------
 // Color range: several UniFi cameras send full-range luma without flagging it, and Chromium then
 // crushes everything below 16 to black. src/avc-range.js rewrites the SPS to say full range.
 
@@ -594,6 +740,7 @@ try {
   if (suite === "hide" || suite === "all") await hideSuite();
   if (suite === "range" || suite === "all") await rangeSuite();
   if (suite === "layouts" || suite === "all") await layoutsSuite();
+  if (suite === "update" || suite === "all") await updateSuite();
   if (suite === "e2e" || suite === "all") await e2eSuite();
 } catch (err) {
   console.error(`\nTest run failed: ${err.message}`);

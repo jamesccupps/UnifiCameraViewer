@@ -45,6 +45,15 @@
         <label class="check"><input type="checkbox" data-setting="startHidden"><span><b>Start with this list hidden</b><small>Opens straight to your cameras when any are set up.</small></span></label>
         <label class="check"><input type="checkbox" data-setting="launchAtLogin"><span><b>Start with Windows</b><small>Launch at sign-in and restore the layout.</small></span></label>
       </div>
+      <div class="updates">
+        <h2>Updates</h2>
+        <div class="update-row">
+          <input id="update-source" aria-label="Update location" placeholder="Update location: https://… or \\server\share\Protect Panes" spellcheck="false" autocomplete="off">
+          <button id="btn-check-update" class="small">Check for updates</button>
+          <button id="btn-install-update" class="small primary hidden">Install and restart</button>
+        </div>
+        <p id="update-status" class="muted small"></p>
+      </div>
     </section>
 
     <p class="hint">Move a camera by dragging the bar that appears when you hover over it. Resize from any edge. Right-click a camera for quality, always-on-top and lock. Positions are saved automatically.</p>
