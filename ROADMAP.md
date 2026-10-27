@@ -1,6 +1,6 @@
 # Roadmap
 
-Owner requests after running 1.1.0 on the real consoles (2026-10-26). Each item records what's already known from the code and the live run, the likely approach, and what's still open. Nothing here is built yet.
+Owner requests after running 1.1.0 on the real consoles (2026-10-26). Each item records what's already known from the code and the live run, the likely approach, and what's still open. All eleven are built: 1-7 shipped in 1.2.0, 8-11 in 1.3.0.
 
 Evidence from that session: self-test run against both real consoles (scratch copy of the config). It covered the 4 saved windows, 3 normal and one 360° camera in quad, all on channel 2 (Low, 640×360 / 640×640). All 4 were live at 0.35-0.44 s lag with 0-1 dropped frames over 20 s, and the quad ran on hardware GL (Iris Xe, D3D11).
 
@@ -8,7 +8,7 @@ Evidence from that session: self-test run against both real consoles (scratch co
 
 ## 1. Picture looks dark / should be lighter
 
-**Status:** cause found and fixed (2026-10-27), unreleased. Falsification test 2 below hit:
+**Status:** cause found and fixed (2026-10-27), shipped in 1.2.0. Falsification test 2 below hit:
 - Every measured camera sends full-range luma, but three of the four don't flag it. Chromium reads those as limited range and turns everything below Y=16 solid black. One camera's picture in the app was 6.0% pure black, against 0.1% for a correct PC-range decode.
 - The app now rewrites the SPS to declare full range (`src/avc-range.js`). Afterwards it measured 0.02%. Shadows keep their detail; mid-tones barely move.
 - Right-click → **Color range** overrides per camera.
@@ -29,7 +29,7 @@ Possible app-side fix if (1) points at us: a per-window brightness/contrast adju
 
 ## 2. Hide the status dot + camera name, and collapse it on small windows
 
-**Status:** built, unreleased. Mock-suite tests cover it. Not yet tried on the real consoles.
+**Status:** built, shipped in 1.2.0. Mock-suite tests cover it. Not yet tried on the real consoles.
 
 - Global: camera list → **Show camera names** (`settings.showNames`) hides the dot and label in every window. It's the master switch.
 - Per window: right-click → **Show name** (`windows[key].hideName`). It's greyed out while the global switch is off.
@@ -38,7 +38,7 @@ Possible app-side fix if (1) points at us: a per-window brightness/contrast adju
 
 ## 3. Time on 360° dewarp views
 
-**Status:** built (2026-10-27), unreleased, as option (a) below. Right-click → **Show time** (`windows[key].clock`) overrides the default for any window. Format: `YYYY-MM-DD HH:MM:SS`. It shows only over live video and hides on windows too narrow for it. `npm run test:mock` covers it.
+**Status:** built (2026-10-27), shipped in 1.2.0, as option (a) below. Right-click → **Show time** (`windows[key].clock`) overrides the default for any window. Format: `YYYY-MM-DD HH:MM:SS`. It shows only over live video and hides on windows too narrow for it. `npm run test:mock` covers it.
 
 Background: confirmed app limitation. Normal cameras show the camera's own timestamp bottom-right. The 360° quad shows none, because the timestamp is in a corner of the fisheye frame, outside the circle the dewarp samples.
 
@@ -51,7 +51,7 @@ Recommend (a), on by default in dewarp modes only, with a per-window toggle and 
 
 ## 4. Apply to all cameras
 
-**Status:** built (2026-10-27), unreleased.
+**Status:** built (2026-10-27), shipped in 1.2.0.
 - Right-click → **Apply to all cameras** copies quality, always on top, show name, show time and color range, one at a time or all of them, to every camera on every console, including ones never opened.
 - The camera list has **Quality for all…** per console.
 - Applying High with more than 6 windows on screen asks first. Dewarp settings aren't copied, since they're per lens.
@@ -65,7 +65,7 @@ Original notes: quality (`channel`), always-on-top and dewarp settings were per 
 
 ## 5. Dashboards / grids / saved views like UniFi
 
-**Status:** built (2026-10-27) as (a) plus Protect liveview import, unreleased.
+**Status:** built (2026-10-27) as (a) plus Protect liveview import, shipped in 1.2.0.
 - Named layouts are saved from the camera list and switched from the list or the tray.
 - Import tiles a liveview's slots as an even grid, using the first camera of each slot. Uneven layouts and slot cycling aren't reproduced.
 - (b), a grid window, isn't built.
@@ -82,7 +82,7 @@ Recommend (a) first, plus importing Protect liveviews as named layouts. Do (b) o
 
 ## 6. Update in place instead of downloading a new zip
 
-**Status:** built (2026-10-27) as the recommended in-app updater, unreleased.
+**Status:** built (2026-10-27) as the recommended in-app updater, shipped in 1.2.0.
 - Settings → Updates takes an https:// URL or a folder holding a release.
 - Install requires an Ed25519-signed `latest.json` and a zip that matches its signed checksum.
 - A PowerShell helper swaps the folder, with rollback, then relaunches.
@@ -90,6 +90,7 @@ Recommend (a) first, plus importing Protect liveviews as named layouts. Do (b) o
 - Signing key: `%USERPROFILE%\.protect-panes\update-signing-key.pem`, public half in `src/update-key.js`.
 - Not built: the asar-only delta. Every update is the full zip.
 - Default update location: this repo's latest GitHub release (`releases/latest/download`).
+- Portable copies of 1.2.0 and 1.3.0 started from Explorer or a shortcut could not install: the helper inherited the install folder as its working folder, which blocks renaming it. Fixed in 1.3.1. Installed copies were not affected.
 
 Original notes: releases were an unsigned portable zip (~159 MB), and the owner replaced the folder by hand.
 
@@ -105,7 +106,7 @@ Options:
 
 ## 7. Hide all / put them back the way they were
 
-**Status:** built (2026-10-27), unreleased. `npm run test:hide` covers it. Decisions: hidden survives a restart; Bring cameras to front and Reset window positions leave hidden windows hidden; Show all stays literal. The notes below are the design as proposed.
+**Status:** built (2026-10-27), shipped in 1.2.0. `npm run test:hide` covers it. Decisions: hidden survives a restart; Bring cameras to front and Reset window positions leave hidden windows hidden; Show all stays literal. The notes below are the design as proposed.
 
 Requested 2026-10-27.
 
@@ -131,11 +132,11 @@ Open:
 
 ## 8. One download: an installer
 
-**Status:** built (2026-10-27), unreleased. `ProtectPanes-Setup.exe` is a per-user NSIS installer with shortcuts and an uninstaller, published alongside the zip. Installer copies update by running the new installer silently; zip copies keep the folder swap. CI installs, starts and uninstalls it on a throwaway runner.
+**Status:** built (2026-10-27), shipped in 1.3.0. `ProtectPanes-Setup.exe` is a per-user NSIS installer with shortcuts and an uninstaller, published alongside the zip. Installer copies update by running the new installer silently; zip copies keep the folder swap. CI installs, starts and uninstalls it on a throwaway runner.
 
 ## 9. Arrange windows and Close all
 
-**Status:** built (2026-10-27), unreleased.
+**Status:** built (2026-10-27), shipped in 1.3.0.
 - **Arrange** tiles the windows on a screen: Auto (best fit for that screen's size and shape) or fixed layouts (1, 2×2, 1+5, 1+7, 3×3, 2+8, 1+12, 4×4, 5×5). The top-left camera gets the big tile.
 - Optionally each camera's quality follows its tile size.
 - **Close all** per console is the opposite of Show all.
@@ -143,7 +144,7 @@ Open:
 
 ## 10. Layout editor (exacqVision-style)
 
-**Status:** built (2026-10-27), unreleased.
+**Status:** built (2026-10-27), shipped in 1.3.0.
 - Pick a screen and a layout, then drag cameras from the list into tiles (or double-click them), swap tiles by dragging, or start from what's on screen.
 - Each 360° camera gets a view per tile: Quad (default), Single, Panorama or Fisheye.
 - Save, or save and apply. Edit reopens it.
@@ -151,7 +152,7 @@ Open:
 
 ## 11. Easier camera list
 
-**Status:** built (2026-10-27), unreleased.
+**Status:** built (2026-10-27), shipped in 1.3.0.
 - Cameras / Layouts / Settings tabs, and hover tips on every control.
 - A camera filter, and a per-console "⋯" menu for the rarely used actions.
 - An About section with the version, the project page and the log folder.

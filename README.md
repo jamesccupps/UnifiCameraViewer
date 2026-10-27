@@ -75,7 +75,7 @@ Dewarping is done by the graphics chip on the one stream that's already being de
 
 ## Updating the app
 
-From 1.2.0 on, Protect Panes can update itself.
+Installed copies (from `ProtectPanes-Setup.exe`, 1.3.0 on) and portable copies from 1.3.1 on can update themselves.
 
 1. The camera list's **Settings → Updates** shows the **update location**. By default it's this project's latest GitHub release. To update from your own copy instead, set it to a folder (for example `\\server\share\Protect Panes`) or web address holding `ProtectPanes-win32-x64.zip` plus `latest.json`. Clear it to turn update checks off.
 2. Click **Check for updates**. A newer version is downloaded and checked first: it has to carry the release signature this copy of the app trusts, and match its signed checksum. Anything else is refused.
@@ -83,7 +83,7 @@ From 1.2.0 on, Protect Panes can update itself.
 
 The folder the app lives in has to be one you can write to, e.g. `C:\Tools\Protect Panes`, not `C:\Program Files`. When an update location is set, the app also checks once at startup (one small request for `latest.json`) and says so in the list and the tray menu. It never downloads without a click.
 
-Copies older than 1.2.0 can't update themselves. Replace their folder with the 1.2.0 zip once.
+Portable copies older than 1.3.1 can't update themselves. 1.2.0 and 1.3.0 download the update, then fail with *a file in it is still in use* and reopen the old version. Install once by hand: quit the app (tray → **Quit**) and run `ProtectPanes-Setup.exe` (your settings carry over), or replace the folder with the latest zip.
 
 ## Keeping up with new Protect versions
 
