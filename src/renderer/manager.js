@@ -22,6 +22,7 @@ let state = null;
 let editingId = null;
 let refreshing = false;
 let openMenuFor = null; // console id whose "⋯" menu is open, kept open across re-renders
+const expandedHidden = new Set(); // console ids whose "Hidden from list" section is expanded
 
 const STATE_DOT = { connected: "live", connecting: "warn", reconnecting: "warn", idle: "warn", error: "bad", authfailed: "bad" };
 const STATE_LABEL = {
@@ -182,10 +183,11 @@ function renderConsoles() {
   const q = filterInput.value.trim().toLowerCase();
   const all = state.consoles.flatMap((c) => c.cameras);
   const open = all.filter((cam) => cam.open).length;
+  const tucked = all.filter((cam) => cam.listHidden).length;
   const matching = q ? all.filter((cam) => matches(cam, q)).length : all.length;
   document.getElementById("cam-count").textContent = q
     ? `${matching} of ${plural(all.length, "camera")}`
-    : `${plural(all.length, "camera")} · ${open} open`;
+    : `${plural(all.length - tucked, "camera")} · ${open} open${tucked ? ` · ${tucked} hidden from list` : ""}`;
   document.getElementById("btn-arrange-auto").disabled = !state.onScreenCount;
   consolesEl.replaceChildren(...(state.consoles.length ? state.consoles.map((c) => renderConsole(c, q)) : [renderEmpty()]));
 }
@@ -229,13 +231,14 @@ function renderConsole(c, q) {
   const dotClass = STATE_DOT[c.state] ?? "warn";
   const subtitle = [c.host, c.controllerName && c.controllerName !== c.name ? c.controllerName : null].filter(Boolean).join(" · ");
   const connected = c.state === "connected";
+  const tuckedCount = c.cameras.filter((cam) => cam.listHidden).length;
   const head = el("div", { class: "console-head" },
     el("span", { class: `dot ${dotClass}`, tip: STATE_LABEL[c.state] ?? c.state }),
     el("div", { class: "title" }, el("b", {}, c.name), el("span", {}, subtitle)),
     el("div", { class: "buttons" },
       el("button", {
         class: "small", disabled: !connected,
-        tip: `Open a window for every camera on ${c.name}.`,
+        tip: `Open a window for every camera on ${c.name}${tuckedCount ? `, except the ${tuckedCount} hidden from the list` : ""}.`,
         onclick: () => panes.invoke("mgr:open-all", c.id).then(refresh),
       }, "Show all"),
       el("button", {
@@ -281,12 +284,36 @@ function renderConsole(c, q) {
   const msg = c.message || (connected ? "" : STATE_LABEL[c.state]);
   const bad = c.state === "error" || c.state === "authfailed";
   const cams = q ? c.cameras.filter((cam) => matches(cam, q)) : c.cameras;
+  const shown = cams.filter((cam) => !cam.listHidden);
+  const tucked = cams.filter((cam) => cam.listHidden);
   let empty = null;
   if (!c.cameras.length) empty = connected ? "No cameras on this console." : "Cameras appear here once connected.";
   else if (!cams.length) empty = "No matching cameras.";
 
-  const list = el("ul", { class: "cams" }, empty ? el("li", { class: "empty" }, empty) : cams.map((cam) => renderCamera(cam)));
-  return el("article", { class: "panel" }, head, msg ? el("p", { class: `console-msg${bad ? " bad" : ""}` }, msg) : null, list);
+  const list = empty || shown.length ? el("ul", { class: "cams" }, empty ? el("li", { class: "empty" }, empty) : shown.map((cam) => renderCamera(cam))) : null;
+  return el("article", { class: "panel" }, head, msg ? el("p", { class: `console-msg${bad ? " bad" : ""}` }, msg) : null, list, renderTucked(c, tucked));
+}
+
+/** The collapsed "Hidden from list" section at the bottom of a console's card. */
+function renderTucked(c, tucked) {
+  if (!tucked.length) return null;
+  return el("details", {
+    class: "tucked",
+    open: expandedHidden.has(c.id),
+    ontoggle: (e) => { if (e.target.open) expandedHidden.add(c.id); else expandedHidden.delete(c.id); },
+  },
+  el("summary", { tip: "Cameras you hid from this list. Show all and the layout editor skip them. Expand to put one back." }, `Hidden from list (${tucked.length})`),
+  el("ul", { class: "cams" }, tucked.map((cam) => el("li", {},
+    el("div", { class: "cam-name" },
+      el("span", { class: `dot ${cam.online ? "live" : "bad"}` }),
+      el("b", { title: cam.name }, cam.name),
+      el("small", {}, [cam.model, cam.fisheye ? "360°" : null, cam.online ? null : cam.stale ? "not available" : "offline"].filter(Boolean).join(" · "))),
+    el("button", {
+      class: "small",
+      "data-focus-key": `unhide-${cam.key}`,
+      tip: "Put this camera back in the list.",
+      onclick: () => panes.invoke("mgr:set-list-hidden", { key: cam.key, hidden: false }).then(refresh),
+    }, "Show in list")))));
 }
 
 function renderCamera(cam) {
@@ -310,7 +337,7 @@ function renderCamera(cam) {
   if (cam.online) dot = cam.open && !cam.hidden && cam.status?.state && cam.status.state !== "live" ? "warn" : "live";
   let statusText = "";
   if (!cam.online) statusText = cam.stale ? "not available" : "offline";
-  else if (cam.hidden) statusText = "hidden";
+  else if (cam.hidden) statusText = "window hidden";
   else if (cam.open && cam.status?.state && cam.status.state !== "live") statusText = cam.status.text;
 
   const name = el("div", { class: "cam-name" },
@@ -335,7 +362,14 @@ function renderCamera(cam) {
     onclick: () => panes.invoke("mgr:find-camera", cam.key),
   }, "Find");
 
-  return el("li", {}, toggle, name, channelSelect, find);
+  const hide = el("button", {
+    class: "small ghost",
+    "data-focus-key": `hide-${cam.key}`,
+    tip: `Hide from this list, for a camera nobody uses right now. It moves to "Hidden from list" at the bottom, and Show all skips it.${cam.open ? " Its window closes." : ""}`,
+    onclick: () => panes.invoke("mgr:set-list-hidden", { key: cam.key, hidden: true }).then(refresh),
+  }, "Hide");
+
+  return el("li", {}, toggle, name, channelSelect, find, hide);
 }
 
 filterInput.addEventListener("input", () => renderConsoles());
@@ -592,7 +626,7 @@ function renderEditor() {
   const q = editorFilter.value.trim().toLowerCase();
   const placedKeys = new Set(ed.cells.filter(Boolean).map((c) => c.key));
   editorCameras.replaceChildren(...state.consoles.flatMap((c) => {
-    const list = c.cameras.filter((cam) => !q || matches(cam, q));
+    const list = c.cameras.filter((cam) => !cam.listHidden && (!q || matches(cam, q)));
     if (!list.length) return [];
     return [
       el("li", { class: "group" }, c.name),

@@ -24,6 +24,7 @@
     "test:update": "node test/run.mjs update",
     "test:arrange": "node test/run.mjs arrange",
     "test:editor": "node test/run.mjs editor",
+    "test:list": "node test/run.mjs list",
     "sign-release": "node scripts/sign-release.js",
     "test:e2e": "node test/run.mjs e2e"
   },

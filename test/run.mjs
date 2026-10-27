@@ -814,6 +814,85 @@ async function editorSuite() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Camera list: Hide from list (cameras nobody uses) and putting them back.
+
+async function listSuite() {
+  console.log("\nCamera list suite (mock consoles)");
+  const userData = tmpDir("list");
+  const results = path.join(userData, "results");
+  const A = "aaaaaaaa-0000-4000-8000-000000000001";
+  const B = "bbbbbbbb-0000-4000-8000-000000000002";
+  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, stair: `${A}/aaaaaaaa-cam2`, ramp: `${B}/bbbbbbbb-cam0` };
+  fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [
+      { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Stair"] },
+      { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp"] },
+    ],
+    windows: {
+      [keys.lobby]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 },
+      [keys.dock]: { open: true, bounds: { x: 0, y: 290, width: 480, height: 270 }, channel: 2 },
+    },
+    settings: { startHidden: false },
+  }, null, 2));
+
+  const card = (name) => `[...document.querySelectorAll("article.panel")].find((a) => a.querySelector(".console-head b")?.textContent === ${JSON.stringify(name)})`;
+  const clickRow = (camName, text) => `(() => {
+    const li = [...document.querySelectorAll(".cams li")].find((l) => l.querySelector(".cam-name b")?.textContent === ${JSON.stringify(camName)});
+    li?.closest("details")?.setAttribute("open", "");
+    const btn = li && [...li.querySelectorAll("button")].find((b) => b.textContent === ${JSON.stringify(text)});
+    btn?.click();
+    return !!btn;
+  })()`;
+  const showAll = `(() => { const btn = [...${card("Building")}.querySelectorAll("button")].find((b) => b.textContent === "Show all"); btn?.click(); return !!btn; })()`;
+  const readList = `(() => {
+    const c = ${card("Building")};
+    return {
+      count: document.getElementById("cam-count").textContent,
+      listed: [...c.querySelectorAll(":scope > ul.cams .cam-name b")].map((b) => b.textContent),
+      summary: c.querySelector("details.tucked > summary")?.textContent ?? null,
+      tucked: [...c.querySelectorAll("details.tucked .cam-name b")].map((b) => b.textContent),
+    };
+  })()`;
+  const readPalette = `(() => {
+    document.querySelector('[data-tab="layouts"]').click();
+    document.getElementById("btn-new-layout").click();
+    const out = [...document.querySelectorAll("#editor-cameras li.cam")].map((li) => li.dataset.key);
+    document.getElementById("editor-cancel").click();
+    document.querySelector('[data-tab="cameras"]').click();
+    return out;
+  })()`;
+  const { result, config } = await runApp({
+    userData, results, seconds: 10, extraArgs: ["--mock"],
+    env: {
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 2500, do: "manager-js", js: clickRow("Building Dock", "Hide") },
+        { at: 3500, do: "manager-js", js: readList },
+        { at: 4000, do: "manager-js", js: showAll },
+        { at: 6000, do: "manager-js", js: readPalette },
+        { at: 6500, do: "manager-js", js: clickRow("Building Dock", "Show in list") },
+        { at: 7500, do: "manager-js", js: readList },
+      ]),
+    },
+  });
+  const [hid, before, all, palette, back, after] = result.actions.map((a) => a.value ?? { error: a.error });
+  check("Hide on a camera row hid it from the list", hid === true && JSON.stringify(before?.listed) === JSON.stringify(["Building Lobby", "Building Stair"]),
+    JSON.stringify(before ?? hid));
+  check("hidden cameras sit in a collapsed Hidden from list section", before?.summary === "Hidden from list (1)" && JSON.stringify(before?.tucked) === JSON.stringify(["Building Dock"]), JSON.stringify(before));
+  check("the camera count leaves them out and says how many are hidden", before?.count === "3 cameras · 1 open · 1 hidden from list", before?.count);
+  const end = last(result);
+  check("hiding closed the camera's window, and Show all skipped it",
+    all === true && Object.keys(end).sort().join() === [keys.lobby, keys.stair].sort().join() && config.windows[keys.dock]?.open === false,
+    `open=${JSON.stringify(Object.keys(end))} dock=${JSON.stringify(config.windows[keys.dock])}`);
+  check("the layout editor's camera list leaves hidden cameras out",
+    Array.isArray(palette) && palette.includes(keys.lobby) && palette.includes(keys.ramp) && !palette.includes(keys.dock), JSON.stringify(palette));
+  check("Show in list put it back", back === true && after?.listed?.includes("Building Dock") && after.summary === null && after.count === "4 cameras · 2 open",
+    JSON.stringify(after ?? back));
+  check("hidden-from-list is saved per camera and cleared again", config.windows[keys.dock] && !("listHidden" in config.windows[keys.dock]), JSON.stringify(config.windows[keys.dock]));
+  console.log(`  results: ${results}`);
+}
+
+// ---------------------------------------------------------------------------------------------
 // Color range: several UniFi cameras send full-range luma without flagging it, and Chromium then
 // crushes everything below 16 to black. src/avc-range.js rewrites the SPS to say full range.
 
@@ -1029,6 +1108,7 @@ try {
   if (suite === "layouts" || suite === "all") await runSuite(layoutsSuite);
   if (suite === "arrange" || suite === "all") await runSuite(arrangeSuite);
   if (suite === "editor" || suite === "all") await runSuite(editorSuite);
+  if (suite === "list" || suite === "all") await runSuite(listSuite);
   if (suite === "update" || suite === "all") await runSuite(updateSuite);
   if (suite === "e2e" || suite === "all") await runSuite(e2eSuite);
 } catch (err) {

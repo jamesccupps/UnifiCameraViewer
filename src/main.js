@@ -310,6 +310,32 @@ function closeAllCameras(consoleId) {
   }
 }
 
+/** "Show all": every camera on the console except the ones hidden from the list. */
+function openAllCameras(consoleId) {
+  for (const cam of connections.get(consoleId)?.cameras() ?? []) {
+    const key = `${consoleId}/${cam.id}`;
+    if (!store.data.windows[key]?.listHidden) openCameraWindow(key);
+  }
+}
+
+/**
+ * Hide from list: for cameras nobody uses right now (often offline). They move to the bottom of
+ * their console in the camera list, Show all and the layout editor skip them, and the window closes.
+ */
+function setListHidden(key, hidden) {
+  const [consoleId, cameraId] = key.split("/");
+  if (!cameraId || !store.data.consoles.some((c) => c.id === consoleId)) return;
+  const entry = (store.data.windows[key] ??= { open: false, bounds: null, channel: null, onTop: false, name: "" });
+  if (hidden) {
+    entry.listHidden = true;
+    if (entry.open) closeCamera(key);
+  } else {
+    delete entry.listHidden;
+  }
+  store.save();
+  notifyManager();
+}
+
 // ---------------------------------------------------------------------------------------------
 // Arrange windows: tile the camera windows on one screen into a layout (src/grid.js).
 
@@ -1092,7 +1118,10 @@ function managerState() {
         const w = store.data.windows[key];
         const cw = camWins.get(key);
         const hidden = !!(w?.open && w.hidden);
-        return { ...cam, key, open: !!cw || hidden, hidden, channel: cw?.stream?.channel ?? w?.channel ?? null, onTop: !!w?.onTop, status: cw?.stream?.status ?? null };
+        return {
+          ...cam, key, open: !!cw || hidden, hidden, listHidden: !!w?.listHidden,
+          channel: cw?.stream?.channel ?? w?.channel ?? null, onTop: !!w?.onTop, status: cw?.stream?.status ?? null,
+        };
       });
       return {
         id: c.id,
@@ -1228,9 +1257,7 @@ function registerIpc() {
   handle("mgr:import-liveview", ({ consoleId, liveviewId } = {}) => importLiveview(String(consoleId), String(liveviewId)));
   handle("mgr:bring-to-front", () => bringAllToFront());
   handle("mgr:reset-positions", () => tileOpenWindows());
-  handle("mgr:open-all", (consoleId) => {
-    const conn = connections.get(String(consoleId));
-    for (const cam of conn?.cameras() ?? []) openCameraWindow(`${consoleId}/${cam.id}`);
-  });
+  handle("mgr:open-all", (consoleId) => openAllCameras(String(consoleId)));
+  handle("mgr:set-list-hidden", ({ key, hidden } = {}) => setListHidden(String(key), !!hidden));
   handle("mgr:quit", () => { quitting = true; app.quit(); });
 }

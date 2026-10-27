@@ -9,7 +9,7 @@ import path from "node:path";
  * {
  *   version: 1,
  *   consoles: [{ id, name, host, username, password: { enc: "safe" | "plain", data: base64 } }],
- *   windows:  { "<consoleId>/<cameraId>": { open, bounds: {x,y,width,height}, channel, onTop, name, hideName, dewarp } },
+ *   windows:  { "<consoleId>/<cameraId>": { open, hidden, listHidden, bounds: {x,y,width,height}, channel, onTop, name, hideName, clock, range, dewarp } },
  *   settings: { lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin },
  *   layouts:  [{ id, name, windows: { "<consoleId>/<cameraId>": { bounds, channel, onTop, hideName, clock, range, dewarp } } }]
  * }
