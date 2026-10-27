@@ -78,6 +78,28 @@ const fmtCircle = (c) => (c ? `x=${c.x.toFixed(4)} y=${c.y.toFixed(4)} r=${c.r.t
 
 async function mockSuite() {
   console.log("\nMock suite (fake cameras, no network)");
+
+  // Without ffmpeg (e.g. --mock in a packaged build) a mock stream must fail like a dropped stream,
+  // not throw in the main process (which pops Electron's blocking error dialog).
+  {
+    const { MockConnection } = await import(new URL("../src/mock.js", import.meta.url).href);
+    const saved = process.env.FFMPEG_PATH;
+    process.env.FFMPEG_PATH = path.join(os.tmpdir(), "no-such-dir", "ffmpeg.exe");
+    const conn = new MockConnection({ id: "cccccccc-0000-4000-8000-000000000003", name: "T", host: "mock-t", mockCameras: ["A"] });
+    conn.start();
+    await new Promise((r) => setTimeout(r, 600));
+    const ctrl = new AbortController();
+    let outcome = "no error";
+    try {
+      for await (const seg of conn.camera("cccccccc-cam0").livestream({ source: { channel: 2 }, signal: ctrl.signal })) { outcome = `got ${seg.type}`; break; }
+    } catch (err) {
+      outcome = err.message;
+    }
+    ctrl.abort();
+    if (saved === undefined) delete process.env.FFMPEG_PATH; else process.env.FFMPEG_PATH = saved;
+    check("mock camera without ffmpeg fails its stream instead of crashing", /needs ffmpeg/.test(outcome), outcome);
+  }
+
   const userData = tmpDir("mock");
   const results = path.join(userData, "results");
   const A = "aaaaaaaa-0000-4000-8000-000000000001";

@@ -7,7 +7,16 @@ Hard requirements, all deliberate:
 - **Direct login by IP** with a local account. No ui.com/cloud, no MFA.
 - **Low resource use.** Medium channel by default, GPU decode via MSE, minimized windows stop streaming, WebGL only for 360° windows.
 
-Current version: **1.1.0** (adds 360° dewarping). The owner has run 1.0 and 1.1 on the real consoles and confirmed they work.
+Current version: **1.2.0**. On top of 1.1's 360° dewarping, it adds the ROADMAP.md items:
+- color-range fix for crushed shadows
+- name label collapse and per-window hide
+- clock on 360° views
+- Apply to all
+- Hide / Show cameras
+- named layouts with Protect liveview import
+- signed in-place updates
+
+The owner ran 1.0 and 1.1 on the real consoles. 1.2.0 is tested against them only through self-test runs from source on a copy of the config; the owner hasn't run the 1.2.0 build yet.
 
 ## Commands
 
@@ -206,6 +215,20 @@ Action results carry `t` (epoch ms), so a check can compare against the samples 
    - For a first install, or a copy older than 1.2.0, hand over the zip instead. The owner quits the app and replaces the folder; settings in `%APPDATA%` carry over.
 
 The exe is unsigned, so SmartScreen shows "Run anyway" on first launch.
+
+**Checking that a packaged build really updates itself** (done for 1.2.0; repeat when updater.js or the helper changes):
+1. Build version N+1 and move its zip and `latest.json` to a scratch release folder. Delete that folder afterwards: it's validly signed.
+2. Build N and copy `dist/Protect Panes-win32-x64` to a scratch `Tools\Protect Panes`.
+3. Run that exe with these settings:
+   - env: `PANES_USER_DATA` pointing at a scratch config with `consoles: []`, `updateSource` set to the release folder, and `startHidden: false`;
+   - self-test actions: click `#btn-check-update` at ~3 s, and invoke `mgr:install-update` at ~20 s.
+4. Expect:
+   - the app log: "N starting", "downloaded and verified", "installing update", then "N+1 starting";
+   - `apply-update.log` ending "update: done";
+   - no `.old` / `.new` folders left beside the install;
+   - the relaunched copy finding nothing to install.
+
+Don't use `--mock` for this. The packaged build has no ffmpeg, so mock cameras just fail and retry.
 
 ## Known limitations / not built
 

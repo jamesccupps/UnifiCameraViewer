@@ -101,6 +101,7 @@ class MockSubscription {
   #queue = [];
   #waiters = [];
   #done = false;
+  #error = null;
   #proc = null;
   #signal;
   #opts;
@@ -179,6 +180,13 @@ class MockSubscription {
     proc.on("exit", () => {
       if (proc === this.#proc && !this.#done) this.#finish();
     });
+    // No ffmpeg (a packaged build, or none on PATH): fail this subscription like a dropped stream,
+    // so CameraStream backs off and retries, instead of an uncaught error in the main process.
+    proc.on("error", (err) => {
+      if (proc !== this.#proc || this.#done) return;
+      this.#error = new Error(`mock camera needs ffmpeg: ${err.message}`);
+      this.#finish();
+    });
   }
 
   #push(item) {
@@ -193,7 +201,10 @@ class MockSubscription {
     this.state = "closed";
     clearTimeout(this.restartTimer);
     this.#proc?.kill("SIGKILL");
-    for (const w of this.#waiters.splice(0)) w.resolve({ value: undefined, done: true });
+    for (const w of this.#waiters.splice(0)) {
+      if (this.#error) w.reject(this.#error);
+      else w.resolve({ value: undefined, done: true });
+    }
     this.#queue = [];
   }
 
@@ -201,8 +212,9 @@ class MockSubscription {
     return {
       next: () => {
         if (this.#queue.length) return Promise.resolve({ value: this.#queue.shift(), done: false });
+        if (this.#error) return Promise.reject(this.#error);
         if (this.#done) return Promise.resolve({ value: undefined, done: true });
-        return new Promise((resolve) => this.#waiters.push({ resolve }));
+        return new Promise((resolve, reject) => this.#waiters.push({ resolve, reject }));
       },
       return: async () => { this.#finish(); return { value: undefined, done: true }; },
     };
