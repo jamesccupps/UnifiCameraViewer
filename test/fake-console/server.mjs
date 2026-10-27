@@ -11,7 +11,8 @@
 //
 // Speaks exactly what the unifi-protect library needs: POST /api/auth/login, GET /proxy/protect/api/bootstrap,
 // WSS /proxy/protect/ws/updates, GET /proxy/protect/api/ws/livestream -> WSS livestream framed as
-// [type:1][len:3][payload] (248 codec, 250 init, 249 begin, 251 moof, 254 mdat header, 252 video, 255 end).
+// [type:1][len:3][payload] (248 codec, 250 init, 249 begin, 251 moof, 254 mdat header, 252 video, 255 end),
+// and GET /proxy/protect/api/cameras/<id>/snapshot?w=<width> -> a JPEG (logged as "snapshot <id> w=<width>").
 // Video comes from ffmpeg (FFMPEG_PATH, the ffmpeg-static dev dependency, or ffmpeg on PATH).
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -106,6 +107,16 @@ const server = https.createServer({ key: fs.readFileSync(path.join(dir, "key.pem
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(bootstrap()));
       return;
     }
+    const snap = url.pathname.match(/^\/proxy\/protect\/api\/cameras\/([^/]+)\/snapshot$/);
+    if (req.method === "GET" && snap) {
+      log("snapshot", snap[1], `w=${url.searchParams.get("w")}`);
+      const w = Math.round(Number(url.searchParams.get("w") || 640) / 2) * 2;
+      snapshotJpeg(w, Math.round((w * 9) / 16 / 2) * 2).then(
+        (jpg) => res.writeHead(200, { "content-type": "image/jpeg" }).end(jpg),
+        () => res.writeHead(500).end(),
+      );
+      return;
+    }
     if (url.pathname === "/proxy/protect/api/ws/livestream") {
       log("livestream negotiate", url.searchParams.get("camera"), "channel", url.searchParams.get("channel"));
       res.writeHead(200, { "content-type": "application/json" })
@@ -125,6 +136,16 @@ server.on("upgrade", (req, socket, head) => {
     ws.close();
   });
 });
+
+function snapshotJpeg(w, h) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegPath(), ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", `testsrc2=size=${w}x${h}:rate=1`, "-frames:v", "1", "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1"], { stdio: ["ignore", "pipe", "ignore"] });
+    const chunks = [];
+    proc.stdout.on("data", (c) => chunks.push(c));
+    proc.on("error", reject);
+    proc.on("exit", (code) => (code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error(`ffmpeg exited with ${code}`))));
+  });
+}
 
 function frame(type, payload = Buffer.alloc(0)) {
   const h = Buffer.alloc(4);

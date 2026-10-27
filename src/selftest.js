@@ -165,7 +165,7 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
       actions: results,
       displays: screen.getAllDisplays().map((d) => ({ id: d.id, bounds: d.bounds, workArea: d.workArea, scaleFactor: d.scaleFactor })),
     };
-    for (const [id, c] of connections) result.connections[id] = { state: c.state, message: c.message, cameras: c.cameras().length };
+    for (const [id, c] of connections) result.connections[id] = { state: c.state, message: c.message, cameras: c.cameras().length, snapshots: c.snapshotCount };
     if (process.env.PANES_SELFTEST_SHOWBAR) {
       for (const cw of camWins.values()) await cw.win.webContents.executeJavaScript("document.getElementById('bar').style.opacity = 1").catch(() => {});
       await new Promise((r) => setTimeout(r, 300));

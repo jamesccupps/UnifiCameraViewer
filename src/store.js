@@ -26,6 +26,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   startHidden: true,
   launchAtLogin: false,
   arrangeQuality: true, // Arrange / layouts pick each camera's stream quality from its tile size
+  showPreviews: true,   // snapshot thumbnails in the camera list (src/previews.js)
   // https:// base URL or folder holding latest.json + the release zip (see updater.js). The default is
   // this project's latest GitHub release; blank turns update checks off.
   updateSource: "https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download",

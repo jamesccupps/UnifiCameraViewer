@@ -6,6 +6,7 @@ import { CameraStream } from "./camera-stream.js";
 import { ConsoleConnection, channelList, fisheyeInfo, resolveChannel } from "./console-connection.js";
 import { autoGrid, cellRects, channelForTile, fitAspect, readingOrder, templateById, TEMPLATES } from "./grid.js";
 import { createLogger } from "./log.js";
+import { Previews } from "./previews.js";
 import { decryptPassword, DEFAULT_SETTINGS, encryptPassword, newId, Store } from "./store.js";
 import { UPDATE_PUBLIC_KEY } from "./update-key.js";
 import { sourceKind, Updater } from "./updater.js";
@@ -31,6 +32,7 @@ let tray = null;
 let managerWin = null;
 let quitting = false;
 let updater = null;
+let previews = null;
 
 const connections = new Map(); // consoleId -> ConsoleConnection
 const camWins = new Map();     // key "<consoleId>/<cameraId>" -> { key, consoleId, cameraId, win, stream, aspect }
@@ -78,6 +80,10 @@ async function init() {
     log: log.child("update"),
   });
   updater.on("state", () => { notifyManager(); updateTrayMenu(); });
+  previews = new Previews({
+    getCamera: (key) => { const [consoleId, cameraId] = key.split("/"); return connections.get(consoleId)?.camera(cameraId); },
+    log: log.child("preview"),
+  });
 
   createTray();
   applyLoginItem();
@@ -994,6 +1000,9 @@ function setSetting(name, value) {
     case "launchAtLogin":
       applyLoginItem();
       break;
+    case "showPreviews":
+      if (!value) previews.clear();
+      break;
   }
   for (const cw of camWins.values()) refreshCameraMeta(cw);
   notifyManager();
@@ -1259,5 +1268,6 @@ function registerIpc() {
   handle("mgr:reset-positions", () => tileOpenWindows());
   handle("mgr:open-all", (consoleId) => openAllCameras(String(consoleId)));
   handle("mgr:set-list-hidden", ({ key, hidden } = {}) => setListHidden(String(key), !!hidden));
+  handle("mgr:preview", (key) => (store.settings.showPreviews ? previews.get(String(key)) : null));
   handle("mgr:quit", () => { quitting = true; app.quit(); });
 }

@@ -69,8 +69,9 @@
     <!-- Settings -->
     <section id="tab-settings" class="tab-panel hidden" role="tabpanel">
       <div class="panel settings">
-        <h2>Camera windows</h2>
+        <h2>Cameras</h2>
         <div class="grid">
+          <label class="check"><input type="checkbox" data-setting="showPreviews"><span><b>Show camera previews</b><small>A still from each camera in this list, refreshed about once a minute while the list is open. Hover one for a bigger view.</small></span></label>
           <label class="check"><input type="checkbox" data-setting="lockLayout"><span><b>Lock layout</b><small>Camera windows can't be moved or resized, 360° views can't be re-aimed, and the hover bar is hidden.</small></span></label>
           <label class="check"><input type="checkbox" data-setting="showNames"><span><b>Show camera names</b><small>Name label in the corner of each window. Right-click a window to hide just that one.</small></span></label>
           <label class="check"><input type="checkbox" data-setting="lockAspect"><span><b>Keep video shape</b><small>Windows resize to the camera's aspect ratio, so there are no black bars.</small></span></label>
@@ -118,6 +119,7 @@
   </footer>
 
   <div id="tip" class="tip" role="tooltip" hidden></div>
+  <div id="preview-pop" class="preview-pop" popover="manual"><img alt=""><p></p></div>
 
   <dialog id="console-dialog">
     <form id="console-form" method="dialog">

@@ -138,6 +138,115 @@ function reattachTip() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Camera previews: a still per camera row, fetched only for rows on screen while this list is
+// visible and refreshed about once a minute. Hovering one, or a camera in the layout editor, shows
+// it bigger. Main caches the pictures (src/previews.js), so the 3 s re-render doesn't re-ask.
+
+const PREVIEW_REFRESH_MS = 60_000;
+const PREVIEW_HOVER_MS = 15_000; // hovering asks for a fresher picture than the row keeps
+const previewCache = new Map();  // key -> { url, at, fetched }
+const previewPending = new Set();
+const previewObserver = new IntersectionObserver((entries) => {
+  for (const e of entries) if (e.isIntersecting) loadPreview(e.target.dataset.previewKey);
+});
+const pop = document.getElementById("preview-pop");
+let popFor = null;
+let popTimer = null;
+
+async function loadPreview(key, maxAge = PREVIEW_REFRESH_MS) {
+  if (!key || !state?.settings.showPreviews || document.hidden || previewPending.has(key)) return;
+  const have = previewCache.get(key);
+  if (have && Date.now() - have.fetched < maxAge) return;
+  previewPending.add(key);
+  let p = null;
+  try { p = await panes.invoke("mgr:preview", key); } catch { /* shown as no picture */ }
+  previewPending.delete(key);
+  // A failed refresh keeps the last good picture rather than blanking the row.
+  previewCache.set(key, p?.url ? { url: p.url, at: p.at, fetched: Date.now() } : { url: have?.url ?? null, at: have?.at ?? null, fetched: Date.now() });
+  for (const node of document.querySelectorAll(`.thumb[data-preview-key="${CSS.escape(key)}"]`)) paintThumb(node);
+  if (popFor?.dataset.previewKey === key) paintPop();
+}
+
+function thumb(cam) {
+  const node = el("div", { class: "thumb", "data-preview-key": cam.key, "data-offline": cam.online ? null : "" });
+  paintThumb(node);
+  return node;
+}
+
+function paintThumb(node) {
+  const p = previewCache.get(node.dataset.previewKey);
+  if (node.hasAttribute("data-offline")) node.replaceChildren(el("span", {}, "offline"));
+  else if (p?.url) node.replaceChildren(el("img", { src: p.url, alt: "" }));
+  else node.replaceChildren();
+}
+
+function observePreviews() {
+  previewObserver.disconnect();
+  for (const node of document.querySelectorAll(".thumb")) previewObserver.observe(node);
+}
+
+const ago = (t) => {
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  return s < 5 ? "just now" : s < 90 ? `${s} s ago` : `${Math.round(s / 60)} min ago`;
+};
+
+function paintPop() {
+  if (!popFor) return;
+  const key = popFor.dataset.previewKey;
+  const cam = cameraByKey().get(key);
+  const p = previewCache.get(key);
+  const offline = cam && !cam.online;
+  const img = pop.querySelector("img");
+  img.classList.toggle("hidden", !p?.url || offline);
+  if (p?.url && img.getAttribute("src") !== p.url) img.src = p.url;
+  const note = offline ? "offline" : p?.url ? `taken ${ago(p.at)}` : previewPending.has(key) ? "loading…" : "no picture";
+  pop.querySelector("p").textContent = [cam?.name, note].filter(Boolean).join(" · ");
+  // Beside the hovered thing, flipped to its left near the right edge, kept inside the window.
+  const r = popFor.getBoundingClientRect();
+  const w = pop.offsetWidth;
+  const h = pop.offsetHeight;
+  let left = r.right + 10;
+  if (left + w > window.innerWidth - 6) left = r.left - w - 10;
+  pop.style.left = `${Math.max(6, Math.min(left, window.innerWidth - w - 6))}px`;
+  pop.style.top = `${Math.max(6, Math.min(r.top + r.height / 2 - h / 2, window.innerHeight - h - 6))}px`;
+}
+
+function hidePop() {
+  clearTimeout(popTimer);
+  popTimer = null;
+  popFor = null;
+  if (pop.matches(":popover-open")) pop.hidePopover();
+}
+
+// A popover, not a positioned div: it has to sit above the layout editor's modal dialog.
+document.addEventListener("pointerover", (e) => {
+  const t = e.target.closest?.("[data-preview-key]");
+  if (t === popFor) return;
+  hidePop();
+  if (!t || !state?.settings.showPreviews) return;
+  popFor = t;
+  popTimer = setTimeout(() => {
+    if (popFor !== t || !t.isConnected) return;
+    pop.showPopover();
+    paintPop();
+    loadPreview(t.dataset.previewKey, PREVIEW_HOVER_MS);
+  }, 300);
+});
+document.addEventListener("pointerdown", hidePop);
+document.addEventListener("scroll", hidePop, true);
+window.addEventListener("blur", hidePop);
+
+/** After a re-render the hovered row is new; keep the preview on its replacement. */
+function reattachPop() {
+  if (!popFor || popFor.isConnected) return;
+  const key = popFor.dataset.previewKey;
+  const t = document.elementFromPoint(pointer.x, pointer.y)?.closest?.("[data-preview-key]");
+  if (t?.dataset.previewKey !== key) { hidePop(); return; }
+  popFor = t;
+  if (pop.matches(":popover-open")) paintPop();
+}
+
+// ---------------------------------------------------------------------------------------------
 // Tabs
 
 for (const btn of document.querySelectorAll("[data-tab]")) {
@@ -174,6 +283,8 @@ function render() {
   if (focusedKey) document.querySelector(`[data-focus-key="${CSS.escape(focusedKey)}"]`)?.focus();
   document.querySelector("main").scrollTop = scroll;
   reattachTip();
+  observePreviews();
+  reattachPop();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -290,7 +401,9 @@ function renderConsole(c, q) {
   if (!c.cameras.length) empty = connected ? "No cameras on this console." : "Cameras appear here once connected.";
   else if (!cams.length) empty = "No matching cameras.";
 
-  const list = empty || shown.length ? el("ul", { class: "cams" }, empty ? el("li", { class: "empty" }, empty) : shown.map((cam) => renderCamera(cam))) : null;
+  const list = empty || shown.length
+    ? el("ul", { class: `cams${state.settings.showPreviews ? " with-previews" : ""}` }, empty ? el("li", { class: "empty" }, empty) : shown.map((cam) => renderCamera(cam)))
+    : null;
   return el("article", { class: "panel" }, head, msg ? el("p", { class: `console-msg${bad ? " bad" : ""}` }, msg) : null, list, renderTucked(c, tucked));
 }
 
@@ -369,7 +482,7 @@ function renderCamera(cam) {
     onclick: () => panes.invoke("mgr:set-list-hidden", { key: cam.key, hidden: true }).then(refresh),
   }, "Hide");
 
-  return el("li", {}, toggle, name, channelSelect, find, hide);
+  return el("li", {}, toggle, state.settings.showPreviews ? thumb(cam) : null, name, channelSelect, find, hide);
 }
 
 filterInput.addEventListener("input", () => renderConsoles());
@@ -635,7 +748,7 @@ function renderEditor() {
           class: `cam${placedKeys.has(cam.key) ? " placed" : ""}`,
           draggable: "true",
           "data-key": cam.key,
-          tip: placedKeys.has(cam.key) ? "Already in the layout. Drag it to move it to another tile." : "Drag onto a tile, or double-click to fill the next empty one.",
+          "data-preview-key": cam.key, // hover shows the camera's picture (the hint text is under the list)
           ondblclick: () => {
             const free = ed.cells.findIndex((x) => !x);
             if (free >= 0) place(free, cam.key);

@@ -182,6 +182,27 @@ main { flex: 1; overflow: auto; padding: 14px 18px 18px; }
 .cam-name b { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cam-name small { color: var(--muted); white-space: nowrap; }
 .cams .empty { display: block; color: var(--muted); padding: 10px 2px; }
+.cams.with-previews li { grid-template-columns: auto auto 1fr auto auto auto; }
+
+/* Camera previews: the row thumbnail, and the bigger one on hover */
+.thumb {
+  width: 64px; height: 36px; flex: none;
+  display: grid; place-items: center; overflow: hidden;
+  border-radius: 4px; background: #0b0d0f; outline: 1px solid var(--line);
+  cursor: zoom-in;
+}
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb span { font-size: 10px; color: var(--muted); }
+.preview-pop {
+  position: fixed; inset: auto; margin: 0;
+  width: 380px; padding: 6px;
+  border: 1px solid var(--line-2); border-radius: 8px;
+  background: var(--panel-2); color: var(--text);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+.preview-pop img { display: block; width: 100%; max-height: 300px; object-fit: contain; border-radius: 4px; background: #000; }
+.preview-pop p { margin: 6px 2px 0; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* "Hidden from list" section at the bottom of a console card */
 .tucked { margin-top: 8px; }

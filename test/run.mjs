@@ -890,6 +890,66 @@ async function listSuite() {
     JSON.stringify(after ?? back));
   check("hidden-from-list is saved per camera and cleared again", config.windows[keys.dock] && !("listHidden" in config.windows[keys.dock]), JSON.stringify(config.windows[keys.dock]));
   console.log(`  results: ${results}`);
+
+  // Second launch: previews. Garage Spare is offline; the list re-renders every 3 s throughout.
+  const pd = tmpDir("previews");
+  fs.writeFileSync(path.join(pd, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [
+      { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock"] },
+      { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp", "Spare"], mockOffline: ["Spare"] },
+    ],
+    windows: {},
+    settings: { startHidden: false },
+  }, null, 2));
+  const readThumbs = `(() => Object.fromEntries([...document.querySelectorAll(".cams li")].map((li) => [
+    li.querySelector(".cam-name b")?.textContent,
+    li.querySelector(".thumb") ? { jpeg: !!li.querySelector(".thumb img")?.src?.startsWith("data:image/jpeg"), text: li.querySelector(".thumb").textContent } : null,
+  ])))()`;
+  const hover = (selector) => `(async () => {
+    document.querySelector(${JSON.stringify(selector)}).dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 700));
+    const pop = document.getElementById("preview-pop");
+    return { open: pop.matches(":popover-open"), jpeg: pop.querySelector("img").src.startsWith("data:image/jpeg"), caption: pop.querySelector("p").textContent };
+  })()`;
+  const hoverPalette = `(async () => {
+    document.querySelector('[data-tab="layouts"]').click();
+    document.getElementById("btn-new-layout").click();
+    // Opening a modal moves what's under the real cursor, and Chromium sends its own pointerover
+    // for that; hover after it, as a person would.
+    await new Promise((r) => setTimeout(r, 300));
+    const r = await ${hover(`#editor-cameras li.cam[data-key="${keys.ramp}"]`)};
+    r.overDialog = document.getElementById("editor-dialog").open;
+    document.getElementById("editor-cancel").click();
+    document.querySelector('[data-tab="cameras"]').click();
+    return r;
+  })()`;
+  const previewsOff = `(() => { const box = document.querySelector('[data-setting="showPreviews"]'); box.checked = false; box.dispatchEvent(new Event("change")); return true; })()`;
+  const run2 = await runApp({
+    userData: pd, results: path.join(pd, "results"), seconds: 12, extraArgs: ["--mock"],
+    env: {
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 3500, do: "manager-js", js: readThumbs },
+        { at: 4000, do: "manager-js", js: hover(`.thumb[data-preview-key="${keys.lobby}"]`) },
+        { at: 5500, do: "manager-js", js: hoverPalette },
+        { at: 9000, do: "manager-js", js: previewsOff },
+        { at: 10500, do: "manager-js", js: readThumbs },
+      ]),
+    },
+  });
+  const [thumbs, popList, popPalette, , thumbsOff] = run2.result.actions.map((a) => a.value ?? { error: a.error });
+  check("each camera row shows a JPEG preview from the camera",
+    thumbs?.["Building Lobby"]?.jpeg && thumbs["Building Dock"]?.jpeg && thumbs["Garage Ramp"]?.jpeg, JSON.stringify(thumbs));
+  check("an offline camera's preview says offline", thumbs?.["Garage Spare"]?.text === "offline" && !thumbs["Garage Spare"].jpeg, JSON.stringify(thumbs?.["Garage Spare"]));
+  check("hovering a preview shows it bigger, with the camera's name and age",
+    popList?.open && popList.jpeg && /^Building Lobby · taken (just now|\d+ s ago)$/.test(popList.caption), JSON.stringify(popList));
+  check("hovering a camera in the layout editor shows its preview above the dialog",
+    popPalette?.open && popPalette.overDialog && popPalette.jpeg && popPalette.caption.startsWith("Garage Ramp"), JSON.stringify(popPalette));
+  const asked = (id) => run2.result.connections[id]?.snapshots;
+  check("re-renders and hovers reuse the picture: one request per online camera, none for the offline one",
+    asked(A) === 2 && asked(B) === 1, JSON.stringify({ building: asked(A), garage: asked(B) }));
+  check("Show camera previews off removes them from the list",
+    run2.config.settings.showPreviews === false && thumbsOff && Object.values(thumbsOff).every((t) => t === null), JSON.stringify(thumbsOff));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1005,9 +1065,13 @@ function startConsole(port, mode, prefix, env = {}) {
   const child = spawn(process.execPath, [path.join(ROOT, "test", "fake-console", "server.mjs"), String(port), mode, prefix], {
     env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"],
   });
+  child.output = []; // its log lines, for checks on what the app asked for
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`fake console ${port} didn't start`)), 10_000);
-    child.stdout.on("data", (d) => { if (String(d).includes("listening")) { clearTimeout(timer); resolve(child); } });
+    child.stdout.on("data", (d) => {
+      child.output.push(...String(d).split(/\r?\n/).filter(Boolean));
+      if (String(d).includes("listening")) { clearTimeout(timer); resolve(child); }
+    });
     child.on("exit", (code) => reject(new Error(`fake console ${port} exited (${code})`)));
   });
 }
@@ -1061,9 +1125,13 @@ async function e2eSuite() {
       sel.dispatchEvent(new Event("change"));
       return options;
     })()`;
+    const thumbsJs = `(() => Object.fromEntries([...document.querySelectorAll(".cams li")].map((li) => [
+      li.querySelector(".cam-name b")?.textContent,
+      { jpeg: !!li.querySelector(".thumb img")?.src?.startsWith("data:image/jpeg"), text: li.querySelector(".thumb")?.textContent ?? null },
+    ])))()`;
     const { result, config } = await runApp({
       userData, results, seconds: 16,
-      env: { PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 5000, do: "manager-js", js: importJs }]) },
+      env: { PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 5000, do: "manager-js", js: importJs }, { at: 10000, do: "manager-js", js: thumbsJs }]) },
     });
     const cams = last(result);
     const conn = result.connections;
@@ -1093,6 +1161,14 @@ async function e2eSuite() {
     check("imported liveview: first camera of each slot, empty slot skipped, grid order kept",
       imported && Object.keys(imported.windows).length === 3 && ib.every(Boolean) && ib[0].x < ib[1].x && ib[2].y > ib[0].y && Math.abs(ib[2].x - ib[1].x) < 3,
       JSON.stringify(imported && Object.keys(imported.windows)));
+    const thumbs = result.actions[1]?.value ?? {};
+    const asked = servers[0].output.filter((l) => l.includes(" snapshot "));
+    check("camera list previews: a JPEG from Protect's snapshot endpoint, through the library",
+      thumbs["Building Cam 1"]?.jpeg && asked.some((l) => l.includes(`snapshot ${cam(P.building, 0)} w=480`)),
+      JSON.stringify({ thumbs, asked }));
+    check("an offline camera's preview says offline and the console isn't asked for it",
+      thumbs["Building Cam 3"]?.text === "offline" && !thumbs["Building Cam 3"]?.jpeg && !asked.some((l) => l.includes(cam(P.building, 2))),
+      JSON.stringify({ cam3: thumbs["Building Cam 3"], asked }));
     console.log(`  results: ${results}`);
   } finally {
     for (const s of servers) s.kill();

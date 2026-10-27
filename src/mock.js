@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
  * moof+mdat fragments), so the whole window/MSE path can be exercised without a console.
  * Uses FFMPEG_PATH, else the ffmpeg-static dev dependency, else ffmpeg on PATH.
  * Set PANES_MOCK_RESTART_SEC to force a mid-stream reconnect (discontinuity) on the first camera
- * of each console.
+ * of each console. cfg.mockOffline lists camera names (without the console prefix) that are offline.
  */
 
 export function ffmpegPath() {
@@ -29,7 +29,7 @@ export class MockConnection extends EventEmitter {
     this.#cfg = cfg;
     const base = cfg.name || "Mock";
     const names = cfg.mockCameras ?? ["Lobby", "Loading Dock", "Stair B", "Parking"];
-    this.#cams = names.map((n, i) => new MockCamera(`${cfg.id.slice(0, 8)}-cam${i}`, `${base} ${n}`, i));
+    this.#cams = names.map((n, i) => new MockCamera(`${cfg.id.slice(0, 8)}-cam${i}`, `${base} ${n}`, i, { online: !(cfg.mockOffline ?? []).includes(n) }));
     // PANES_MOCK_FISHEYE=<png> adds a 360° ceiling camera that loops that fisheye image.
     if (process.env.PANES_MOCK_FISHEYE && cfg.mockFisheye !== false) {
       this.#cams.push(new MockCamera(`${cfg.id.slice(0, 8)}-cam360`, `${base} 360`, names.length, { image: process.env.PANES_MOCK_FISHEYE, mount: process.env.PANES_MOCK_FISHEYE_MOUNT || "ceiling" }));
@@ -40,6 +40,8 @@ export class MockConnection extends EventEmitter {
   get name() { return this.#cfg.name || this.#cfg.host; }
   get host() { return this.#cfg.host; }
   get controllerName() { return `${this.name} (mock)`; }
+  /** Snapshot requests that reached the "console", for the self-test result. */
+  get snapshotCount() { return this.#cams.reduce((n, c) => n + c.snapshots, 0); }
 
   start() {
     this.#set("connecting", "Connecting…");
@@ -51,7 +53,7 @@ export class MockConnection extends EventEmitter {
   camera(id) { return this.state === "connected" ? this.#cams.find((c) => c.id === id) : undefined; }
   cameras() {
     if (this.state !== "connected") return [];
-    return this.#cams.map((c) => ({ id: c.id, name: c.name, online: true, model: c.image ? "Mock AI 360" : "Mock G5", channels: c.channelList, fisheye: !!c.image }));
+    return this.#cams.map((c) => ({ id: c.id, name: c.name, online: c.isOnline, model: c.image ? "Mock AI 360" : "Mock G5", channels: c.channelList, fisheye: !!c.image }));
   }
 
   /** cfg.mockLiveviews: [{ id, name, slots: [camera index | null] }]. */
@@ -70,7 +72,7 @@ export class MockConnection extends EventEmitter {
 const SQUARE = { 0: [1920, 1920], 1: [1280, 1280], 2: [640, 640] };
 
 class MockCamera {
-  constructor(id, name, index, { image = null, mount = "ceiling" } = {}) {
+  constructor(id, name, index, { image = null, mount = "ceiling", online = true } = {}) {
     this.id = id;
     this.name = name;
     this.index = index;
@@ -78,7 +80,8 @@ class MockCamera {
     // A camera named "... Shadows" sends what several real UniFi cameras do: full-range luma (here
     // Y=0 left, Y=24 right) with no range flag in the SPS. Tests check it isn't crushed to black.
     this.shadows = /\bShadows\b/.test(name);
-    this.isOnline = true;
+    this.isOnline = online;
+    this.snapshots = 0;
     const sizes = image ? SQUARE : SIZES;
     this.config = {
       marketName: image ? "AI 360" : "G5 Bullet",
@@ -87,6 +90,24 @@ class MockCamera {
       channels: [0, 1, 2].map((ch) => ({ id: ch, name: ["High", "Medium", "Low"][ch], enabled: true, width: sizes[ch][0], height: sizes[ch][1] })),
     };
     this.channelList = this.config.channels.map((c) => ({ id: c.id, label: `${c.name} · ${c.width}×${c.height}`, width: c.width, height: c.height }));
+  }
+
+  /** One JPEG of the camera's picture, like Protect's /snapshot endpoint (Camera.snapshot in the library). */
+  snapshot({ width = 640, signal } = {}) {
+    this.snapshots++;
+    const w = Math.round(width / 2) * 2;
+    const h = this.image ? w : Math.round((w * 9) / 16 / 2) * 2;
+    const input = this.image
+      ? ["-i", this.image, "-vf", `scale=${w}:${h}`]
+      : ["-f", "lavfi", "-i", `testsrc2=size=${w}x${h}:rate=1`, "-vf", `hue=h=${this.index * 70}`];
+    return new Promise((resolve, reject) => {
+      const proc = spawn(ffmpegPath(), ["-hide_banner", "-loglevel", "error", ...input, "-frames:v", "1", "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1"], { stdio: ["ignore", "pipe", "ignore"] });
+      const chunks = [];
+      proc.stdout.on("data", (c) => chunks.push(c));
+      proc.on("error", (err) => reject(new Error(`mock camera needs ffmpeg: ${err.message}`)));
+      proc.on("exit", (code) => (code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error(`ffmpeg exited with ${code}`))));
+      signal?.addEventListener("abort", () => proc.kill("SIGKILL"), { once: true });
+    });
   }
 
   livestream({ source, signal }) {
