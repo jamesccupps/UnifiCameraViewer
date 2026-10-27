@@ -459,8 +459,10 @@ async function updateSuite() {
   fs.writeFileSync(privFile, privateKey.export({ type: "pkcs8", format: "pem" }));
   fs.writeFileSync(pubFile, pubPem);
 
-  // A release folder like build-win.js makes: zip with a top folder holding ProtectPanes.exe.
-  const makeRelease = (name, files, version = "9.9.9") => {
+  // A release folder like build-win.js makes: zip with a top folder holding ProtectPanes.exe, and
+  // optionally the gzip'd app.asar for copies on `electron`.
+  const zlib = await import("node:zlib");
+  const makeRelease = (name, files, version = "9.9.9", { asar = null, electron = "45.0.0" } = {}) => {
     const rel = path.join(dir, name);
     const app = path.join(rel, "build", "Protect Panes-win32-x64");
     for (const [f, body] of Object.entries(files)) {
@@ -469,8 +471,16 @@ async function updateSuite() {
     }
     const zip = path.join(rel, "ProtectPanes-win32-x64.zip");
     spawnSync("powershell", ["-NoProfile", "-Command", `Compress-Archive -Path '${app}' -DestinationPath '${zip}'`]);
+    let asarOpt = null;
+    if (asar !== null) {
+      const unpacked = path.join(rel, "build", "app.asar");
+      fs.writeFileSync(unpacked, asar);
+      const gz = path.join(rel, "ProtectPanes-app.asar.gz");
+      fs.writeFileSync(gz, zlib.gzipSync(Buffer.from(asar)));
+      asarOpt = { gz, unpacked, electron };
+    }
+    signRelease({ zip, asar: asarOpt, version, keyFile: privFile });
     fs.rmSync(path.join(rel, "build"), { recursive: true, force: true });
-    signRelease({ zip, version, keyFile: privFile });
     return rel;
   };
   const good = makeRelease("good", { "ProtectPanes.exe": "v2", "resources/app.asar": "v2" });
@@ -597,6 +607,50 @@ async function updateSuite() {
     check("a failing installer is reported, and the helper still relaunches what's there",
       /update failed: the installer exited with code 3/.test(bad.log) && /update: done/.test(bad.log) && fs.readFileSync(path.join(installDir, "ProtectPanes.exe"), "utf8") === "v3-from-installer",
       bad.log.trim());
+
+    // Small update: only resources\app.asar changes; the exe and everything else stay.
+    const asarBody = "v4 app.asar ".repeat(2000);
+    const asarRel = makeRelease("with-asar", { "ProtectPanes.exe": "v4", "resources/app.asar": asarBody }, "9.9.9", { asar: asarBody });
+    const u7 = mk(asarRel, "1.2.0", { electronVersion: "45.0.0" });
+    await u7.check();
+    const log7 = await runHelper(u7, installDir);
+    const res = path.join(installDir, "resources");
+    check("the helper swaps in the new app.asar and leaves the rest of the folder alone",
+      fs.readFileSync(path.join(res, "app.asar"), "utf8") === asarBody && fs.readFileSync(path.join(installDir, "ProtectPanes.exe"), "utf8") === "v3-from-installer"
+        && /installed app\.asar/.test(log7) && JSON.stringify(fs.readdirSync(res)) === '["app.asar"]' && !fs.existsSync(u7.state.file),
+      `${log7.trim()} resources=${JSON.stringify(fs.readdirSync(res))}`);
+
+    // Signed, and the .gz matches, but what it unpacks to doesn't match the signed unpacked hash.
+    const relSigned = JSON.parse(Buffer.from(JSON.parse(fs.readFileSync(path.join(asarRel, "latest.json"), "utf8")).payload, "base64"));
+    const badAsar = path.join(dir, "bad-asar");
+    fs.cpSync(asarRel, badAsar, { recursive: true });
+    const badPayload = Buffer.from(JSON.stringify({ ...relSigned, version: "9.9.10", asar: { ...relSigned.asar, unpacked: { ...relSigned.asar.unpacked, sha256: "0".repeat(64) } } }));
+    fs.writeFileSync(path.join(badAsar, "latest.json"), JSON.stringify({ payload: badPayload.toString("base64"), signature: crypto.sign(null, badPayload, privateKey).toString("base64") }));
+    fs.writeFileSync(path.join(res, "app.asar"), "v5 keep me");
+    const u8 = mk(badAsar, "1.2.0", { electronVersion: "45.0.0" });
+    await u8.check();
+    const log8 = await runHelper(u8, installDir);
+    check("an app.asar that unpacks to the wrong checksum is refused and the old one stays",
+      u8.state.kind === "asar" && /doesn't match its signed checksum/.test(log8) && fs.readFileSync(path.join(res, "app.asar"), "utf8") === "v5 keep me"
+        && JSON.stringify(fs.readdirSync(res)) === '["app.asar"]',
+      `${log8.trim()} resources=${JSON.stringify(fs.readdirSync(res))}`);
+  }
+
+  {
+    const asarRel = path.join(dir, "with-asar");
+    if (!fs.existsSync(asarRel)) makeRelease("with-asar", { "ProtectPanes.exe": "v4" }, "9.9.9", { asar: "v4" });
+    const gzSize = fs.statSync(path.join(asarRel, "ProtectPanes-app.asar.gz")).size;
+    const same = mk(asarRel, "1.2.0", { electronVersion: "45.0.0" });
+    await same.check();
+    check("same Electron: the update is just the gzip'd app.asar",
+      same.state.status === "ready" && same.state.kind === "asar" && same.state.file?.endsWith("-app.asar.gz") && fs.statSync(same.state.file).size === gzSize,
+      JSON.stringify(same.state));
+    const installed = mk(asarRel, "1.2.0", { electronVersion: "45.0.0", installKind: "installer" });
+    await installed.check();
+    check("installed copies on the same Electron take the small update too", installed.state.kind === "asar", JSON.stringify(installed.state));
+    const older = mk(asarRel, "1.2.0", { electronVersion: "44.1.0" });
+    await older.check();
+    check("a different Electron gets the full zip", older.state.kind === "folder" && /\.zip$/.test(older.state.file ?? ""), JSON.stringify(older.state));
   }
 
   const folderCopy = mk(setupRel);

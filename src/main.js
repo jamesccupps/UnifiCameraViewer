@@ -76,6 +76,7 @@ async function init() {
     publicKey: updatePublicKey(),
     stageDir: updateStageDir(),
     installKind: installKind(),
+    electronVersion: process.versions.electron,
     fetch: (url, init) => net.fetch(url, init), // Chromium networking: Windows proxy settings and certificate store
     log: log.child("update"),
   });

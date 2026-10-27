@@ -57,10 +57,12 @@ export function verifyManifest(text, publicKeyPem) {
   // Bare file names only: no paths, nothing to traverse.
   const fileOk = (f, ext) => typeof f?.file === "string" && new RegExp(`^[\\w.-]+\\.${ext}$`).test(f.file)
     && /^[0-9a-f]{64}$/.test(f.sha256) && Number.isInteger(f.size) && f.size > 0 && f.size <= MAX_ZIP_BYTES;
+  const hashOk = (h) => /^[0-9a-f]{64}$/.test(h?.sha256) && Number.isInteger(h?.size) && h.size > 0 && h.size <= MAX_ZIP_BYTES;
   const valid = p?.app === "protect-panes"
     && /^\d+\.\d+\.\d+$/.test(p.version)
     && fileOk(p, "zip")
-    && (p.installer === undefined || fileOk(p.installer, "exe"));
+    && (p.installer === undefined || fileOk(p.installer, "exe"))
+    && (p.asar === undefined || (fileOk(p.asar, "asar\\.gz") && /^\d+\.\d+\.\d+$/.test(p.asar.electron) && hashOk(p.asar.unpacked)));
   if (!valid) throw new Error("The update manifest is malformed.");
   return p;
 }
@@ -136,6 +138,8 @@ export class Updater extends EventEmitter {
    * @param {string} opts.stageDir      - where downloads are kept until installed
    * @param {"folder" | "installer"} [opts.installKind] - how this copy was installed: unzipped folder
    *   (update = swap the folder) or Setup.exe (update = run the new installer, which keeps its uninstaller)
+   * @param {string} [opts.electronVersion] - the running Electron. A release built for the same one
+   *   updates either kind by replacing resources\app.asar alone (a few MB instead of the zip).
    * @param {typeof fetch} [opts.fetch]
    * @param {object} opts.log
    */
@@ -167,12 +171,16 @@ export class Updater extends EventEmitter {
         this.#set("available", { version: manifest.version, message: `Version ${manifest.version} is available.` });
         return this.state;
       }
-      const kind = this.#opts.installKind === "installer" ? "installer" : "folder";
-      const want = kind === "installer" ? manifest.installer : manifest;
+      // Installed copies keep their Settings -> Apps entry at the version Setup.exe last wrote; it
+      // catches up on the next full update (a new Electron), which goes through the installer.
+      const sameElectron = !!manifest.asar && manifest.asar.electron === this.#opts.electronVersion;
+      const kind = sameElectron ? "asar" : this.#opts.installKind === "installer" ? "installer" : "folder";
+      const want = { asar: manifest.asar, installer: manifest.installer, folder: manifest }[kind];
       if (!want) throw new Error(`Version ${manifest.version} has no installer. Download it from the release page.`);
       this.#set("downloading", { version: manifest.version, message: `Downloading ${manifest.version}…` });
       fs.mkdirSync(stageDir, { recursive: true });
-      const file = path.join(stageDir, kind === "installer" ? `ProtectPanes-Setup-${manifest.version}.exe` : `ProtectPanes-${manifest.version}.zip`);
+      const name = { asar: `ProtectPanes-${manifest.version}-app.asar.gz`, installer: `ProtectPanes-Setup-${manifest.version}.exe`, folder: `ProtectPanes-${manifest.version}.zip` }[kind];
+      const file = path.join(stageDir, name);
       const part = `${file}.part`;
       fs.rmSync(part, { force: true });
       let got;
@@ -187,7 +195,10 @@ export class Updater extends EventEmitter {
       }
       fs.renameSync(part, file);
       log?.info(`update ${manifest.version} (${kind}) downloaded and verified (${got.size} bytes, sha256 ${got.sha256.slice(0, 12)}…)`);
-      this.#set("ready", { version: manifest.version, kind, file, message: `Version ${manifest.version} is ready to install.` });
+      this.#set("ready", {
+        version: manifest.version, kind, file, unpackedSha256: kind === "asar" ? want.unpacked.sha256 : undefined,
+        message: `Version ${manifest.version} is ready to install (${(got.size / 1e6).toFixed(1)} MB downloaded).`,
+      });
     } catch (err) {
       log?.warn(`update check: ${err.message}`);
       this.#set("error", { message: err.message });
@@ -214,7 +225,11 @@ export class Updater extends EventEmitter {
     fs.writeFileSync(script, HELPER_PS1, "utf8");
     fs.rmSync(log, { force: true });
     const q = (s) => `'${String(s).replace(/['‘’‚‛]/g, "$&$&")}'`; // PowerShell single-quoted literal
-    const payload = this.state.kind === "installer" ? `-Installer ${q(this.state.file)}` : `-Zip ${q(this.state.file)}`;
+    const payload = {
+      installer: `-Installer ${q(this.state.file)}`,
+      asar: `-AsarGz ${q(this.state.file)} -AsarSha256 ${q(this.state.unpackedSha256)}`,
+      folder: `-Zip ${q(this.state.file)}`,
+    }[this.state.kind ?? "folder"];
     const invoke = `& ${q(script)} -WaitPid ${Number(pid)} ${payload} -Target ${q(installDir)} -Exe ${q(exeName)} -Log ${q(log)}${noLaunch ? " -NoLaunch" : ""}`;
     /*
      * Measured on Windows 11: a detached powershell.exe (DETACHED_PROCESS, no console) exits 0 at
@@ -240,10 +255,12 @@ export class Updater extends EventEmitter {
  *         back if that fails.
  *   -Installer: runs the verified Setup.exe silently, as electron-builder's own updater does
  *         (/S --updated). The installer replaces the files and keeps its uninstaller and shortcuts.
- * Either way it relaunches whichever version ended up in place.
+ *   -AsarGz: gunzips the verified download next to resources\app.asar, checks the result against
+ *         the signed -AsarSha256, swaps the one file and puts the old one back if that fails.
+ * Whichever ran, it relaunches the version that ended up in place.
  */
 export const HELPER_PS1 = String.raw`param(
-  [int]$WaitPid, [string]$Zip, [string]$Installer, [string]$Target, [string]$Exe, [string]$Log, [switch]$NoLaunch
+  [int]$WaitPid, [string]$Zip, [string]$Installer, [string]$AsarGz, [string]$AsarSha256, [string]$Target, [string]$Exe, [string]$Log, [switch]$NoLaunch
 )
 $ErrorActionPreference = 'Stop'
 function Say([string]$m) { Add-Content -LiteralPath $Log -Value ("{0:s} {1}" -f (Get-Date), $m) }
@@ -259,6 +276,39 @@ try {
     if ($p.ExitCode -ne 0) { throw "the installer exited with code $($p.ExitCode)" }
     Say "update: installer finished"
     Remove-Item -LiteralPath $Installer -Force -ErrorAction SilentlyContinue
+  } elseif ($AsarGz) {
+    $res = Join-Path $Target 'resources'
+    $cur = Join-Path $res 'app.asar'
+    $tmp = Join-Path $res "app.asar.new-$stamp"
+    $bak = Join-Path $res "app.asar.old-$stamp"
+    $in = [IO.File]::OpenRead($AsarGz)
+    try {
+      $gz = New-Object IO.Compression.GZipStream($in, [IO.Compression.CompressionMode]::Decompress)
+      $out = [IO.File]::Create($tmp)
+      try { $gz.CopyTo($out) } finally { $out.Dispose(); $gz.Dispose() }
+    } finally { $in.Dispose() }
+    if ((Get-FileHash -LiteralPath $tmp -Algorithm SHA256).Hash -ne $AsarSha256.ToUpperInvariant()) {
+      Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+      throw "the unpacked app.asar doesn't match its signed checksum"
+    }
+    $moved = $false
+    for ($i = 0; $i -lt 10 -and -not $moved; $i++) {
+      try { Move-Item -LiteralPath $cur -Destination $bak; $moved = $true } catch { Start-Sleep -Seconds 1 }
+    }
+    if (-not $moved) {
+      Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+      throw "couldn't replace $cur (still in use)"
+    }
+    try {
+      Move-Item -LiteralPath $tmp -Destination $cur
+    } catch {
+      Say "update: move failed, restoring the old app.asar: $_"
+      Move-Item -LiteralPath $bak -Destination $cur -Force
+      throw
+    }
+    Say "update: installed app.asar into $Target"
+    Remove-Item -LiteralPath $bak -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $AsarGz -Force -ErrorAction SilentlyContinue
   } else {
     Expand-Archive -LiteralPath $Zip -DestinationPath $work -Force
     $new = Get-ChildItem -LiteralPath $work -Directory | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName $Exe) } | Select-Object -First 1

@@ -2,6 +2,7 @@
 //   dist/Protect Panes-win32-x64/ProtectPanes.exe   the app folder (@electron/packager)
 //   dist/ProtectPanes-win32-x64.zip                 that folder zipped: portable copies, and what 1.2.x updates from
 //   dist/ProtectPanes-Setup.exe                     per-user installer wrapping the same folder (Windows only)
+//   dist/ProtectPanes-app.asar.gz                   just resources/app.asar, gzip'd: the small update for copies on the same Electron
 //   dist/latest.json                                signed manifest for in-app updates, when the signing key is present
 // The installer is electron-builder's NSIS target in --prepackaged mode, so the zip and the
 // installer carry byte-identical app files.
@@ -10,6 +11,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import zlib from "node:zlib";
 import { DEFAULT_KEY_FILE, signRelease } from "./sign-release.js";
 
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
@@ -103,7 +105,17 @@ if (process.platform === "win32") {
   console.log("installer:", installer);
 }
 
-// latest.json lets installed copies update in place (Settings -> Updates). Publish it with the zip
-// and the installer.
-if (fs.existsSync(DEFAULT_KEY_FILE)) console.log("signed:", signRelease({ zip, installer, version: pkg.version }));
+// Everything the app itself is lives in app.asar (no native modules, nothing unpacked), so a copy
+// already on this Electron only needs that file. The manifest names the Electron it was built for;
+// a release that changes anything else in the folder must leave the asar out (delete the .gz
+// before signing) so every copy takes the full update.
+const asarRaw = path.join(appPath, "resources", "app.asar");
+const asarGz = path.resolve("dist", "ProtectPanes-app.asar.gz");
+fs.writeFileSync(asarGz, zlib.gzipSync(fs.readFileSync(asarRaw), { level: 9 }));
+const electron = createRequire(import.meta.url)("electron/package.json").version;
+console.log(`app.asar: ${asarGz} (${(fs.statSync(asarGz).size / 1e6).toFixed(1)} MB, for Electron ${electron})`);
+
+// latest.json lets installed copies update in place (Settings -> Updates). Publish it with the zip,
+// the installer and the asar.
+if (fs.existsSync(DEFAULT_KEY_FILE)) console.log("signed:", signRelease({ zip, installer, asar: { gz: asarGz, unpacked: asarRaw, electron }, version: pkg.version }));
 else console.warn(`not signed: no key at ${DEFAULT_KEY_FILE} (run node scripts/make-signing-key.js once)`);

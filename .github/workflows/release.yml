@@ -93,4 +93,4 @@ jobs:
           $notes = "release-notes/$tag.md"
           $opts = @('--title', "Protect Panes $($tag.TrimStart('v'))", '--verify-tag')
           if (Test-Path $notes) { $opts += @('--notes-file', $notes) } else { $opts += '--generate-notes' }
-          gh release create $tag dist/ProtectPanes-Setup.exe dist/ProtectPanes-win32-x64.zip dist/latest.json @opts
+          gh release create $tag dist/ProtectPanes-Setup.exe dist/ProtectPanes-win32-x64.zip dist/ProtectPanes-app.asar.gz dist/latest.json @opts
