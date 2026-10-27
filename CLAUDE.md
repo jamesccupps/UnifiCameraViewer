@@ -28,7 +28,7 @@ npm run test:mock         # mock cameras: playback, forced reconnect, 360° quad
 npm run test:hide         # Hide cameras / Show cameras / per-console Hide all, across two launches
 npm run test:bounds       # window and grid sizes stay put across three launches at a forced 150 % scale
 npm run test:connection   # ConsoleConnection unit checks with a fake library client (runs under Electron's Node)
-npm run test:streams      # stream recovery: a camera going offline while viewed
+npm run test:streams      # stream recovery: a camera going offline while viewed, a stream that never decodes
 npm run test:range        # SPS color-range rewrite (unit, ffmpeg fixtures) + displayed pixel levels in Chromium, Adjust picture
 npm run test:layouts      # save / apply named layouts, import a Protect liveview, switch from the tray
 npm run test:update       # signed manifest, verified download, the real swap helper (folder, installer, app.asar), camera-list Updates
@@ -68,7 +68,7 @@ src/renderer/camera.*       Camera page: MSE playback, live-edge tracking, codec
 src/renderer/dewarp.js      360°: WebGL fisheye dewarp (quad / panorama), PTZ input, circle auto-detect, calibration UI
 src/renderer/grid-window.*  The page under a grid window's tiles: empty-tile placeholders, right-click
 src/renderer/manager.*      Camera list: Cameras / Layouts / Settings tabs, previews, hover tips (data-tip), vanilla DOM, no innerHTML with camera/console names
-src/mock.js                 Dev-only fake consoles/cameras (--mock); PANES_MOCK_FISHEYE adds a 360 camera, cfg.mockOffline marks cameras offline, cfg.mockDropout takes one offline and back mid-run
+src/mock.js                 Dev-only fake consoles/cameras (--mock); PANES_MOCK_FISHEYE adds a 360 camera, cfg.mockOffline marks cameras offline, cfg.mockDropout takes one offline and back mid-run, a "… Broken" camera never decodes
 src/selftest.js             Dev-only harness, active only when PANES_SELFTEST_DIR is set
 test/run.mjs                Test runner (all the suites above, with assertions)
 test/legacy-password.cjs    Writes a password the way 1.3.x did (sync safeStorage), for the e2e upgrade check
@@ -94,7 +94,7 @@ release-notes/vX.Y.Z.md     Release text the workflow publishes
 4. The renderer appends to a MediaSource `SourceBuffer`:
    - It holds about 0.2-0.7 s behind live: it plays 1.15× faster when behind, and jumps forward past 1.5 s.
    - It trims history older than 12 s.
-   - Anything unrecoverable sends `cam:reset`, and main restarts the subscription.
+   - Anything unrecoverable sends `cam:reset`, and main restarts the subscription. Resets are at least 3 s apart; one asked for sooner waits rather than being dropped (dropping it once left a closed MediaSource under a "live" status: black with a green dot). The gap doubles while restarts fail with no frame shown in between (up to 60 s), and after 3 the window says the PC couldn't decode the stream and suggests a lower quality. A frame on screen (`requestVideoFrameCallback`) clears the count. The mock's "… Broken" camera sends fragments no decoder takes; the streams suite checks it.
 5. On reconnect the library rebases timestamps to zero and flags `discontinuity`. Main then resends init with `reset: true`, and the renderer rebuilds the MediaSource.
 6. 360°: `Dewarper` reads `<video>` frames as a WebGL texture (on `requestVideoFrameCallback`) and draws the views. The video element stays rendered *under* the canvas: rVFC doesn't fire for hidden videos.
 

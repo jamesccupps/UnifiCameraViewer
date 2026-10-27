@@ -394,19 +394,21 @@ async function streamsSuite() {
   console.log("\nStreams suite (mock consoles)");
   const userData = tmpDir("streams");
   const A = "aaaaaaaa-0000-4000-8000-000000000001";
-  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1` };
+  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, broken: `${A}/aaaaaaaa-cam2` };
   // Dock goes offline 4 s after the console connects and comes back at 10 s. The library would keep
-  // its stream "recovering" (renegotiating every few seconds) the whole time.
+  // its stream "recovering" (renegotiating every few seconds) the whole time. Broken's fragments
+  // fail to decode every time.
   fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
     version: 1,
-    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock"], mockDropout: { camera: "Dock", offMs: 4000, onMs: 10000 } }],
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Broken"], mockDropout: { camera: "Dock", offMs: 4000, onMs: 10000 } }],
     windows: {
       [keys.lobby]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 },
       [keys.dock]: { open: true, bounds: { x: 500, y: 0, width: 480, height: 270 }, channel: 2 },
+      [keys.broken]: { open: true, bounds: { x: 0, y: 300, width: 480, height: 270 }, channel: 2 },
     },
     settings: { startHidden: true },
   }, null, 2));
-  const { result } = await runApp({ userData, results: path.join(userData, "results"), seconds: 22, extraArgs: ["--mock"] });
+  const { result } = await runApp({ userData, results: path.join(userData, "results"), seconds: 30, extraArgs: ["--mock"] });
   const states = (k) => result.samples.map((s) => s.cams[k]?.status).filter(Boolean);
   const runs = (list) => list.filter((s, i) => s !== list[i - 1]);
   const dock = runs(states(keys.dock));
@@ -417,6 +419,17 @@ async function streamsSuite() {
   check("the other camera on the console stays live", runs(states(keys.lobby).slice(2)).join() === "live", runs(states(keys.lobby)).join(" > "));
   const subs = result.connections[A]?.subscriptions?.["aaaaaaaa-cam1"];
   check("the offline camera is subscribed again only once it's back", subs === 2, `subscriptions=${subs}`);
+
+  // Every failed decode leads to a restart, spaced out more each time, and the window ends up saying
+  // why instead of showing black with a green dot.
+  const broken = result.samples.map((s) => s.cams[keys.broken]).filter((c) => c && !c.error);
+  const end = broken.at(-1);
+  const afterFirst = broken.filter((c) => c.resetRequests > 0);
+  check("a stream that never decodes is restarted with back-off (3 s, 6 s, 12 s...)",
+    end?.resetRequests >= 3 && end.resetRequests <= 5, `resetRequests=${end?.resetRequests} errors=${JSON.stringify(end?.errors?.slice(-3))}`);
+  check("its window always says something once it has failed (never black under a hidden status)",
+    afterFirst.length > 3 && afterFirst.every((c) => c.statusText), JSON.stringify(afterFirst.map((c) => [c.status, c.statusText])));
+  check("after 3 failed restarts it says this PC couldn't decode it", /couldn't decode/.test(end?.statusText ?? ""), end?.statusText);
   console.log(`  results: ${userData}`);
 }
 

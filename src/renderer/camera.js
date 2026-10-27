@@ -31,6 +31,10 @@ const CATCHUP_LAG_S = 0.5;    // play slightly fast above this
 const KEEP_BEHIND_S = 12;     // seconds of decoded history to keep before trimming
 const LABEL_MAX_SHARE = 0.5;  // a name label wider than this share of the window shrinks to just the dot
 const CLOCK_MAX_SHARE = 0.45; // below the label's share, so the two bottom corners never meet
+const RESET_GAP_MS = 3_000;   // between stream restarts; doubles while restarts keep failing...
+const RESET_GAP_MAX_MS = 60_000; // ...up to this
+const DECODE_HELP_AFTER = 3;  // failed restarts in a row before saying it's this PC's decoder
+const DECODE_HELP = "This PC couldn't decode this stream. Try Medium or Low quality from the right-click menu.";
 
 let mediaSource = null;
 let sourceBuffer = null;
@@ -38,6 +42,8 @@ let mime = "";
 let queue = [];
 let lastTrim = 0;
 let lastResetRequest = 0;
+let resetTimer = null;
+let failedResets = 0;         // restarts asked for since a frame was last shown
 let lastAspect = "";
 let streamState = "connecting";
 let codecError = "";          // sticky: a live stream we can't decode stays an error
@@ -66,6 +72,8 @@ window.__panesStats = () => {
     droppedFrames: q?.droppedVideoFrames ?? null,
     mime,
     status: streamState,
+    failedResets,
+    statusText: statusEl.classList.contains("hidden") ? "" : statusText.textContent,
     label: { shown: !document.body.classList.contains("no-names"), compact: labelEl.classList.contains("compact") },
     clock: { wanted: clockWanted, shown: !clockEl.classList.contains("hidden"), text: clockEl.textContent },
     picture: { filter: video.style.filter, canvasFilter: dewarpCanvas.style.filter, panel: !pictureEl.classList.contains("hidden") },
@@ -159,6 +167,13 @@ function rebuild(codec, initData) {
   mediaSource = ms;
   const url = URL.createObjectURL(ms);
   video.src = url;
+  // A frame on screen means the restarts worked.
+  video.requestVideoFrameCallback(() => {
+    if (!failedResets) return;
+    failedResets = 0;
+    if (streamState === "live" && !codecError) hideStatus();
+    updateDot();
+  });
   ms.addEventListener("sourceopen", () => {
     URL.revokeObjectURL(url);
     if (ms !== mediaSource) return;
@@ -198,7 +213,7 @@ function pump() {
   } catch (err) {
     if (err.name === "QuotaExceededError") {
       queue.unshift(chunk);
-      trim(true);
+      if (!trim(true)) requestReset("buffer full"); // nothing old enough to drop: start over
       return;
     }
     requestReset(`append: ${err.name}`);
@@ -245,16 +260,26 @@ function trim(force) {
   }
 }
 
+// A reset asked for too soon after the last one waits for the gap instead of being dropped. Dropping
+// it left the MediaSource closed while main sent "live", so a stream that failed to decode every time
+// (one the GPU's decoder accepts, then rejects) showed black with a green dot, cycling forever. The
+// gap doubles while restarts keep failing, and after a few the window says what's wrong.
 function requestReset(reason) {
   stats.errors.push(String(reason));
   if (stats.errors.length > 20) stats.errors.shift();
-  const now = performance.now();
-  if (now - lastResetRequest < 3_000) return;
-  lastResetRequest = now;
-  stats.resetRequests++;
+  if (resetTimer) return; // one is already waiting
   teardown();
-  showStatus("reconnecting", "Reconnecting…");
-  panes.send("cam:reset", reason);
+  if (failedResets >= DECODE_HELP_AFTER) showStatus("error", DECODE_HELP);
+  else showStatus("reconnecting", "Reconnecting…");
+  updateDot();
+  const gap = Math.min(RESET_GAP_MS * 2 ** failedResets, RESET_GAP_MAX_MS);
+  resetTimer = setTimeout(() => {
+    resetTimer = null;
+    lastResetRequest = performance.now();
+    stats.resetRequests++;
+    failedResets++;
+    panes.send("cam:reset", reason);
+  }, Math.max(0, lastResetRequest + gap - performance.now()));
 }
 
 video.addEventListener("error", () => requestReset(`video error ${video.error?.code ?? ""}`));
@@ -298,6 +323,7 @@ panes.on("cam:media", (data) => {
 panes.on("cam:status", ({ state, text }) => {
   streamState = state;
   if (state === "live" && codecError) showStatus("error", codecError);
+  else if (state === "live" && failedResets >= DECODE_HELP_AFTER) showStatus("error", DECODE_HELP);
   else if (state === "live") hideStatus();
   else showStatus(state, text);
   updateDot();
@@ -441,7 +467,7 @@ setInterval(() => { if (clockWanted) updateClock(); }, 250);
 
 function updateDot() {
   dot.className = "dot";
-  if (codecError) dot.classList.add("bad");
+  if (codecError || failedResets >= DECODE_HELP_AFTER) dot.classList.add("bad");
   else if (streamState === "live") dot.classList.add("live");
   else if (streamState === "error" || streamState === "offline") dot.classList.add("bad");
   else dot.classList.add("warn");

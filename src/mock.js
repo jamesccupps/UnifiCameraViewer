@@ -93,6 +93,9 @@ class MockCamera {
     // A camera named "... Shadows" sends what several real UniFi cameras do: full-range luma (here
     // Y=0 left, Y=24 right) with no range flag in the SPS. Tests check it isn't crushed to black.
     this.shadows = /\bShadows\b/.test(name);
+    // "... Broken" sends a valid init, then fragments no decoder accepts (each first NAL length is
+    // corrupt), like a stream the GPU's decoder takes on and then rejects every time.
+    this.broken = /\bBroken\b/.test(name);
     this.isOnline = online;
     this.snapshots = 0;
     this.subscriptions = 0;
@@ -136,7 +139,7 @@ class MockCamera {
     if (restartSec) this.restartUsed = true;
     this.subscriptions++;
     const sub = new MockSubscription({
-      channel: source?.channel ?? 0, hue: this.index * 70, label: this.name, signal, restartSec, image: this.image, shadows: this.shadows,
+      channel: source?.channel ?? 0, hue: this.index * 70, label: this.name, signal, restartSec, image: this.image, shadows: this.shadows, broken: this.broken,
       onDone: () => this.live.delete(sub),
     });
     this.live.add(sub);
@@ -234,6 +237,7 @@ class MockSubscription {
           moof = Buffer.from(box);
         } else if (type === "mdat" && moof && haveInit) {
           const seg = { type: "media", data: Buffer.concat([moof, box]) };
+          if (this.#opts.broken) seg.data.writeUInt32BE(0x7fffffff, moof.length + 8);
           if (this.#pendingDiscontinuity) { seg.discontinuity = true; this.#pendingDiscontinuity = false; }
           moof = null;
           this.state = "live";
