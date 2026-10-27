@@ -5,6 +5,11 @@ const dialog = document.getElementById("console-dialog");
 const form = document.getElementById("console-form");
 const dialogError = document.getElementById("dialog-error");
 const dialogTitle = document.getElementById("dialog-title");
+const layoutDialog = document.getElementById("layout-dialog");
+const layoutForm = document.getElementById("layout-form");
+const layoutError = document.getElementById("layout-error");
+const layoutList = document.getElementById("layout-list");
+const importSelect = document.getElementById("import-liveview");
 
 let state = null;
 let editingId = null;
@@ -69,6 +74,7 @@ function render() {
   const scroll = document.querySelector("main").scrollTop;
 
   consolesEl.replaceChildren(...(state.consoles.length ? state.consoles.map(renderConsole) : [renderEmpty()]));
+  renderLayouts();
 
   if (focusedKey) document.querySelector(`[data-focus-key="${CSS.escape(focusedKey)}"]`)?.focus();
   document.querySelector("main").scrollTop = scroll;
@@ -195,6 +201,65 @@ function renderCamera(c, cam) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Layouts
+
+function renderLayouts() {
+  const plural = (n) => `${n} camera${n === 1 ? "" : "s"}`;
+  layoutList.replaceChildren(...(state.layouts.length
+    ? state.layouts.map((l) => el("li", {},
+      el("b", { title: l.name }, l.name),
+      el("small", {}, plural(l.count)),
+      el("button", { class: "small", "data-focus-key": `la-${l.id}`, onclick: () => panes.invoke("mgr:apply-layout", l.id).then(refresh) }, "Apply"),
+      el("button", {
+        class: "small ghost",
+        onclick: async () => {
+          if (!confirm(`Delete the layout "${l.name}"? Camera windows aren't affected.`)) return;
+          await panes.invoke("mgr:delete-layout", l.id);
+          refresh();
+        },
+      }, "Delete"),
+    ))
+    : [el("li", { class: "empty" }, "No layouts yet. Arrange the camera windows, then Save current layout. Protect's own liveviews can be imported too.")]));
+
+  // Protect liveviews, grouped by console. The value is "<consoleId>|<liveviewId>".
+  const groups = state.consoles.filter((c) => c.liveviews?.length).map((c) => el("optgroup", { label: c.name },
+    c.liveviews.map((lv) => el("option", { value: `${c.id}|${lv.id}` }, `${lv.name} (${plural(lv.count)})`))));
+  importSelect.replaceChildren(el("option", { value: "", selected: true }, "Import a Protect liveview…"), ...groups);
+  importSelect.classList.toggle("hidden", !groups.length);
+}
+
+importSelect.addEventListener("change", async () => {
+  const [consoleId, liveviewId] = importSelect.value.split("|");
+  importSelect.value = "";
+  if (!consoleId || !liveviewId) return;
+  try {
+    await panes.invoke("mgr:import-liveview", { consoleId, liveviewId });
+  } catch (err) {
+    alert(String(err?.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""));
+  }
+  refresh();
+});
+
+document.getElementById("btn-save-layout").addEventListener("click", () => {
+  layoutForm.name.value = "";
+  layoutError.textContent = "";
+  layoutDialog.showModal();
+  layoutForm.name.focus();
+});
+document.getElementById("layout-cancel").addEventListener("click", () => layoutDialog.close());
+layoutForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  layoutError.textContent = "";
+  try {
+    await panes.invoke("mgr:save-layout", layoutForm.name.value);
+    layoutDialog.close();
+    refresh();
+  } catch (err) {
+    layoutError.textContent = String(err?.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
 // Add / edit console dialog
 
 function openDialog(c) {
@@ -255,7 +320,7 @@ panes.onChanged(() => refresh());
 // Camera online/offline status isn't pushed; poll lightly while the list is visible.
 setInterval(() => {
   // Don't re-render under an open dropdown or dialog.
-  if (document.hidden || dialog.open || document.activeElement?.tagName === "SELECT") return;
+  if (document.hidden || dialog.open || layoutDialog.open || document.activeElement?.tagName === "SELECT") return;
   refresh();
 }, 3_000);
 refresh();

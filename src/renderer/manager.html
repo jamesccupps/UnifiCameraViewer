@@ -25,6 +25,16 @@
   <main>
     <section id="consoles" aria-label="Consoles"></section>
 
+    <section class="panel layouts" aria-label="Layouts">
+      <div class="layouts-head">
+        <h2>Layouts</h2>
+        <span class="spacer"></span>
+        <select id="import-liveview" class="small hidden" aria-label="Import a Protect liveview as a layout"></select>
+        <button id="btn-save-layout" class="small">Save current layout…</button>
+      </div>
+      <ul id="layout-list" class="layout-list"></ul>
+    </section>
+
     <section class="panel settings" aria-label="Settings">
       <h2>Settings</h2>
       <div class="grid">
@@ -59,6 +69,19 @@
       <div class="dialog-actions">
         <button type="button" id="dialog-cancel" class="ghost">Cancel</button>
         <button type="submit" id="dialog-save" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="layout-dialog">
+    <form id="layout-form" method="dialog">
+      <h2>Save layout</h2>
+      <p class="muted small">Saves every camera window on screen: where it is, its size, quality, 360° views and options. Saving under an existing name replaces that layout.</p>
+      <label>Name<input name="name" placeholder="Night shift" maxlength="60" required autocomplete="off"></label>
+      <p id="layout-error" class="error-text" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" id="layout-cancel" class="ghost">Cancel</button>
+        <button type="submit" id="layout-save" class="primary">Save</button>
       </div>
     </form>
   </dialog>

@@ -81,6 +81,23 @@ export class ConsoleConnection extends EventEmitter {
     return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   }
 
+  /**
+   * Protect's saved liveviews (the web UI's camera grids) as { id, name, slots: [cameraId | null] }.
+   * A slot can cycle through several cameras in Protect; only its first camera is used here.
+   */
+  liveviews() {
+    if (!this.#client) return [];
+    try {
+      return this.#client.liveviews.map((lv) => ({
+        id: lv.id,
+        name: lv.name,
+        slots: (lv.slots ?? []).map((s) => s?.cameras?.[0] ?? null),
+      }));
+    } catch {
+      return [];
+    }
+  }
+
   async #run(signal) {
     let delay = 5_000;
     while (!signal.aborted) {

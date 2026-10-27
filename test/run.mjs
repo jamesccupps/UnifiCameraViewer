@@ -297,6 +297,90 @@ async function hideSuite() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Named layouts (mock consoles): save through the dialog, import a Protect liveview, apply it,
+// then switch back from the tray.
+
+async function layoutsSuite() {
+  console.log("\nLayouts suite (mock consoles)");
+  const userData = tmpDir("layouts");
+  const results = path.join(userData, "results");
+  const A = "aaaaaaaa-0000-4000-8000-000000000001";
+  const B = "bbbbbbbb-0000-4000-8000-000000000002";
+  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, stair: `${A}/aaaaaaaa-cam2`, ramp: `${B}/bbbbbbbb-cam0` };
+  fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [
+      { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Stair"],
+        mockLiveviews: [{ id: "lv1", name: "Entrances", slots: [0, 2, null, 1] }] },
+      { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp"] },
+    ],
+    windows: {
+      [keys.lobby]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 },
+      [keys.dock]: { open: true, bounds: { x: 0, y: 290, width: 480, height: 270 }, channel: 2 },
+      [keys.ramp]: { open: true, bounds: { x: 500, y: 0, width: 480, height: 270 }, channel: 2 },
+    },
+    settings: { startHidden: false },
+  }, null, 2));
+
+  const saveJs = `(() => {
+    document.getElementById("btn-save-layout").click();
+    const f = document.getElementById("layout-form");
+    f.name.value = "Everything";
+    f.requestSubmit();
+    return true;
+  })()`;
+  const importJs = `(() => {
+    const sel = document.getElementById("import-liveview");
+    const options = [...sel.options].map((o) => o.textContent);
+    sel.value = ${JSON.stringify(`${A}|lv1`)};
+    sel.dispatchEvent(new Event("change"));
+    return options;
+  })()`;
+  const applyJs = (name) => `(() => {
+    const li = [...document.querySelectorAll("#layout-list li")].find((l) => l.querySelector("b")?.textContent === ${JSON.stringify(name)});
+    const btn = li && [...li.querySelectorAll("button")].find((b) => b.textContent === "Apply");
+    btn?.click();
+    return !!btn;
+  })()`;
+  const { result, config } = await runApp({
+    userData, results, seconds: 11, extraArgs: ["--mock"],
+    env: {
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 2500, do: "manager-js", js: saveJs },
+        { at: 3500, do: "manager-js", js: importJs },
+        { at: 5000, do: "manager-js", js: applyJs("Building · Entrances") },
+        { at: 8000, do: "tray-click", label: "Everything" },
+      ]),
+    },
+  });
+  const byJs = (needle) => result.actions.find((a) => a.act.js?.includes(needle));
+  const applyAct = byJs("Building · Entrances");
+  const trayAct = result.actions.find((a) => a.act.do === "tray-click");
+  const first = result.samples[0]?.cams ?? {};
+  const mid = result.samples.filter((s) => s.t > applyAct?.t && s.t < trayAct?.t).at(-1)?.cams ?? {};
+  const end = last(result);
+  const openSet = (cams) => Object.keys(cams).map((k) => Object.entries(keys).find(([, v]) => v === k)?.[0] ?? k).sort().join(",");
+  const sameBounds = (a, b) => a && b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+  const names = config.layouts?.map((l) => l.name) ?? [];
+
+  check("Save current layout stored the on-screen windows", names.includes("Everything") && Object.keys(config.layouts.find((l) => l.name === "Everything").windows).length === 3, JSON.stringify(names));
+  check("Protect liveview offered for import", byJs("import-liveview")?.value?.includes("Entrances (3 cameras)"), JSON.stringify(byJs("import-liveview")?.value ?? byJs("import-liveview")?.error));
+  check("imported liveview saved as a layout", names.includes("Building · Entrances"), JSON.stringify(names));
+  check("applying the liveview layout opened exactly its cameras", applyAct?.value === true && openSet(mid) === "dock,lobby,stair", `${openSet(mid)} ${applyAct?.error ?? ""}`);
+  const [l, s, d] = [mid[keys.lobby]?.bounds, mid[keys.stair]?.bounds, mid[keys.dock]?.bounds];
+  check("liveview slots tiled as a 2x2 grid (lobby, stair / empty, dock)",
+    l && s && d && l.x < s.x && Math.abs(l.y - s.y) < 3 && d.y > l.y && Math.abs(d.x - s.x) < 3,
+    JSON.stringify({ l, s, d }));
+  check("liveview layout windows live", ["lobby", "stair", "dock"].every((n) => mid[keys[n]]?.status === "live"),
+    JSON.stringify(["lobby", "stair", "dock"].map((n) => mid[keys[n]]?.status)));
+  check("tray Layouts switched back: same windows at the same places",
+    openSet(end) === "dock,lobby,ramp" && ["lobby", "dock", "ramp"].every((n) => sameBounds(end[keys[n]]?.bounds, first[keys[n]]?.bounds) && end[keys[n]]?.status === "live"),
+    `${openSet(end)} ${JSON.stringify(["lobby", "dock", "ramp"].map((n) => [end[keys[n]]?.bounds, first[keys[n]]?.bounds]))}`);
+  check("window left out of the layout is closed in config", config.windows[keys.stair]?.open === false);
+  console.log(`  results: ${results}`);
+}
+
+// ---------------------------------------------------------------------------------------------
 // Color range: several UniFi cameras send full-range luma without flagging it, and Chromium then
 // crushes everything below 16 to black. src/avc-range.js rewrites the SPS to say full range.
 
@@ -458,7 +542,17 @@ async function e2eSuite() {
       settings: { startHidden: false },
     }, null, 2));
 
-    const { result, config } = await runApp({ userData, results, seconds: 16 });
+    const importJs = `(() => {
+      const sel = document.getElementById("import-liveview");
+      const options = [...sel.options].map((o) => o.textContent);
+      sel.value = [...sel.options].find((o) => o.parentElement.label === "Building")?.value ?? "";
+      sel.dispatchEvent(new Event("change"));
+      return options;
+    })()`;
+    const { result, config } = await runApp({
+      userData, results, seconds: 16,
+      env: { PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 5000, do: "manager-js", js: importJs }]) },
+    });
     const cams = last(result);
     const conn = result.connections;
     check("Building console connected", conn[ids.B]?.state === "connected", JSON.stringify(conn[ids.B]));
@@ -479,6 +573,14 @@ async function e2eSuite() {
     check("fisheye detected from Protect flags -> quad view, ceiling mount", cams[keys.fisheye]?.dewarp?.active && fd?.mode === "quad" && fd?.mount === "ceiling", JSON.stringify({ mode: fd?.mode, mount: fd?.mount }));
     check("fisheye image circle auto-detected within 1%", near(fd?.circle, CEILING_TRUTH, 0.01), fmtCircle(fd?.circle));
     check("normal cameras don't create a WebGL context", cams[keys.garage]?.dewarp?.gl === false);
+    const opts = result.actions[0]?.value ?? [];
+    check("Protect liveviews read through the library", opts.includes("Building Entrances (3 cameras)") && opts.includes("Garage Entrances (3 cameras)"), JSON.stringify(result.actions[0]?.value ?? result.actions[0]?.error));
+    const imported = config.layouts?.find((l) => l.name === "Building · Building Entrances");
+    const slotKeys = [1, 0, 2].map((i) => `${ids.B}/${cam(P.building, i)}`);
+    const ib = slotKeys.map((k) => imported?.windows[k]?.bounds);
+    check("imported liveview: first camera of each slot, empty slot skipped, grid order kept",
+      imported && Object.keys(imported.windows).length === 3 && ib.every(Boolean) && ib[0].x < ib[1].x && ib[2].y > ib[0].y && Math.abs(ib[2].x - ib[1].x) < 3,
+      JSON.stringify(imported && Object.keys(imported.windows)));
     console.log(`  results: ${results}`);
   } finally {
     for (const s of servers) s.kill();
@@ -491,6 +593,7 @@ try {
   if (suite === "mock" || suite === "all") await mockSuite();
   if (suite === "hide" || suite === "all") await hideSuite();
   if (suite === "range" || suite === "all") await rangeSuite();
+  if (suite === "layouts" || suite === "all") await layoutsSuite();
   if (suite === "e2e" || suite === "all") await e2eSuite();
 } catch (err) {
   console.error(`\nTest run failed: ${err.message}`);

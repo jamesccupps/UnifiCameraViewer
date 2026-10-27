@@ -54,6 +54,16 @@ export class MockConnection extends EventEmitter {
     return this.#cams.map((c) => ({ id: c.id, name: c.name, online: true, model: c.image ? "Mock AI 360" : "Mock G5", channels: c.channelList, fisheye: !!c.image }));
   }
 
+  /** cfg.mockLiveviews: [{ id, name, slots: [camera index | null] }]. */
+  liveviews() {
+    if (this.state !== "connected") return [];
+    return (this.#cfg.mockLiveviews ?? []).map((lv) => ({
+      id: lv.id,
+      name: lv.name,
+      slots: lv.slots.map((i) => (i === null ? null : this.#cams[i]?.id ?? null)),
+    }));
+  }
+
   #set(state, message) { this.state = state; this.message = message; this.emit("state"); }
 }
 

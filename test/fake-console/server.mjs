@@ -70,8 +70,13 @@ const bootstrap = () => ({
   cameras,
   nvr: { id: "nvr1", modelKey: "nvr", name: `${prefix} NVR`, host: "127.0.0.1", version: "7.0.0", marketName: "UNVR", type: "UNVR", upSince: 1, lastSeen: Date.now() },
   users: [{ id: "user1", modelKey: "user", name: USER, permissions: [], role: "viewer" }],
+  // A 2x2 liveview: cam1, cam0, an empty slot, then a cycling slot (only its first camera counts).
+  liveviews: [{
+    id: "liveview1", modelKey: "liveview", name: `${prefix} Entrances`, isDefault: false, isGlobal: true, layout: 4, owner: "user1",
+    slots: [[1], [0], [], [2, 0]].map((ids) => ({ cameras: ids.map((i) => cameraId(port, i)), cycleMode: "time", cycleInterval: 10 })),
+  }],
   // The library's reducer expects every collection to be present, even if empty.
-  liveviews: [], fobs: [], viewers: [], chimes: [], lights: [], sensors: [], relays: [], ringtones: [], groups: [], bridges: [],
+  fobs: [], viewers: [], chimes: [], lights: [], sensors: [], relays: [], ringtones: [], groups: [], bridges: [],
 });
 
 const server = https.createServer({ key: fs.readFileSync(path.join(dir, "key.pem")), cert: fs.readFileSync(path.join(dir, "cert.pem")) }, (req, res) => {

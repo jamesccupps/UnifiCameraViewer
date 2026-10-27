@@ -65,7 +65,13 @@ Original notes: quality (`channel`), always-on-top and dewarp settings were per 
 
 ## 5. Dashboards / grids / saved views like UniFi
 
-**Status:** not built (already listed under "Known limitations": no named layout presets).
+**Status:** built (2026-10-27) as (a) plus Protect liveview import, unreleased.
+- Named layouts are saved from the camera list and switched from the list or the tray.
+- Import tiles a liveview's slots as an even grid, using the first camera of each slot. Uneven layouts and slot cycling aren't reproduced.
+- (b), a grid window, isn't built.
+- `npm run test:layouts` and the e2e suite cover it; the e2e suite checks the real library's `client.liveviews`.
+
+Original notes:
 
 Two different features:
 - **(a) Named layouts.** Save the set of open windows plus their bounds, quality and dewarp state under a name, and switch between them from the tray or the list. This fits the free-floating, one-window-per-camera design and is mostly config work (`layouts{name: windows-snapshot}`).

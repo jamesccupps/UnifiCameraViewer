@@ -5,6 +5,7 @@ const ALLOWED = new Set([
   "mgr:open-camera", "mgr:close-camera", "mgr:find-camera", "mgr:set-channel",
   "mgr:set-setting", "mgr:bring-to-front", "mgr:reset-positions", "mgr:open-all", "mgr:quit",
   "mgr:hide-cameras", "mgr:show-cameras", "mgr:apply-all",
+  "mgr:save-layout", "mgr:apply-layout", "mgr:delete-layout", "mgr:import-liveview",
 ]);
 
 contextBridge.exposeInMainWorld("panes", {

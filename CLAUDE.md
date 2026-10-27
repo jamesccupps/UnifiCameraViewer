@@ -19,6 +19,7 @@ npm test                  # all test suites below (~1.5 min, windows flash on sc
 npm run test:mock         # mock cameras: playback, forced reconnect, 360° quad/panorama, real mouse PTZ input, name label
 npm run test:hide         # Hide cameras / Show cameras / per-console Hide all, across two launches
 npm run test:range        # SPS color-range rewrite (unit, ffmpeg fixtures) + displayed pixel levels in Chromium
+npm run test:layouts      # save / apply named layouts, import a Protect liveview, switch from the tray
 npm run test:e2e          # fake UniFi OS consoles over HTTPS/WSS through the real unifi-protect library
 npm run build:win         # portable build -> dist/Protect Panes-win32-x64/ + dist/ProtectPanes-win32-x64.zip
 ```
@@ -43,7 +44,7 @@ src/renderer/dewarp.js      360°: WebGL fisheye dewarp (quad / panorama), PTZ i
 src/renderer/manager.*      Camera list + settings window (vanilla DOM, no innerHTML with camera/console names)
 src/mock.js                 Dev-only fake consoles/cameras (--mock); PANES_MOCK_FISHEYE adds a 360 camera
 src/selftest.js             Dev-only harness, active only when PANES_SELFTEST_DIR is set
-test/run.mjs                Test runner (mock, hide, range and e2e suites with assertions)
+test/run.mjs                Test runner (mock, hide, range, layouts and e2e suites with assertions)
 test/fake-console/          Fake UniFi OS console (HTTPS + WSS) and its throwaway self-signed cert
 test/fixtures/              Synthetic fisheye frames with known geometry (ceiling circle truth: x .513, y .4938, r .4818)
 scripts/build-win.js        @electron/packager build + zip (no Wine needed); ELECTRON_ZIP_DIR to use a pre-downloaded runtime
@@ -69,7 +70,7 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
 
 - **Camera → main:** `cam:ready`, `cam:aspect {width,height}`, `cam:reset`, `cam:context-menu`, `cam:toggle-top`, `cam:close`, `cam:dewarp {views?, pano?, focus?, circle?}`
 - **Main → camera:** `cam:init`, `cam:media`, `cam:status`, `cam:meta`, `cam:highlight`, `cam:command {cmd: "calibrate" | "autodetect"}`
-- **Camera list (invoke):** `mgr:state`, `mgr:save-console`, `mgr:remove-console`, `mgr:reconnect`, `mgr:open-camera`, `mgr:close-camera`, `mgr:find-camera`, `mgr:set-channel`, `mgr:set-setting`, `mgr:bring-to-front`, `mgr:reset-positions`, `mgr:open-all`, `mgr:hide-cameras consoleId|null`, `mgr:show-cameras consoleId|null`, `mgr:apply-all {consoleId|null, changes}`, `mgr:quit`. `changes` goes through `cleanChanges()`, which keeps only `channel`, `onTop`, `hideName`, `clock` and `range`.
+- **Camera list (invoke):** `mgr:state`, `mgr:save-console`, `mgr:remove-console`, `mgr:reconnect`, `mgr:open-camera`, `mgr:close-camera`, `mgr:find-camera`, `mgr:set-channel`, `mgr:set-setting`, `mgr:bring-to-front`, `mgr:reset-positions`, `mgr:open-all`, `mgr:hide-cameras consoleId|null`, `mgr:show-cameras consoleId|null`, `mgr:apply-all {consoleId|null, changes}`, `mgr:save-layout name`, `mgr:apply-layout id`, `mgr:delete-layout id`, `mgr:import-liveview {consoleId, liveviewId}`, `mgr:quit`. `changes` goes through `cleanChanges()`, which keeps only `channel`, `onTop`, `hideName`, `clock` and `range`.
 - **Main → camera list:** `mgr:changed` (throttled). The list also polls every 3 s while visible, for online/offline status.
 
 ## Config and logs
@@ -80,6 +81,7 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
   - `consoles[]`: `{id, name, host, username, password: {enc: "safe" | "plain", data}}`
   - `windows["<consoleId>/<cameraId>"]`: `{open, bounds, channel, onTop, name, hideName, hidden, clock, range, dewarp}`. `range` is `"full" | "limited"` (absent = auto). `clock` true/false overrides the default (on in quad/panorama, off otherwise). `hideName` hides one window's label; `settings.showNames` off hides all of them. `hidden` (with `open: true`) means taken off screen by Hide cameras / Hide all.
   - `settings`: `{lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin}`
+  - `layouts[]`: `{id, name, windows: {"<consoleId>/<cameraId>": {bounds, channel, onTop, hideName, clock, range, dewarp}}}`. Saving under an existing name (case-insensitive) replaces it.
 - `protect-panes.log`: connection log. Rolls to `.log.1` at 2 MB.
 
 Passwords are DPAPI-encrypted (`safeStorage`) and tied to the Windows user. `enc: "plain"` is base64 and only exists in tests and on Linux without a keyring. **Never print or log decrypted passwords.**
@@ -118,6 +120,15 @@ Passwords are DPAPI-encrypted (`safeStorage`) and tied to the Windows user. `enc
   - The camera list's per-console "Quality for all…" does the same for quality only.
   - `allCameraKeys()` includes cameras that have never been opened. They get a window entry with `open: false`, so they open with the setting later.
   - Applying High with more than 6 windows on screen asks first.
+- **Layouts.**
+  - Save current layout snapshots the on-screen windows (not hidden). It takes live bounds from the window unless it's minimized or maximized, then copies `LAYOUT_FIELDS` from the entry.
+  - `applyLayout()` closes every open window not in the layout, writes the saved fields over each entry, moves or restarts existing windows, and calls `openCameraWindow`, which creates the window or un-hides it.
+  - Layouts are switchable from the tray (Layouts submenu) and the camera list.
+- **Protect liveview import.**
+  - `ConsoleConnection.liveviews()` maps `client.liveviews` to `{id, name, slots: [firstCameraId | null]}`. Protect slots can cycle through several cameras; only the first is used.
+  - `importLiveview()` tiles the slots as an even ceil(√n) grid on the display the camera list is on, each window the largest 16:9 that fits its cell. Protect's uneven layouts become even grids.
+  - The import only saves a layout; Apply is a separate click, so the current arrangement isn't thrown away.
+  - The fake console serves one liveview, including an empty slot and a cycling slot.
 - **Hidden vs closed vs minimized.**
   - Hide cameras (tray, list header) and Hide all (per console) apply to the windows on screen; minimized ones are skipped. Each window gets `win.hide()` plus `CameraStream.pause()`, so its renderer stays alive and Show only waits for a keyframe.
   - At launch, hidden windows aren't created at all. Show cameras creates them.
@@ -174,6 +185,6 @@ Owner-requested features, with findings and open questions, are in `ROADMAP.md`.
 - Live view only: no playback, timeline, events, audio or two-way talk.
 - PTZ cameras can't be steered; only the 360° virtual PTZ exists.
 - One window per camera: the same camera can't be open twice.
-- No named layout presets.
+- Imported Protect liveviews become even grids. Uneven layouts and slot cycling aren't reproduced.
 - Doorbell package-camera lens isn't exposed (the library supports `source: {type: "lens"}`).
 - Desk-mount panorama and lens FOV > 180° are implemented but have only light test coverage.

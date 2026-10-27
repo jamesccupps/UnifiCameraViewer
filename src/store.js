@@ -10,7 +10,8 @@ import path from "node:path";
  *   version: 1,
  *   consoles: [{ id, name, host, username, password: { enc: "safe" | "plain", data: base64 } }],
  *   windows:  { "<consoleId>/<cameraId>": { open, bounds: {x,y,width,height}, channel, onTop, name, hideName, dewarp } },
- *   settings: { lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin }
+ *   settings: { lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin },
+ *   layouts:  [{ id, name, windows: { "<consoleId>/<cameraId>": { bounds, channel, onTop, hideName, clock, range, dewarp } } }]
  * }
  *
  * Passwords are encrypted with Electron safeStorage, which on Windows is DPAPI bound to the
@@ -27,7 +28,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
 });
 
 function defaults() {
-  return { version: 1, consoles: [], windows: {}, settings: { ...DEFAULT_SETTINGS } };
+  return { version: 1, consoles: [], windows: {}, settings: { ...DEFAULT_SETTINGS }, layouts: [] };
 }
 
 export class Store {
@@ -61,6 +62,7 @@ export class Store {
       consoles: Array.isArray(raw.consoles) ? raw.consoles.filter((c) => c && c.id && c.host) : [],
       windows: raw.windows && typeof raw.windows === "object" ? raw.windows : {},
       settings: { ...d.settings, ...(raw.settings ?? {}) },
+      layouts: Array.isArray(raw.layouts) ? raw.layouts.filter((l) => l && l.id && l.name && l.windows && typeof l.windows === "object") : [],
     };
   }
 

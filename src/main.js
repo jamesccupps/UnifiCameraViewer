@@ -280,6 +280,117 @@ function showHiddenCameras(consoleId = null) {
   notifyManager();
 }
 
+// ---------------------------------------------------------------------------------------------
+// Named layouts: a saved set of on-screen windows with their places and per-window settings.
+// Applying one closes the windows it doesn't include and opens or moves the ones it does.
+
+const LAYOUT_FIELDS = ["bounds", "channel", "onTop", "hideName", "clock", "range", "dewarp"];
+
+function layoutEntry(key) {
+  const entry = store.data.windows[key] ?? {};
+  const cw = camWins.get(key);
+  const out = {};
+  for (const f of LAYOUT_FIELDS) if (entry[f] !== undefined) out[f] = structuredClone(entry[f]);
+  if (cw && !cw.win.isDestroyed() && !cw.win.isMinimized() && !cw.win.isMaximized()) out.bounds = cw.win.getBounds();
+  return out;
+}
+
+function putLayout(name, windows) {
+  const clean = String(name ?? "").trim().slice(0, 60);
+  if (!clean) throw new Error("Give the layout a name.");
+  if (!Object.keys(windows).length) throw new Error("There are no camera windows on screen to save.");
+  const existing = store.data.layouts.find((l) => l.name.toLowerCase() === clean.toLowerCase());
+  if (existing) Object.assign(existing, { name: clean, windows });
+  else store.data.layouts.push({ id: newId(), name: clean, windows });
+  store.save();
+  updateTrayMenu();
+  notifyManager();
+  return (existing ?? store.data.layouts.at(-1)).id;
+}
+
+function saveCurrentLayout(name) {
+  const windows = {};
+  for (const [key, w] of Object.entries(store.data.windows)) {
+    if (w.open && !w.hidden && camWins.has(key)) windows[key] = layoutEntry(key);
+  }
+  return putLayout(name, windows);
+}
+
+function applyLayout(id) {
+  const layout = store.data.layouts.find((l) => l.id === id);
+  if (!layout) return;
+  const consoleIds = new Set(store.data.consoles.map((c) => c.id));
+  const want = Object.entries(layout.windows).filter(([key]) => consoleIds.has(key.split("/")[0]));
+  const wantKeys = new Set(want.map(([key]) => key));
+  for (const [key, w] of Object.entries(store.data.windows)) if (w.open && !wantKeys.has(key)) closeCamera(key);
+  for (const [key, saved] of want) {
+    const entry = (store.data.windows[key] ??= { open: false, bounds: null, channel: null, onTop: false, name: "" });
+    const restart = entry.channel !== (saved.channel ?? null) || (entry.range ?? "auto") !== (saved.range ?? "auto");
+    for (const f of LAYOUT_FIELDS) {
+      if (saved[f] === undefined) delete entry[f];
+      else entry[f] = structuredClone(saved[f]);
+    }
+    entry.channel ??= null;
+    const cw = camWins.get(key);
+    if (cw && !cw.win.isDestroyed()) {
+      if (cw.win.isMaximized()) cw.win.unmaximize();
+      const b = fitBounds(entry.bounds);
+      if (b) cw.win.setBounds(b);
+      applyAspect(cw);
+      cw.win.setAlwaysOnTop(!!entry.onTop, "floating");
+      if (restart) cw.stream.restart();
+      setTimeout(() => refreshCameraMeta(cw), restart ? 50 : 0);
+    }
+    openCameraWindow(key, { flash: false }); // creates it, or un-hides and raises it
+  }
+  store.save();
+  updateTrayMenu();
+  notifyManager();
+}
+
+function deleteLayout(id) {
+  store.data.layouts = store.data.layouts.filter((l) => l.id !== id);
+  store.save();
+  updateTrayMenu();
+  notifyManager();
+}
+
+/**
+ * Turn a Protect liveview into a layout: its slots tiled as an even grid on the display the camera
+ * list is on, each window the largest 16:9 that fits its cell. Protect's uneven layouts (one big
+ * tile plus small ones) become even grids. The cameras keep their current per-window settings.
+ */
+function importLiveview(consoleId, liveviewId) {
+  const conn = connections.get(consoleId);
+  const lv = conn?.liveviews?.().find((l) => l.id === liveviewId);
+  if (!lv) throw new Error("That liveview isn't on the console any more.");
+  const n = Math.max(1, lv.slots.length);
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+  const area = (managerWin && !managerWin.isDestroyed() ? screen.getDisplayMatching(managerWin.getBounds()) : screen.getPrimaryDisplay()).workArea;
+  const cellW = Math.floor(area.width / cols);
+  const cellH = Math.floor(area.height / rows);
+  const width = Math.max(160, Math.floor(Math.min(cellW, (cellH * 16) / 9)));
+  const height = Math.max(90, Math.floor((width * 9) / 16));
+  const windows = {};
+  lv.slots.forEach((cameraId, i) => {
+    if (!cameraId) return;
+    const key = `${consoleId}/${cameraId}`;
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    windows[key] = {
+      ...layoutEntry(key),
+      bounds: {
+        x: area.x + col * cellW + Math.floor((cellW - width) / 2),
+        y: area.y + row * cellH + Math.floor((cellH - height) / 2),
+        width,
+        height,
+      },
+    };
+  });
+  return putLayout(`${consoleName(consoleId)} · ${lv.name}`, windows);
+}
+
 function cameraTitle(key) {
   const [consoleId, cameraId] = key.split("/");
   const conn = connections.get(consoleId);
@@ -775,6 +886,7 @@ function managerState() {
     settings: { ...store.settings },
     hiddenCount: hiddenKeys().length,
     shownCount: shown(),
+    layouts: store.data.layouts.map((l) => ({ id: l.id, name: l.name, count: Object.keys(l.windows).length })),
     consoles: store.data.consoles.map((c) => {
       const conn = connections.get(c.id);
       const live = conn?.cameras() ?? [];
@@ -801,6 +913,7 @@ function managerState() {
         controllerName: conn?.controllerName ?? null,
         hiddenCount: hiddenKeys(c.id).length,
         shownCount: shown(c.id),
+        liveviews: (conn?.liveviews?.() ?? []).map((lv) => ({ id: lv.id, name: lv.name, count: lv.slots.filter(Boolean).length })),
         cameras,
       };
     }),
@@ -824,6 +937,9 @@ function trayMenuTemplate() {
       ? { label: "Show cameras", click: () => showHiddenCameras() }
       : { label: "Hide cameras", click: () => hideCameras() },
     { label: "Bring cameras to front", click: () => bringAllToFront() },
+    ...(store.data.layouts.length
+      ? [{ label: "Layouts", submenu: store.data.layouts.map((l) => ({ label: l.name, click: () => applyLayout(l.id) })) }]
+      : []),
     { label: "Lock layout", type: "checkbox", checked: !!store.settings.lockLayout, click: (item) => setSetting("lockLayout", item.checked) },
     { type: "separator" },
     { label: "Quit Protect Panes", click: () => { quitting = true; app.quit(); } },
@@ -896,6 +1012,10 @@ function registerIpc() {
   });
   handle("mgr:set-setting", ({ name, value } = {}) => setSetting(String(name), value));
   handle("mgr:apply-all", ({ consoleId, changes } = {}) => applyToAll(changes, consoleId ? String(consoleId) : null));
+  handle("mgr:save-layout", (name) => saveCurrentLayout(name));
+  handle("mgr:apply-layout", (id) => applyLayout(String(id)));
+  handle("mgr:delete-layout", (id) => deleteLayout(String(id)));
+  handle("mgr:import-liveview", ({ consoleId, liveviewId } = {}) => importLiveview(String(consoleId), String(liveviewId)));
   handle("mgr:bring-to-front", () => bringAllToFront());
   handle("mgr:reset-positions", () => tileOpenWindows());
   handle("mgr:open-all", (consoleId) => {
