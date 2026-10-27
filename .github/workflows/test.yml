@@ -77,14 +77,22 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $p = Start-Process dist\ProtectPanes-Setup.exe -ArgumentList '/S' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "installer exited with $($p.ExitCode)" }
-          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Protect Panes'
+          # Find the install the way Windows does: the Add/Remove Programs entry it registered.
+          $entry = Get-ChildItem HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall | Get-ItemProperty |
+            Where-Object { $_.DisplayName -like 'Protect Panes*' } | Select-Object -First 1
+          if (-not $entry) { throw "no Add/Remove Programs entry for Protect Panes" }
+          "entry: $($entry.DisplayName) $($entry.DisplayVersion) | InstallLocation=$($entry.InstallLocation) | $($entry.UninstallString)"
+          $dir = $entry.InstallLocation
+          Get-ChildItem $dir | Select-Object -ExpandProperty Name | Select-Object -First 40
           $exe = Join-Path $dir 'ProtectPanes.exe'
-          if (-not (Test-Path $exe)) { throw "nothing at $exe"; }
+          if (-not (Test-Path $exe)) { throw "no ProtectPanes.exe in $dir" }
           $uninstaller = Get-ChildItem $dir -Filter 'Uninstall *.exe' | Select-Object -First 1
           if (-not $uninstaller) { throw "no 'Uninstall *.exe' next to the app; installKind() would treat it as a folder install" }
-          $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Protect Panes.lnk'
-          if (-not (Test-Path $lnk)) { throw "no Start menu shortcut at $lnk" }
-          "installed $((Get-Item $exe).VersionInfo.ProductVersion) to $dir with $($uninstaller.Name)"
+          $menu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+          $lnk = Get-ChildItem $menu -Recurse -Filter 'Protect Panes*.lnk' | Select-Object -First 1
+          if (-not $lnk) { throw "no Start menu shortcut under $menu" }
+          "installed $((Get-Item $exe).VersionInfo.ProductVersion) to $dir with $($uninstaller.Name), shortcut $($lnk.FullName)"
+          $lnk = $lnk.FullName
 
           $ud = Join-Path $env:RUNNER_TEMP 'pp-installed'
           New-Item -ItemType Directory -Force $ud | Out-Null

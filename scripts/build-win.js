@@ -72,6 +72,9 @@ if (process.platform === "win32") {
   await build({
     targets: Platform.WINDOWS.createTarget("nsis", Arch.x64),
     prepackaged: appPath,
+    // On CI electron-builder publishes by default. Releases go out only through the release
+    // workflow, after its checks.
+    publish: "never",
     config: {
       appId: "protect-panes", // = app.setAppUserModelId() in main.js, so the taskbar groups shortcut and windows
       productName: "Protect Panes",
