@@ -177,7 +177,7 @@ Passwords are DPAPI-encrypted (`safeStorage`) and tied to the Windows user. `enc
     - relaunches whichever version ended up in place;
     - logs to `apply-update.log` and ends with "update: done".
 
-  Launching the helper (measured): a `detached` powershell.exe never runs, because it gets no console. A non-detached one dies with the app (libuv's kill-on-close job). So it goes `cmd /c start /min powershell -EncodedCommand <base64>`, with no paths on cmd's line, because `&` and `%` are legal in user and folder names. The test installs into `Tools & 100% O'Brien\` on purpose.
+  Launching the helper (measured): a `detached` powershell.exe never runs, because it gets no console. A non-detached one dies with the app (libuv's kill-on-close job). So it goes `cmd /c start /min powershell -EncodedCommand <base64>`, with no paths on cmd's line, because `&` and `%` are legal in user and folder names. The test installs into `Tools & 100% O'Brien\` on purpose. It also starts with `cwd` set to the updates folder. Launched from Explorer or a shortcut, the app's working folder is the install folder, and Windows refuses to rename a folder that is any process's working folder. 1.2.0 and 1.3.0 passed that working folder down to the helper, so their own helper blocked the swap. That's why the test runs `install()` from inside the install folder.
 
   The install folder's parent must be writable; Program Files isn't.
 

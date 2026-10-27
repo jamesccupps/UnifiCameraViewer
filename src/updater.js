@@ -222,10 +222,12 @@ export class Updater extends EventEmitter {
      * it would die with the app. A detached cmd.exe running "start" gives PowerShell its own console
      * outside that job. Nothing on cmd's line is a path: the call travels base64-encoded, so no
      * "&" or "%" in a user or folder name can be read by cmd.
+     * cwd: started from Explorer or a shortcut, the app's working folder is the install folder, and
+     * Windows won't rename a folder that's any process's working folder, the helper's included.
      */
     const encoded = Buffer.from(invoke, "utf16le").toString("base64");
     const child = spawn(process.env.ComSpec || "cmd.exe", ["/d", "/c", "start", "/min", "powershell.exe", "-NoProfile", "-NonInteractive",
-      "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], { detached: true, stdio: "ignore", windowsHide: true });
+      "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], { cwd: this.#opts.stageDir, detached: true, stdio: "ignore", windowsHide: true });
     child.unref();
     return { script, log };
   }

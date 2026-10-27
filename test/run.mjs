@@ -527,8 +527,13 @@ async function updateSuite() {
     // The swap helper, for real, on throwaway folders. noLaunch keeps it from starting the "exe".
     const exited = spawnSync(process.execPath, ["-e", ""]).pid;
     // install() launches the helper fully detached (it must outlive the app), so wait on its log.
+    // It runs from inside installDir, as the app does when started from Explorer or a shortcut.
     const runHelper = async (updater, installDir) => {
-      const { log } = updater.install({ installDir, exeName: "ProtectPanes.exe", pid: exited, noLaunch: true });
+      const cwd = process.cwd();
+      process.chdir(installDir);
+      let log;
+      try { ({ log } = updater.install({ installDir, exeName: "ProtectPanes.exe", pid: exited, noLaunch: true })); }
+      finally { process.chdir(cwd); }
       const read = () => (fs.existsSync(log) ? fs.readFileSync(log, "utf8") : "");
       for (let i = 0; i < 120 && !/update: done/.test(read()); i++) await new Promise((r) => setTimeout(r, 500));
       return read();
