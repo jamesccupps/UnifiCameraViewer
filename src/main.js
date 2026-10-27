@@ -69,13 +69,14 @@ async function init() {
   const MockConnection = MOCK ? (await import("./mock.js")).MockConnection : null;
   for (const cfg of store.data.consoles) startConnection(cfg, MockConnection);
 
-  const openKeys = Object.entries(store.data.windows).filter(([, w]) => w.open).map(([k]) => k);
+  // Hidden windows ("Hide cameras") stay part of the layout but aren't created until shown.
+  const openKeys = Object.entries(store.data.windows).filter(([, w]) => w.open && !w.hidden).map(([k]) => k);
   for (const key of openKeys) openCameraWindow(key);
 
   if (!store.data.consoles.length || !openKeys.length || !store.settings.startHidden) showManager();
 
   if (process.env.PANES_SELFTEST_DIR) {
-    (await import("./selftest.js")).runSelfTest({ camWins, log, connections, store, hooks: { cameraContextMenuTemplate, updateDewarp, sendCommand } });
+    (await import("./selftest.js")).runSelfTest({ camWins, log, connections, store, hooks: { cameraContextMenuTemplate, trayMenuTemplate, updateDewarp, sendCommand } });
   }
 }
 
@@ -138,12 +139,22 @@ async function removeConsole(id) {
 // ---------------------------------------------------------------------------------------------
 // Camera windows
 
-function openCameraWindow(key, { focus = false } = {}) {
+// Every explicit open (switch, Find, Show all, Show cameras) ends with the window on screen, so it
+// also clears a "hidden" flag.
+function openCameraWindow(key, { focus = false, flash = true } = {}) {
   const existing = camWins.get(key);
   if (existing) {
+    const entry = store.data.windows[key];
+    if (entry?.hidden) {
+      delete entry.hidden;
+      store.save();
+      existing.stream.resume();
+      updateTrayMenu();
+      notifyManager();
+    }
     existing.win.showInactive();
     existing.win.moveTop();
-    highlight(existing);
+    if (flash) highlight(existing);
     return;
   }
   const [consoleId, cameraId] = key.split("/");
@@ -151,6 +162,7 @@ function openCameraWindow(key, { focus = false } = {}) {
 
   const entry = (store.data.windows[key] ??= { open: true, bounds: null, channel: null, onTop: false, name: "" });
   entry.open = true;
+  delete entry.hidden;
   store.save();
 
   const s = store.settings;
@@ -214,10 +226,56 @@ function openCameraWindow(key, { focus = false } = {}) {
     senders.delete(wcId);
     if (!quitting) {
       entry.open = false;
+      delete entry.hidden;
       store.save();
+      updateTrayMenu();
       notifyManager();
     }
   });
+  updateTrayMenu();
+  notifyManager();
+}
+
+function closeCamera(key) {
+  const cw = camWins.get(key);
+  if (cw) return cw.win.close();
+  // A window hidden at launch was never created; just drop it from the layout.
+  const entry = store.data.windows[key];
+  if (!entry?.open) return;
+  entry.open = false;
+  delete entry.hidden;
+  store.save();
+  updateTrayMenu();
+  notifyManager();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Hide cameras / Show cameras: take the on-screen windows away and put exactly those back later,
+// at the same places. Hidden windows pause their streams like minimized ones (no bandwidth, no
+// decode) and keep their renderer, so Show only has to wait for a keyframe.
+
+const hiddenKeys = (consoleId = null) => Object.entries(store.data.windows)
+  .filter(([key, w]) => w.open && w.hidden && (!consoleId || key.startsWith(`${consoleId}/`)))
+  .map(([key]) => key);
+
+function hideCameras(consoleId = null) {
+  for (const cw of camWins.values()) {
+    if (consoleId && cw.consoleId !== consoleId) continue;
+    const entry = store.data.windows[cw.key];
+    // Minimized windows aren't on screen, so they aren't part of what Show brings back.
+    if (!entry || entry.hidden || cw.win.isDestroyed() || cw.win.isMinimized()) continue;
+    entry.hidden = true;
+    cw.stream.pause();
+    cw.win.hide();
+  }
+  store.save();
+  updateTrayMenu();
+  notifyManager();
+}
+
+function showHiddenCameras(consoleId = null) {
+  for (const key of hiddenKeys(consoleId)) openCameraWindow(key, { flash: false });
+  updateTrayMenu();
   notifyManager();
 }
 
@@ -457,12 +515,13 @@ function tileOpenWindows() {
     if (cw.win.isMaximized()) cw.win.unmaximize();
     cw.win.setBounds(b);
     applyAspect(cw);
-    cw.win.showInactive();
+    if (!store.data.windows[cw.key]?.hidden) cw.win.showInactive();
   }
 }
 
 function bringAllToFront() {
   for (const cw of camWins.values()) {
+    if (store.data.windows[cw.key]?.hidden) continue; // hidden stays hidden until Show cameras
     if (cw.win.isMinimized()) cw.win.restore();
     cw.win.showInactive();
     cw.win.moveTop();
@@ -579,9 +638,13 @@ const notifyManager = throttle(() => {
 }, 250);
 
 function managerState() {
+  const shown = (consoleId = null) => [...camWins.values()]
+    .filter((cw) => (!consoleId || cw.consoleId === consoleId) && !store.data.windows[cw.key]?.hidden).length;
   return {
     mock: MOCK,
     settings: { ...store.settings },
+    hiddenCount: hiddenKeys().length,
+    shownCount: shown(),
     consoles: store.data.consoles.map((c) => {
       const conn = connections.get(c.id);
       const live = conn?.cameras() ?? [];
@@ -595,7 +658,8 @@ function managerState() {
         const key = `${c.id}/${cam.id}`;
         const w = store.data.windows[key];
         const cw = camWins.get(key);
-        return { ...cam, key, open: !!cw, channel: cw?.stream?.channel ?? w?.channel ?? null, onTop: !!w?.onTop, status: cw?.stream?.status ?? null };
+        const hidden = !!(w?.open && w.hidden);
+        return { ...cam, key, open: !!cw || hidden, hidden, channel: cw?.stream?.channel ?? w?.channel ?? null, onTop: !!w?.onTop, status: cw?.stream?.status ?? null };
       });
       return {
         id: c.id,
@@ -605,6 +669,8 @@ function managerState() {
         state: conn?.state ?? "idle",
         message: conn?.message ?? "",
         controllerName: conn?.controllerName ?? null,
+        hiddenCount: hiddenKeys(c.id).length,
+        shownCount: shown(c.id),
         cameras,
       };
     }),
@@ -620,15 +686,23 @@ function createTray() {
   updateTrayMenu();
 }
 
-function updateTrayMenu() {
-  if (!tray) return;
-  tray.setContextMenu(Menu.buildFromTemplate([
+function trayMenuTemplate() {
+  return [
     { label: "Camera list…", click: () => showManager() },
+    // One toggle: while anything is hidden it puts it back, otherwise it hides what's on screen.
+    hiddenKeys().length
+      ? { label: "Show cameras", click: () => showHiddenCameras() }
+      : { label: "Hide cameras", click: () => hideCameras() },
     { label: "Bring cameras to front", click: () => bringAllToFront() },
     { label: "Lock layout", type: "checkbox", checked: !!store.settings.lockLayout, click: (item) => setSetting("lockLayout", item.checked) },
     { type: "separator" },
     { label: "Quit Protect Panes", click: () => { quitting = true; app.quit(); } },
-  ]));
+  ];
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+  tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate()));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -678,7 +752,9 @@ function registerIpc() {
   handle("mgr:remove-console", (id) => removeConsole(String(id)));
   handle("mgr:reconnect", async (id) => { await connections.get(String(id))?.restart(); });
   handle("mgr:open-camera", (key) => openCameraWindow(String(key)));
-  handle("mgr:close-camera", (key) => camWins.get(String(key))?.win.close());
+  handle("mgr:close-camera", (key) => closeCamera(String(key)));
+  handle("mgr:hide-cameras", (consoleId) => hideCameras(consoleId ? String(consoleId) : null));
+  handle("mgr:show-cameras", (consoleId) => showHiddenCameras(consoleId ? String(consoleId) : null));
   handle("mgr:find-camera", (key) => openCameraWindow(String(key)));
   handle("mgr:set-channel", ({ key, channel } = {}) => {
     const k = String(key);

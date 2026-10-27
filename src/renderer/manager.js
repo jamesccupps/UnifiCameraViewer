@@ -56,6 +56,10 @@ function el(tag, attrs = {}, ...children) {
 
 function render() {
   document.getElementById("mock-badge").classList.toggle("hidden", !state.mock);
+  const hideBtn = document.getElementById("btn-hide");
+  hideBtn.textContent = state.hiddenCount ? "Show cameras" : "Hide cameras";
+  hideBtn.title = state.hiddenCount ? "Put the hidden camera windows back where they were" : "Take the camera windows off the screen; Show cameras puts them back";
+  hideBtn.disabled = !state.hiddenCount && !state.shownCount;
   for (const input of document.querySelectorAll("[data-setting]")) {
     input.checked = !!state.settings[input.dataset.setting];
   }
@@ -90,6 +94,17 @@ function renderConsole(c) {
         title: "Open a window for every camera on this console",
         onclick: () => panes.invoke("mgr:open-all", c.id).then(refresh),
       }, "Show all"),
+      c.hiddenCount
+        ? el("button", {
+          class: "small",
+          title: "Put this console's hidden windows back where they were",
+          onclick: () => panes.invoke("mgr:show-cameras", c.id).then(refresh),
+        }, "Restore")
+        : el("button", {
+          class: "small", disabled: !c.shownCount,
+          title: "Take this console's camera windows off the screen; Restore puts them back",
+          onclick: () => panes.invoke("mgr:hide-cameras", c.id).then(refresh),
+        }, "Hide all"),
       el("button", { class: "small", onclick: () => openDialog(c) }, "Edit"),
       el("button", { class: "small", onclick: () => panes.invoke("mgr:reconnect", c.id).then(refresh) }, "Reconnect"),
       el("button", {
@@ -133,8 +148,11 @@ function renderCamera(c, cam) {
   );
 
   let dot = "bad";
-  if (cam.online) dot = cam.open && cam.status?.state && cam.status.state !== "live" ? "warn" : "live";
-  const statusText = !cam.online ? (cam.stale ? "not available" : "offline") : (cam.open && cam.status?.state && cam.status.state !== "live" ? cam.status.text : "");
+  if (cam.online) dot = cam.open && !cam.hidden && cam.status?.state && cam.status.state !== "live" ? "warn" : "live";
+  let statusText = "";
+  if (!cam.online) statusText = cam.stale ? "not available" : "offline";
+  else if (cam.hidden) statusText = "hidden";
+  else if (cam.open && cam.status?.state && cam.status.state !== "live") statusText = cam.status.text;
 
   const name = el("div", { class: "cam-name" },
     el("span", { class: `dot ${dot}` }),
@@ -153,7 +171,7 @@ function renderCamera(c, cam) {
   const find = el("button", {
     class: "small ghost",
     disabled: !cam.open,
-    title: "Flash this camera's window",
+    title: cam.hidden ? "Bring this camera's window back" : "Flash this camera's window",
     onclick: () => panes.invoke("mgr:find-camera", cam.key),
   }, "Find");
 
@@ -208,6 +226,9 @@ for (const input of document.querySelectorAll("[data-setting]")) {
   input.addEventListener("change", () => panes.invoke("mgr:set-setting", { name: input.dataset.setting, value: input.checked }).then(refresh));
 }
 document.getElementById("btn-add").addEventListener("click", () => openDialog(null));
+document.getElementById("btn-hide").addEventListener("click", () => {
+  panes.invoke(state?.hiddenCount ? "mgr:show-cameras" : "mgr:hide-cameras", null).then(refresh);
+});
 document.getElementById("btn-front").addEventListener("click", () => panes.invoke("mgr:bring-to-front"));
 document.getElementById("btn-reset").addEventListener("click", () => {
   if (confirm("Move every open camera window back onto the main screen?")) panes.invoke("mgr:reset-positions");

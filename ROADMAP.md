@@ -74,6 +74,32 @@ Options:
 - Constraint: the install folder must be writable by the user (e.g. `C:\Tools\Protect Panes` or `%LOCALAPPDATA%`), not `Program Files`, or the swap needs elevation.
 - Open: where updates are published (LAN share vs GitHub), and whether to check automatically or only on "Check for updates".
 
+## 7. Hide all / put them back the way they were
+
+**Status:** built (2026-10-27), unreleased. `npm run test:hide` covers it. Decisions: hidden survives a restart; Bring cameras to front and Reset window positions leave hidden windows hidden; Show all stays literal. The notes below are the design as proposed.
+
+Requested 2026-10-27.
+
+Known from the code:
+- **Show all** (per console, `mgr:open-all`) opens a window for *every* camera on that console, which can be dozens. There's no inverse.
+- Closing a window already remembers its position, size, quality and 360° views, so one camera reopens where it was. What isn't remembered is *which set* was on screen.
+- Each window can be minimized, and its stream pauses (`CameraStream.pause()`). There's no minimize-all, though. And with **Hide cameras from taskbar** on (as in the real config), a minimized window has no taskbar button; only **Bring cameras to front** gets it back.
+
+Proposed:
+- **Hide cameras / Show cameras**, a global toggle in the tray menu and the camera list header. Hide takes every window currently on screen off the screen and pauses its stream (no bandwidth, no decode). Show brings back exactly that set, at the same positions and sizes and with the same 360° views, without stealing focus (`showInactive()`).
+- **Hide all** per console, next to Show all: the same thing for one console's windows. While any of them are hidden, the button reads **Restore**.
+- Both use one per-window flag (`windows[key].hidden`), so the camera list can show hidden windows distinctly from closed ones.
+
+How to hide, with tradeoffs:
+- **`win.hide()` + paused stream (recommended).** Bounds are untouched, and restore is quick: about 1-2 s to the first frame, because the stream has to restart and wait for a keyframe. Cost: each hidden window keeps its renderer process and some GPU memory, which is fine for the handful normally on screen.
+- **Minimize.** Same cost as hide, but it plays the Windows minimize animation per window, and with taskbar hiding on there's no way back except Bring to front.
+- **Close and remember the set.** Frees the memory, but restoring means recreating every window and reconnecting its stream, so it's slower. It survives a restart for free via the existing `open` flag.
+
+Open:
+- Should "hidden" survive an app restart? Suggestion: yes. At launch, skip creating hidden windows (saves memory) and create them on Show.
+- Should **Bring cameras to front** also un-hide hidden windows, or only raise the visible ones? Today it restores everything, minimized ones included.
+- Should **Show all** keep meaning "every camera on the console", or become "restore what I had" when windows are hidden? Suggestion: keep it literal, and let Restore / Show cameras do the putting back.
+
 ---
 
 ## Housekeeping found along the way

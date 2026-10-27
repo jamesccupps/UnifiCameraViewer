@@ -15,8 +15,9 @@ Current version: **1.1.0** (adds 360° dewarping). The owner has run 1.0 and 1.1
 npm install
 npm start                 # run from source (uses the real config - quit the installed app first, see Gotchas)
 npm run mock              # fake consoles with ffmpeg test patterns, no network
-npm test                  # both test suites below (~1 min, windows flash on screen)
-npm run test:mock         # mock cameras: playback, forced reconnect, 360° quad/panorama, real mouse PTZ input
+npm test                  # all test suites below (~1.5 min, windows flash on screen)
+npm run test:mock         # mock cameras: playback, forced reconnect, 360° quad/panorama, real mouse PTZ input, name label
+npm run test:hide         # Hide cameras / Show cameras / per-console Hide all, across two launches
 npm run test:e2e          # fake UniFi OS consoles over HTTPS/WSS through the real unifi-protect library
 npm run build:win         # portable build -> dist/Protect Panes-win32-x64/ + dist/ProtectPanes-win32-x64.zip
 ```
@@ -40,7 +41,7 @@ src/renderer/dewarp.js      360°: WebGL fisheye dewarp (quad / panorama), PTZ i
 src/renderer/manager.*      Camera list + settings window (vanilla DOM, no innerHTML with camera/console names)
 src/mock.js                 Dev-only fake consoles/cameras (--mock); PANES_MOCK_FISHEYE adds a 360 camera
 src/selftest.js             Dev-only harness, active only when PANES_SELFTEST_DIR is set
-test/run.mjs                Test runner (mock + e2e suites with assertions)
+test/run.mjs                Test runner (mock, hide and e2e suites with assertions)
 test/fake-console/          Fake UniFi OS console (HTTPS + WSS) and its throwaway self-signed cert
 test/fixtures/              Synthetic fisheye frames with known geometry (ceiling circle truth: x .513, y .4938, r .4818)
 scripts/build-win.js        @electron/packager build + zip (no Wine needed); ELECTRON_ZIP_DIR to use a pre-downloaded runtime
@@ -66,7 +67,7 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
 
 - **Camera → main:** `cam:ready`, `cam:aspect {width,height}`, `cam:reset`, `cam:context-menu`, `cam:toggle-top`, `cam:close`, `cam:dewarp {views?, pano?, focus?, circle?}`
 - **Main → camera:** `cam:init`, `cam:media`, `cam:status`, `cam:meta`, `cam:highlight`, `cam:command {cmd: "calibrate" | "autodetect"}`
-- **Camera list (invoke):** `mgr:state`, `mgr:save-console`, `mgr:remove-console`, `mgr:reconnect`, `mgr:open-camera`, `mgr:close-camera`, `mgr:find-camera`, `mgr:set-channel`, `mgr:set-setting`, `mgr:bring-to-front`, `mgr:reset-positions`, `mgr:open-all`, `mgr:quit`
+- **Camera list (invoke):** `mgr:state`, `mgr:save-console`, `mgr:remove-console`, `mgr:reconnect`, `mgr:open-camera`, `mgr:close-camera`, `mgr:find-camera`, `mgr:set-channel`, `mgr:set-setting`, `mgr:bring-to-front`, `mgr:reset-positions`, `mgr:open-all`, `mgr:hide-cameras consoleId|null`, `mgr:show-cameras consoleId|null`, `mgr:quit`
 - **Main → camera list:** `mgr:changed` (throttled). The list also polls every 3 s while visible, for online/offline status.
 
 ## Config and logs
@@ -75,7 +76,7 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
 
 - `config.json`:
   - `consoles[]`: `{id, name, host, username, password: {enc: "safe" | "plain", data}}`
-  - `windows["<consoleId>/<cameraId>"]`: `{open, bounds, channel, onTop, name, hideName, dewarp}`. `hideName` hides one window's label; `settings.showNames` off hides all of them.
+  - `windows["<consoleId>/<cameraId>"]`: `{open, bounds, channel, onTop, name, hideName, hidden, dewarp}`. `hideName` hides one window's label; `settings.showNames` off hides all of them. `hidden` (with `open: true`) means taken off screen by Hide cameras / Hide all.
   - `settings`: `{lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin}`
 - `protect-panes.log`: connection log. Rolls to `.log.1` at 2 MB.
 
@@ -97,6 +98,11 @@ Passwords are DPAPI-encrypted (`safeStorage`) and tied to the Windows user. `enc
 - **Circle auto-detect.** It scans 120 rays for the point where the picture goes dark for good, then fits with RANSAC + a Kasa least-squares fit. The test fixture deliberately includes an OSD timestamp and black boxes inside the circle. Keep both passing if you touch it.
 - **Name label auto-collapse.** `fitLabel()` in camera.js measures the full label on every resize and title change. When the label is wider than `LABEL_MAX_SHARE` (50%) of the window, only the status dot is shown. Measuring is deliberate, because a fixed breakpoint fits short names or long ones, never both.
 - **Aspect lock.** The renderer reports the aspect it wants: the video size normally, 16:9 in dewarp modes. Main calls `setAspectRatio` and snaps the window height. Calibration deliberately doesn't change aspect.
+- **Hidden vs closed vs minimized.**
+  - Hide cameras (tray, list header) and Hide all (per console) apply to the windows on screen; minimized ones are skipped. Each window gets `win.hide()` plus `CameraStream.pause()`, so its renderer stays alive and Show only waits for a keyframe.
+  - At launch, hidden windows aren't created at all. Show cameras creates them.
+  - Any explicit open (switch, Find, Show all, Show cameras) clears `hidden`. Bring to front and Reset window positions leave hidden windows hidden.
+  - If nothing is on screen at launch, the camera list opens even with Start hidden on.
 - **Windows never steal focus.** Use `showInactive()`, never `show()`/`focus()` for camera windows: exacqVision is in use on the same screen.
 - **Moving vs aiming.** The window drag region is only the hover bar (`-webkit-app-region: drag`). The picture itself takes right-click (context menu) and, in 360° views, drag/scroll for PTZ. Lock layout disables both window moves and PTZ.
 - `src/mock.js` and `src/selftest.js` ship inside the build but do nothing unless `--mock` or `PANES_SELFTEST_DIR` is set.
@@ -123,8 +129,10 @@ When adding a test, extend `test/run.mjs`. `PANES_SELFTEST_ACTIONS` (JSON) drive
 - `key` `{win, key}`
 - `resize` `{win, size: [w, h]}`
 - `menu-click` `{win, label}`: runs that context-menu item's click handler (searches submenus too)
+- `tray-click` `{label}`: same, for the tray menu (no `win`)
+- `manager-js` `{js}`: runs JS in the camera list window and stores the result as `value` (no `win`). The list must be open (`startHidden: false`).
 
-Action results carry `t` (epoch ms), so a check can compare against the samples taken before an action.
+Action results carry `t` (epoch ms), so a check can compare against the samples taken before an action. Each sample row also has main-process `visible` and `bounds` per window.
 
 `win` is the index in window-open order. That's config order.
 

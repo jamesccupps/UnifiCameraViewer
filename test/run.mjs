@@ -152,6 +152,107 @@ async function mockSuite() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Hide cameras / Show cameras (mock consoles): per-console Hide all from the camera list, the tray
+// toggle, Bring to front leaving hidden windows alone, and hidden windows surviving a restart.
+
+async function hideSuite() {
+  console.log("\nHide/show suite (mock consoles, two launches)");
+  const userData = tmpDir("hide");
+  const A = "aaaaaaaa-0000-4000-8000-000000000001";
+  const B = "bbbbbbbb-0000-4000-8000-000000000002";
+  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, ramp: `${B}/bbbbbbbb-cam0` };
+  fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [
+      { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock"] },
+      { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp"] },
+    ],
+    windows: {
+      [keys.lobby]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 },
+      [keys.dock]: { open: true, bounds: { x: 0, y: 290, width: 480, height: 270 }, channel: 2 },
+      [keys.ramp]: { open: true, bounds: { x: 500, y: 0, width: 480, height: 270 }, channel: 2 },
+    },
+    settings: { startHidden: false },
+  }, null, 2));
+
+  // Click a button in a console's card by its text; returns false if it isn't there.
+  const clickInCard = (consoleName, text) => `(() => {
+    const card = [...document.querySelectorAll("article.panel")].find((a) => a.querySelector(".console-head b")?.textContent === ${JSON.stringify(consoleName)});
+    const btn = card && [...card.querySelectorAll("button")].find((b) => b.textContent === ${JSON.stringify(text)});
+    btn?.click();
+    return !!btn;
+  })()`;
+  const readButtons = `(() => ({
+    header: document.getElementById("btn-hide").textContent,
+    garage: [...[...document.querySelectorAll("article.panel")].find((a) => a.querySelector(".console-head b")?.textContent === "Garage").querySelectorAll("button")].map((b) => b.textContent),
+    rampStatus: [...document.querySelectorAll(".cam-name")].find((n) => n.querySelector("b")?.textContent === "Garage Ramp")?.querySelector("small")?.textContent,
+  }))()`;
+
+  const run1 = await runApp({
+    userData, results: path.join(userData, "results-1"), seconds: 11, extraArgs: ["--mock"],
+    env: {
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 3000, do: "manager-js", js: clickInCard("Garage", "Hide all") },
+        { at: 4500, do: "manager-js", js: readButtons },
+        { at: 5000, do: "tray-click", label: "Show cameras" },
+        { at: 8500, do: "tray-click", label: "Hide cameras" },
+        { at: 9500, do: "tray-click", label: "Bring cameras to front" },
+      ]),
+    },
+  });
+  const act = (r, label) => r.result.actions.find((a) => a.act.label === label || (a.act.js && a.act.js.includes(label)));
+  const between = (r, from, to) => r.result.samples.filter((s) => s.t > (from?.t ?? Infinity) && s.t < (to?.t ?? Infinity)).at(-1)?.cams ?? {};
+  const hideB = act(run1, '"Hide all"');
+  const showT = act(run1, "Show cameras");
+  const hideAllT = act(run1, "Hide cameras");
+  const firstSample = run1.result.samples[0]?.cams ?? {};
+  const afterHideB = between(run1, hideB, showT);
+  const afterShow = between(run1, showT, hideAllT);
+  const end1 = last(run1.result);
+  const buttons = run1.result.actions.find((a) => a.act.js === readButtons)?.value;
+  const vis = (cams) => JSON.stringify(Object.fromEntries(Object.entries(keys).map(([n, k]) => [n, cams[k]?.visible])));
+  const sameBounds = (a, b) => a && b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+
+  check("Garage Hide all clicked in the camera list", hideB?.value === true, hideB?.error);
+  check("Hide all hid only Garage's window and paused its stream",
+    afterHideB[keys.ramp]?.visible === false && afterHideB[keys.ramp]?.status === "paused" && afterHideB[keys.lobby]?.visible && afterHideB[keys.dock]?.visible,
+    `${vis(afterHideB)} ramp=${afterHideB[keys.ramp]?.status}`);
+  check("camera list shows Restore, Show cameras and a hidden camera",
+    buttons?.garage?.includes("Restore") && !buttons.garage.includes("Hide all") && buttons.header === "Show cameras" && buttons.rampStatus?.includes("hidden"),
+    JSON.stringify(buttons));
+  check("Show cameras brought the window back live at the same place",
+    afterShow[keys.ramp]?.visible === true && afterShow[keys.ramp]?.status === "live" && sameBounds(afterShow[keys.ramp]?.bounds, firstSample[keys.ramp]?.bounds),
+    `status=${afterShow[keys.ramp]?.status} ${JSON.stringify(afterShow[keys.ramp]?.bounds)} vs ${JSON.stringify(firstSample[keys.ramp]?.bounds)}`);
+  check("Hide cameras hid every window, and Bring to front left them hidden",
+    Object.values(keys).every((k) => end1[k]?.visible === false && end1[k]?.status === "paused"), vis(end1));
+  check("hidden windows saved as open + hidden", Object.values(keys).every((k) => run1.config.windows[k]?.open === true && run1.config.windows[k]?.hidden === true),
+    JSON.stringify(Object.values(keys).map((k) => run1.config.windows[k])));
+
+  // Second launch: everything was hidden at quit. Nothing should open until Show cameras, and the
+  // camera list should come up even with "Start with this list hidden" on, since nothing is on screen.
+  const cfg = JSON.parse(fs.readFileSync(path.join(userData, "config.json"), "utf8"));
+  cfg.settings.startHidden = true;
+  fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify(cfg, null, 2));
+  const run2 = await runApp({
+    userData, results: path.join(userData, "results-2"), seconds: 8, extraArgs: ["--mock"],
+    env: { PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 2500, do: "tray-click", label: "Show cameras" }]) },
+  });
+  const show2 = act(run2, "Show cameras");
+  const beforeShow2 = run2.result.samples.filter((s) => s.t < show2?.t).at(-1)?.cams;
+  const end2 = last(run2.result);
+  check("relaunch with everything hidden opens no camera windows", beforeShow2 && Object.keys(beforeShow2).length === 0, beforeShow2 && JSON.stringify(Object.keys(beforeShow2)));
+  check("relaunch shows the camera list when nothing is on screen", Object.keys(run2.result.windows).some((n) => n.includes("Protect_Panes")), JSON.stringify(Object.keys(run2.result.windows)));
+  for (const [name, key] of Object.entries(keys)) {
+    const c = end2[key];
+    check(`after relaunch, Show cameras restored ${name} live at its saved place`,
+      c?.visible && c.status === "live" && c.decodedFrames >= 30 && sameBounds(c.bounds, firstSample[key]?.bounds),
+      c && `status=${c.status} frames=${c.decodedFrames} ${JSON.stringify(c.bounds)} vs ${JSON.stringify(firstSample[key]?.bounds)}`);
+  }
+  check("hidden flags cleared after Show cameras", Object.values(keys).every((k) => run2.config.windows[k]?.open === true && !run2.config.windows[k]?.hidden));
+  console.log(`  results: ${userData}`);
+}
+
+// ---------------------------------------------------------------------------------------------
 // End-to-end suite against fake consoles
 
 function startConsole(port, mode, prefix, env = {}) {
@@ -238,6 +339,7 @@ async function e2eSuite() {
 
 try {
   if (suite === "mock" || suite === "all") await mockSuite();
+  if (suite === "hide" || suite === "all") await hideSuite();
   if (suite === "e2e" || suite === "all") await e2eSuite();
 } catch (err) {
   console.error(`\nTest run failed: ${err.message}`);

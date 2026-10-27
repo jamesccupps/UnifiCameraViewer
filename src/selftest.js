@@ -16,16 +16,49 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
   const sample = async () => {
     const row = { t: Date.now(), cams: {} };
     for (const [key, cw] of camWins) {
-      try { row.cams[key] = await cw.win.webContents.executeJavaScript("window.__panesStats && window.__panesStats()"); } catch (err) { row.cams[key] = { error: String(err) }; }
+      try {
+        const stats = await cw.win.webContents.executeJavaScript("window.__panesStats && window.__panesStats()");
+        row.cams[key] = { ...stats, visible: cw.win.isVisible(), bounds: cw.win.getBounds() };
+      } catch (err) { row.cams[key] = { error: String(err) }; }
     }
     samples.push(row);
   };
   const timer = setInterval(sample, 2_000);
 
+  const findItem = (items, label) => {
+    for (const i of items) {
+      if (i.label === label) return i;
+      const sub = i.submenu && findItem(i.submenu, label);
+      if (sub) return sub;
+    }
+    return null;
+  };
+  const managerWindow = () => BrowserWindow.getAllWindows().find((w) => w.getTitle() === "Protect Panes");
+
   // PANES_SELFTEST_ACTIONS: JSON list of { at, do, win, ... } driving camera windows with real input.
+  // tray-click and manager-js don't need a camera window.
   const results = [];
+  const APP_ACTIONS = new Set(["tray-click", "manager-js"]);
   for (const act of JSON.parse(process.env.PANES_SELFTEST_ACTIONS || "[]")) {
     setTimeout(async () => {
+      let value;
+      if (APP_ACTIONS.has(act.do)) {
+        try {
+          if (act.do === "tray-click") {
+            const item = findItem(hooks.trayMenuTemplate(), act.label);
+            if (!item?.click) throw new Error(`no tray item "${act.label}"`);
+            item.click(item);
+          } else {
+            const mgr = managerWindow();
+            if (!mgr) throw new Error("camera list isn't open");
+            value = await mgr.webContents.executeJavaScript(act.js);
+          }
+          results.push({ act, ok: true, t: Date.now(), value });
+        } catch (err) {
+          results.push({ act, error: String(err), t: Date.now() });
+        }
+        return;
+      }
       const cw = [...camWins.values()][act.win ?? 0];
       if (!cw) { results.push({ act, error: "no window" }); return; }
       const wc = cw.win.webContents;
@@ -73,21 +106,13 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
             cw.win.setSize(act.size[0], act.size[1]);
             break;
           case "menu-click": {
-            const find = (items) => {
-              for (const i of items) {
-                if (i.label === act.label) return i;
-                const sub = i.submenu && find(i.submenu);
-                if (sub) return sub;
-              }
-              return null;
-            };
-            const item = find(hooks.cameraContextMenuTemplate(cw));
+            const item = findItem(hooks.cameraContextMenuTemplate(cw), act.label);
             if (!item?.click) throw new Error(`no menu item "${act.label}"`);
-            item.click();
+            item.click(item);
             break;
           }
         }
-        results.push({ act, ok: true, t: Date.now() });
+        results.push({ act, ok: true, t: Date.now(), value });
       } catch (err) {
         results.push({ act, error: String(err) });
       }
@@ -97,7 +122,7 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
   // Optionally drive the camera list like a user would (dev only).
   if (process.env.PANES_SELFTEST_MANAGER_JS) {
     setTimeout(async () => {
-      const mgr = BrowserWindow.getAllWindows().find((w) => w.getTitle() === "Protect Panes");
+      const mgr = managerWindow();
       try {
         const out = await mgr.webContents.executeJavaScript(process.env.PANES_SELFTEST_MANAGER_JS);
         fs.writeFileSync(path.join(dir, "manager-script.json"), JSON.stringify(out, null, 2));
