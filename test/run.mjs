@@ -22,6 +22,7 @@ const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURES = path.join(ROOT, "test", "fixtures");
 const ELECTRON = require("electron");
+const FFMPEG = process.env.FFMPEG_PATH || require("ffmpeg-static") || "ffmpeg";
 const CEILING_TRUTH = { x: 0.513, y: 0.4938, r: 0.4818 }; // where fisheye-ceiling.png's image circle really is
 
 const suite = process.argv[2] || "all";
@@ -271,6 +272,112 @@ async function hideSuite() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Color range: several UniFi cameras send full-range luma without flagging it, and Chromium then
+// crushes everything below 16 to black. src/avc-range.js rewrites the SPS to say full range.
+
+const ffmpeg = (args) => spawnSync(FFMPEG, ["-hide_banner", ...args], { encoding: "utf8", maxBuffer: 64 << 20 });
+const videoLine = (file) => (/Video: .*/.exec(ffmpeg(["-i", file]).stderr) ?? [""])[0];
+const frameHashes = (file) => ffmpeg(["-v", "error", "-i", file, "-map", "0:v", "-f", "framemd5", "-"]).stdout.split("\n").filter((l) => l && !l.startsWith("#")).map((l) => l.split(",").at(-1).trim());
+const decodeErrors = (file) => ffmpeg(["-v", "error", "-i", file, "-f", "null", "-"]).stderr.trim();
+
+function splitInit(bytes) {
+  let p = 0;
+  while (p + 8 <= bytes.length) {
+    const size = bytes.readUInt32BE(p);
+    const type = bytes.toString("latin1", p + 4, p + 8);
+    p += size;
+    if (type === "moov") break;
+  }
+  return { init: new Uint8Array(bytes.subarray(0, p)), rest: bytes.subarray(p) };
+}
+
+/** Mean gray level of a region of a PNG (fractions of width/height). */
+function regionLuma(png, [x, y, w, h]) {
+  const out = ffmpeg(["-i", png, "-vf", `crop=iw*${w}:ih*${h}:iw*${x}:ih*${y},format=gray,signalstats,metadata=print:key=lavfi.signalstats.YAVG`, "-f", "null", "-"]).stderr;
+  const m = /YAVG=([\d.]+)/.exec(out);
+  return m ? Number(m[1]) : NaN;
+}
+
+async function rangeSuite() {
+  console.log("\nColor range suite (SPS rewrite + what Chromium actually displays)");
+  const { initRange, applyRange, internals } = await import(new URL("../src/avc-range.js", import.meta.url).href);
+  const dir = tmpDir("range");
+  const encode = (name, extra) => {
+    const file = path.join(dir, `${name}.mp4`);
+    ffmpeg(["-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=15", "-t", "1", ...extra,
+      "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-profile:v", "main", "-pix_fmt", "yuv420p", "-g", "15",
+      "-f", "mp4", "-movflags", "frag_keyframe+empty_moov+default_base_moof", file]);
+    return file;
+  };
+  const write = (name, init, rest) => {
+    const file = path.join(dir, `${name}.mp4`);
+    fs.writeFileSync(file, Buffer.concat([Buffer.from(init), rest]));
+    return file;
+  };
+
+  // No VUI at all: x264 always writes one, so cut it off a real x264 SPS.
+  const stripVui = (sps) => {
+    const { BitReader, BitWriter, readToVui, unescapeRbsp, escapeRbsp } = internals;
+    const r = new BitReader(unescapeRbsp(sps.subarray(1)));
+    readToVui(r);
+    const w = new BitWriter();
+    w.copy(r, 0, r.pos - 1);
+    w.bit(0);
+    return Uint8Array.from([sps[0], ...escapeRbsp(w.finish())]);
+  };
+
+  const unflagged = encode("unflagged", []);
+  const { init: u, rest: uRest } = splitInit(fs.readFileSync(unflagged));
+  const variants = [
+    { name: "no range flag (x264 VUI)", file: unflagged, declared: null, auto: true },
+    { name: "flagged full", file: encode("pc", ["-color_range", "pc"]), declared: true, auto: true },
+    // x264 only writes the signal-type block for limited range when colorimetry is set too.
+    { name: "flagged limited", file: encode("tv", ["-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"]), declared: false, auto: false },
+    { name: "no VUI at all", file: write("novui", internals.mapSps(u, stripVui), uRest), declared: null, auto: true },
+  ];
+  for (const v of variants) {
+    const { init, rest } = splitInit(fs.readFileSync(v.file));
+    const declared = initRange(init);
+    const auto = applyRange(init, "auto");
+    const patchedFile = write(`${path.basename(v.file, ".mp4")}-auto`, auto, rest);
+    const same = JSON.stringify(frameHashes(v.file)) === JSON.stringify(frameHashes(patchedFile));
+    const errs = decodeErrors(patchedFile);
+    check(`${v.name}: reads as ${v.declared}`, declared === v.declared, `got ${declared}`);
+    check(`${v.name}: auto -> ${v.auto ? "full" : "left alone"}, decodes identically`,
+      initRange(auto) === v.auto && same && !errs && (v.auto ? /\(pc/.test(videoLine(patchedFile)) : auto === init),
+      `range=${initRange(auto)} sameFrames=${same} errors=${errs || "none"} ${videoLine(patchedFile)}`);
+  }
+  const { init: tvInit } = splitInit(fs.readFileSync(variants[2].file));
+  check("Full override rewrites a limited flag", initRange(applyRange(tvInit, "full")) === true);
+  check("Limited override flags an unflagged stream limited", initRange(applyRange(u, "limited")) === false);
+  check("non-H.264 input is passed through untouched", applyRange(new Uint8Array([0, 0, 0, 8, 0x66, 0x72, 0x65, 0x65]), "auto").length === 8);
+
+  // In the app: two mock cameras sending Y=0 | Y=24 full-range, unflagged. Auto should show the
+  // right half at ~24; the Limited override reproduces the old crushed look (~9).
+  const A = "aaaaaaaa-0000-4000-8000-000000000001";
+  const userData = tmpDir("range-app");
+  const results = path.join(userData, "results");
+  fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Shadows", "Shadows Limited"] }],
+    windows: {
+      [`${A}/aaaaaaaa-cam0`]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 },
+      [`${A}/aaaaaaaa-cam1`]: { open: true, bounds: { x: 500, y: 0, width: 480, height: 270 }, channel: 2, range: "limited" },
+    },
+    settings: { startHidden: true, showNames: false },
+  }, null, 2));
+  const { result } = await runApp({ userData, results, seconds: 6, extraArgs: ["--mock"] });
+  const shot = (suffix) => path.join(results, Object.keys(result.windows).find((n) => n.endsWith(suffix)) ?? "missing.png");
+  const auto = { left: regionLuma(shot("Building_Shadows.png"), [0.1, 0.15, 0.3, 0.6]), right: regionLuma(shot("Building_Shadows.png"), [0.6, 0.15, 0.3, 0.6]) };
+  const limited = { right: regionLuma(shot("Shadows_Limited.png"), [0.6, 0.15, 0.3, 0.6]) };
+  const live = Object.values(last(result)).every((c) => c.status === "live");
+  check("both shadow cameras live", live);
+  check("Auto shows full-range shadows (Y=24 displays ~24, not crushed)", auto.right > 19 && auto.right < 29 && auto.left < 4, JSON.stringify(auto));
+  check("Limited override shows the crushed TV-range reading (~9)", limited.right > 4 && limited.right < 14, JSON.stringify(limited));
+  console.log(`  results: ${dir}  ${results}`);
+}
+
+// ---------------------------------------------------------------------------------------------
 // End-to-end suite against fake consoles
 
 function startConsole(port, mode, prefix, env = {}) {
@@ -358,6 +465,7 @@ async function e2eSuite() {
 try {
   if (suite === "mock" || suite === "all") await mockSuite();
   if (suite === "hide" || suite === "all") await hideSuite();
+  if (suite === "range" || suite === "all") await rangeSuite();
   if (suite === "e2e" || suite === "all") await e2eSuite();
 } catch (err) {
   console.error(`\nTest run failed: ${err.message}`);

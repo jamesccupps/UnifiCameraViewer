@@ -61,6 +61,7 @@ Dewarping is done by the graphics chip on the one stream that's already being de
 | "Camera offline" | The camera is disconnected in Protect. The window recovers when it's back. |
 | H.265 message | This PC can't decode HEVC. In Protect, set that camera to Standard (H.264) encoding. |
 | Picture behind / choppy | Right-click → pick **Medium** or **Low**. High (4K) streams cost the most GPU. |
+| Shadows look crushed / washed out | Many UniFi cameras send full-range video without saying so; the app corrects this automatically. If one camera still looks wrong, try **Right-click → Color range → Full** or **Limited**. |
 
 ## Keeping up with new Protect versions
 

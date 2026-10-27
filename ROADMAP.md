@@ -8,7 +8,13 @@ Evidence from that session: self-test run against both real consoles (scratch co
 
 ## 1. Picture looks dark / should be lighter
 
-**Status:** cause unknown. Not reproduced from screenshots alone.
+**Status:** cause found and fixed (2026-10-27), unreleased. Falsification test 2 below hit:
+- Every measured camera sends full-range luma, but three of the four don't flag it. Chromium reads those as limited range and turns everything below Y=16 solid black. One camera's picture in the app was 6.0% pure black, against 0.1% for a correct PC-range decode.
+- The app now rewrites the SPS to declare full range (`src/avc-range.js`). Afterwards it measured 0.02%. Shadows keep their detail; mid-tones barely move.
+- Right-click → **Color range** overrides per camera.
+- Not built: the brightness/contrast control. It's only worth doing if pictures still look dark next to Protect's own viewer. Test 1 below (side by side with Protect's web view) still needs the owner.
+
+Original notes:
 
 Known:
 - Nothing in the app alters color. There are no CSS filters on `<video>`, and the dewarp fragment shader is a plain `texture2D` passthrough.

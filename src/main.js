@@ -202,6 +202,7 @@ function openCameraWindow(key, { focus = false, flash = true } = {}) {
     getConnection: () => connections.get(consoleId),
     cameraId,
     resolveChannel: (cam) => resolveChannel(cam, store.data.windows[key]?.channel),
+    getRange: () => store.data.windows[key]?.range ?? "auto",
     send: (channel, payload) => { if (!win.isDestroyed()) win.webContents.send(channel, payload); },
     log: log.child(`cam ${cameraId.slice(-6)}`),
   });
@@ -459,6 +460,17 @@ function setChannel(cw, channel) {
   setTimeout(() => refreshCameraMeta(cw), 50);
 }
 
+const RANGES = ["auto", "full", "limited"];
+
+function setRange(cw, range) {
+  const entry = store.data.windows[cw.key];
+  if (!entry || !RANGES.includes(range)) return;
+  if (range === "auto") delete entry.range;
+  else entry.range = range;
+  store.save();
+  cw.stream.restart(); // the range is applied to the init segment, so a fresh one has to be sent
+}
+
 function toggleOnTop(cw) {
   const entry = store.data.windows[cw.key];
   entry.onTop = !entry.onTop;
@@ -558,6 +570,14 @@ function cameraContextMenuTemplate(cw) {
     })),
     ...(meta.channels.length ? [{ type: "separator" }] : []),
     { label: meta.fisheye ? "360° view" : "360° view (fisheye lens)", submenu: dewarpMenu(cw) },
+    {
+      label: "Color range",
+      submenu: [
+        ["auto", "Auto (recommended)"],
+        ["full", "Full (0-255)"],
+        ["limited", "Limited (16-235)"],
+      ].map(([id, label]) => ({ label, type: "radio", checked: (entry.range ?? "auto") === id, click: () => setRange(cw, id) })),
+    },
     { type: "separator" },
     { label: "Always on top", type: "checkbox", checked: !!entry.onTop, click: () => toggleOnTop(cw) },
     { label: "Show name", type: "checkbox", checked: meta.showNames, enabled: !!store.settings.showNames, click: () => toggleName(cw) },

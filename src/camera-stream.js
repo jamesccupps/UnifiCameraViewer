@@ -1,4 +1,5 @@
 import { ProtectAuthorizationError, ProtectCodecChangeError, ProtectLivestreamUnavailableError } from "unifi-protect";
+import { applyRange } from "./avc-range.js";
 import { errorText } from "./util.js";
 
 // How long a live view tolerates no video before the library declares a stall and reconnects.
@@ -27,6 +28,7 @@ export class CameraStream {
    * @param {() => any} opts.getConnection  - current ConsoleConnection (or mock)
    * @param {string} opts.cameraId
    * @param {(cam) => number} opts.resolveChannel
+   * @param {() => string} [opts.getRange]   - "auto" | "full" | "limited" (see avc-range.js)
    * @param {(channel: string, payload: any) => void} opts.send
    * @param {object} opts.log
    */
@@ -118,7 +120,8 @@ export class CameraStream {
 
       let sentInit = false;
       const sendInit = (init) => {
-        this.#send("cam:init", { codec: init.codec, data: new Uint8Array(init.data), reset: true });
+        const data = applyRange(init.data, this.#opts.getRange?.() ?? "auto");
+        this.#send("cam:init", { codec: init.codec, data: new Uint8Array(data), reset: true });
         sentInit = true;
         this.#setStatus("live", "");
       };

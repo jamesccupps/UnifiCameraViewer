@@ -13,6 +13,7 @@
     "test": "node test/run.mjs all",
     "test:mock": "node test/run.mjs mock",
     "test:hide": "node test/run.mjs hide",
+    "test:range": "node test/run.mjs range",
     "test:e2e": "node test/run.mjs e2e"
   },
   "dependencies": {

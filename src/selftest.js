@@ -13,6 +13,29 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
   const samples = [];
   fs.mkdirSync(dir, { recursive: true });
 
+  // PANES_SELFTEST_DUMP_SEC=n: save the first n seconds of each window's stream (init + fragments,
+  // a playable fragmented MP4) as <cameraId>.mp4, for checking the encoder's color flags offline.
+  const dumpSec = Number(process.env.PANES_SELFTEST_DUMP_SEC || 0);
+  if (dumpSec > 0) {
+    for (const cw of camWins.values()) {
+      const wc = cw.win.webContents;
+      const send = wc.send.bind(wc);
+      const file = path.join(dir, `${cw.cameraId}.mp4`);
+      let startedAt = 0;
+      let done = false;
+      wc.send = (channel, payload) => {
+        if (!done && channel === "cam:init") {
+          if (startedAt) done = true; // a second init means the stream restarted; keep the clean part
+          else { startedAt = Date.now(); fs.writeFileSync(file, payload.data); }
+        } else if (!done && startedAt && channel === "cam:media") {
+          if (Date.now() - startedAt > dumpSec * 1000) done = true;
+          else fs.appendFileSync(file, payload);
+        }
+        return send(channel, payload);
+      };
+    }
+  }
+
   const sample = async () => {
     const row = { t: Date.now(), cams: {} };
     for (const [key, cw] of camWins) {

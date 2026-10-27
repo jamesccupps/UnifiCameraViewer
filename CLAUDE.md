@@ -18,6 +18,7 @@ npm run mock              # fake consoles with ffmpeg test patterns, no network
 npm test                  # all test suites below (~1.5 min, windows flash on screen)
 npm run test:mock         # mock cameras: playback, forced reconnect, 360° quad/panorama, real mouse PTZ input, name label
 npm run test:hide         # Hide cameras / Show cameras / per-console Hide all, across two launches
+npm run test:range        # SPS color-range rewrite (unit, ffmpeg fixtures) + displayed pixel levels in Chromium
 npm run test:e2e          # fake UniFi OS consoles over HTTPS/WSS through the real unifi-protect library
 npm run build:win         # portable build -> dist/Protect Panes-win32-x64/ + dist/ProtectPanes-win32-x64.zip
 ```
@@ -32,6 +33,7 @@ npm run build:win         # portable build -> dist/Protect Panes-win32-x64/ + di
 src/main.js                 App lifecycle, camera windows, camera list window, tray, context menu, IPC, settings, dewarp settings
 src/console-connection.js   One logged-in console (ProtectClient), connect/backoff, state; channelList / resolveChannel / fisheyeInfo
 src/camera-stream.js        Pumps one camera's livestream subscription to its window (init/media/status), reconnect handling
+src/avc-range.js            Rewrites the H.264 SPS in the init segment to declare full color range (see Gotchas)
 src/store.js                config.json load/save (debounced, atomic), DPAPI password encryption via safeStorage
 src/log.js, src/util.js     File logger (rolls at 2 MB); sleep/debounce/throttle/normalizeHost
 src/preload-camera.cjs      Camera window bridge - IN/OUT channel allowlists
@@ -41,7 +43,7 @@ src/renderer/dewarp.js      360°: WebGL fisheye dewarp (quad / panorama), PTZ i
 src/renderer/manager.*      Camera list + settings window (vanilla DOM, no innerHTML with camera/console names)
 src/mock.js                 Dev-only fake consoles/cameras (--mock); PANES_MOCK_FISHEYE adds a 360 camera
 src/selftest.js             Dev-only harness, active only when PANES_SELFTEST_DIR is set
-test/run.mjs                Test runner (mock, hide and e2e suites with assertions)
+test/run.mjs                Test runner (mock, hide, range and e2e suites with assertions)
 test/fake-console/          Fake UniFi OS console (HTTPS + WSS) and its throwaway self-signed cert
 test/fixtures/              Synthetic fisheye frames with known geometry (ceiling circle truth: x .513, y .4938, r .4818)
 scripts/build-win.js        @electron/packager build + zip (no Wine needed); ELECTRON_ZIP_DIR to use a pre-downloaded runtime
@@ -76,7 +78,7 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
 
 - `config.json`:
   - `consoles[]`: `{id, name, host, username, password: {enc: "safe" | "plain", data}}`
-  - `windows["<consoleId>/<cameraId>"]`: `{open, bounds, channel, onTop, name, hideName, hidden, clock, dewarp}`. `clock` true/false overrides the default (on in quad/panorama, off otherwise). `hideName` hides one window's label; `settings.showNames` off hides all of them. `hidden` (with `open: true`) means taken off screen by Hide cameras / Hide all.
+  - `windows["<consoleId>/<cameraId>"]`: `{open, bounds, channel, onTop, name, hideName, hidden, clock, range, dewarp}`. `range` is `"full" | "limited"` (absent = auto). `clock` true/false overrides the default (on in quad/panorama, off otherwise). `hideName` hides one window's label; `settings.showNames` off hides all of them. `hidden` (with `open: true`) means taken off screen by Hide cameras / Hide all.
   - `settings`: `{lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin}`
 - `protect-panes.log`: connection log. Rolls to `.log.1` at 2 MB.
 
@@ -98,6 +100,15 @@ Passwords are DPAPI-encrypted (`safeStorage`) and tied to the Windows user. `enc
 - **Circle auto-detect.** It scans 120 rays for the point where the picture goes dark for good, then fits with RANSAC + a Kasa least-squares fit. The test fixture deliberately includes an OSD timestamp and black boxes inside the circle. Keep both passing if you touch it.
 - **Name label auto-collapse.** `fitLabel()` in camera.js measures the full label on every resize and title change. When the label is wider than `LABEL_MAX_SHARE` (50%) of the window, only the status dot is shown. Measuring is deliberate, because a fixed breakpoint fits short names or long ones, never both.
 - **Aspect lock.** The renderer reports the aspect it wants: the video size normally, 16:9 in dewarp modes. Main calls `setAspectRatio` and snaps the window height. Calibration deliberately doesn't change aspect.
+- **Color range (why pictures looked dark).** Measured on the owner's cameras (2026-10-27, Low channel):
+  - Every camera sends full-range luma (0-255). The worst garage camera had 4% of picture pixels below 16.
+  - Only some flag it: one camera's SPS says `pc, bt709`. Three others have a VUI with no `video_signal_type`.
+  - Chromium reads unflagged streams as limited, so everything below 16 went solid black: 6% of one camera's picture in the app, against 0.1% in a PC-range decode.
+  - `applyRange()` (avc-range.js) rewrites the avcC SPS in `CameraStream`'s `sendInit` to declare full range.
+  - Chromium ignores the range bit unless `colour_description_present_flag` is set, so the rewrite also writes BT.709 when there's no colour description.
+  - Streams that already flag a range are left alone. Right-click → Color range (`range`) overrides.
+  - Fixture-tested: no flag, flagged pc, flagged tv, and no VUI. Each one decodes bit-identically after the rewrite.
+  - Verified live afterwards: pure black dropped to 0.02%. H.265 isn't handled.
 - **App clock on 360° views.** The camera's own timestamp sits in a corner of the fisheye frame, which no dewarped view samples. `updateClock()` draws PC time minus the buffer lag, bottom right.
   - It shows only while the stream is live: a ticking clock over a frozen picture would claim it's live.
   - It hides when it would take more than 45% of the window width (below the label's 50%, so the two never overlap).
@@ -135,6 +146,8 @@ When adding a test, extend `test/run.mjs`. `PANES_SELFTEST_ACTIONS` (JSON) drive
 - `menu-click` `{win, label}`: runs that context-menu item's click handler (searches submenus too)
 - `tray-click` `{label}`: same, for the tray menu (no `win`)
 - `manager-js` `{js}`: runs JS in the camera list window and stores the result as `value` (no `win`). The list must be open (`startHidden: false`).
+
+`PANES_SELFTEST_DUMP_SEC=n` saves the first n seconds of each window's stream as `<cameraId>.mp4` in the results folder. That's how the color-range finding was measured (`ffmpeg -i` for flags, `signalstats` for levels). Against real consoles it records real video, so delete the dumps afterwards.
 
 Action results carry `t` (epoch ms), so a check can compare against the samples taken before an action. Each sample row also has main-process `visible` and `bounds` per window.
 

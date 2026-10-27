@@ -65,6 +65,9 @@ class MockCamera {
     this.name = name;
     this.index = index;
     this.image = image;
+    // A camera named "... Shadows" sends what several real UniFi cameras do: full-range luma (here
+    // Y=0 left, Y=24 right) with no range flag in the SPS. Tests check it isn't crushed to black.
+    this.shadows = /\bShadows\b/.test(name);
     this.isOnline = true;
     const sizes = image ? SQUARE : SIZES;
     this.config = {
@@ -78,7 +81,7 @@ class MockCamera {
 
   livestream({ source, signal }) {
     const restartSec = this.index === 0 ? Number(process.env.PANES_MOCK_RESTART_SEC || 0) : 0;
-    return new MockSubscription({ channel: source?.channel ?? 0, hue: this.index * 70, label: this.name, signal, restartSec, image: this.image });
+    return new MockSubscription({ channel: source?.channel ?? 0, hue: this.index * 70, label: this.name, signal, restartSec, image: this.image, shadows: this.shadows });
   }
 }
 
@@ -113,9 +116,10 @@ class MockSubscription {
   #spawn() {
     const image = this.#opts.image;
     const [w, h] = (image ? SQUARE : SIZES)[this.#opts.channel] ?? SIZES[1];
-    const input = image
-      ? ["-loop", "1", "-framerate", "15", "-i", image, "-vf", `scale=${w}:${h},drawbox=x=mod(t*80\\,${w}):y=${Math.round(h * 0.5)}:w=24:h=24:color=red:t=fill`]
-      : ["-f", "lavfi", "-i", `testsrc2=size=${w}x${h}:rate=15`, "-vf", `hue=h=${this.#opts.hue}`];
+    let input;
+    if (image) input = ["-loop", "1", "-framerate", "15", "-i", image, "-vf", `scale=${w}:${h},drawbox=x=mod(t*80\\,${w}):y=${Math.round(h * 0.5)}:w=24:h=24:color=red:t=fill`];
+    else if (this.#opts.shadows) input = ["-f", "lavfi", "-i", `color=c=black:size=${w}x${h}:rate=15`, "-vf", "format=yuv420p,geq=lum='if(lt(X,W/2),0,24)':cb=128:cr=128"];
+    else input = ["-f", "lavfi", "-i", `testsrc2=size=${w}x${h}:rate=15`, "-vf", `hue=h=${this.#opts.hue}`];
     const args = [
       "-hide_banner", "-loglevel", "error", "-re",
       ...input,
