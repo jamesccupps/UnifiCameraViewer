@@ -7,13 +7,14 @@ Hard requirements, all deliberate:
 - **Direct login by IP** with a local account. No ui.com/cloud, no MFA.
 - **Low resource use.** Medium channel by default, GPU decode via MSE, minimized windows stop streaming, WebGL only for 360° windows.
 
-Current version: **1.4.0**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
+Current version: **1.4.1**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
 - **1.2.0:** color-range fix for crushed shadows, name label collapse and per-window hide, clock on 360° views, Apply to all, Hide / Show cameras, named layouts with Protect liveview import, signed in-place updates.
 - **1.3.0:** the Setup.exe installer, Arrange and Close all, the layout editor, the tabbed camera list with hover tips, 360° Single view, and undici patched for security.
 - **1.3.1:** portable copies' in-app update fixed (the helper's working folder blocked the swap); Arrange / "Use what's on screen" missing just-shown windows.
 - **1.4.0:** grid windows, Hide from list, camera previews, Adjust picture (brightness / contrast), small app.asar-only updates, async safeStorage.
+- **1.4.1:** a click in the camera list brings it back above a camera opened from it. The first release 1.4.0 copies take as a small update.
 
-The owner ran 1.0 to 1.2 on the real consoles and has 1.3.1 installed from Setup.exe. Later versions are tested against the real consoles only through self-test runs from source on a copy of the config.
+The owner ran 1.0 to 1.2 on the real consoles, and their installed copy updated itself from 1.3.1 to 1.4.0 in the app (the installer path). Later versions are tested against the real consoles only through self-test runs from source on a copy of the config.
 
 ## Commands
 
@@ -229,6 +230,8 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
   - Everything the app is lives in app.asar (no native modules, nothing unpacked). **A release that changes anything else in the folder** (Electron, packager or builder options, the icon) **must leave the .gz out** (delete it before signing), so every copy takes the full update.
   - An installed copy's Settings → Apps version stays at what Setup.exe last wrote until the next full update.
 - **Windows never steal focus.** Use `showInactive()`, never `show()`/`focus()` for camera windows: exacqVision is in use on the same screen.
+  - The catch, reported by the owner in 1.4.0: a camera or grid window opened from the camera list appears above it, while the list stays the active window underneath. On Windows, clicking a window that's already active doesn't raise it, so the list stayed covered until you clicked elsewhere and back. The list now sends `mgr:raise` (→ `managerWin.moveTop()`) on every pointerdown.
+  - The list suite checks the real z-order with Win32 `GetWindow(GW_HWNDPREV)` through PowerShell (`sampleZOrder()`); Electron exposes no z-order. Without the fix the check fails.
 - **Moving vs aiming.** The window drag region is only the hover bar (`-webkit-app-region: drag`). The picture itself takes right-click (context menu) and, in 360° views, drag/scroll for PTZ. Lock layout disables both window moves and PTZ.
 - `src/mock.js` and `src/selftest.js` ship inside the build but do nothing unless `--mock` or `PANES_SELFTEST_DIR` is set.
 - ffmpeg for mock/tests comes from `FFMPEG_PATH`, then the `ffmpeg-static` dev dependency, then PATH.
