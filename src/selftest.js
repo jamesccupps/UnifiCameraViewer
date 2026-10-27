@@ -128,6 +128,9 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
           case "resize":
             cw.win.setSize(act.size[0], act.size[1]);
             break;
+          case "camera-js":
+            value = await wc.executeJavaScript(act.js);
+            break;
           case "menu-click": {
             const item = findItem(hooks.cameraContextMenuTemplate(cw), act.label);
             if (!item?.click) throw new Error(`no menu item "${act.label}"`);

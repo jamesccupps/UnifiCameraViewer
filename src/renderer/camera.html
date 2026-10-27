@@ -43,6 +43,15 @@
     <button type="button">Done</button>
   </div>
 
+  <div id="picture" class="picture hidden">
+    <label><span>Brightness</span><input id="pic-brightness" type="range" min="50" max="200" step="5"><output id="pic-brightness-val"></output></label>
+    <label><span>Contrast</span><input id="pic-contrast" type="range" min="50" max="200" step="5"><output id="pic-contrast-val"></output></label>
+    <div class="picture-actions">
+      <button type="button" id="pic-reset" class="ghost">Reset</button>
+      <button type="button" id="pic-done">Done</button>
+    </div>
+  </div>
+
   <div id="notice" class="notice hidden" role="status"></div>
   <div id="highlight" class="highlight"></div>
   <script src="dewarp.js"></script>

@@ -18,6 +18,9 @@ const barConsole = document.getElementById("bar-console");
 const btnTop = document.getElementById("btn-top");
 const highlightEl = document.getElementById("highlight");
 const noticeEl = document.getElementById("notice");
+const dewarpCanvas = document.getElementById("dewarp");
+const pictureEl = document.getElementById("picture");
+const picInputs = { brightness: document.getElementById("pic-brightness"), contrast: document.getElementById("pic-contrast") };
 
 const MAX_QUEUE = 150;        // ~15 s of fragments waiting to append => we're not keeping up
 const MAX_LAG_S = 1.5;        // jump to live if further behind than this
@@ -38,6 +41,8 @@ let codecError = "";          // sticky: a live stream we can't decode stays an 
 let meta = { title: "", consoleName: "" };
 let clockWanted = false;
 let clockFits = true;
+let picture = { brightness: 1, contrast: 1 };
+let pictureSave = null;
 
 // Exposed for the self-test harness only.
 const stats = { appended: 0, rebuilds: 0, jumps: 0, resetRequests: 0, errors: [] };
@@ -60,12 +65,13 @@ window.__panesStats = () => {
     status: streamState,
     label: { shown: !document.body.classList.contains("no-names"), compact: labelEl.classList.contains("compact") },
     clock: { wanted: clockWanted, shown: !clockEl.classList.contains("hidden"), text: clockEl.textContent },
+    picture: { filter: video.style.filter, canvasFilter: dewarpCanvas.style.filter, panel: !pictureEl.classList.contains("hidden") },
     dewarp: dewarper.stats(),
   };
 };
 
 // 360° cameras: the Dewarper paints quad/panorama views from the same decoded video.
-const dewarper = new Dewarper(video, document.getElementById("dewarp"), {
+const dewarper = new Dewarper(video, dewarpCanvas, {
   onChange: (patch) => panes.send("cam:dewarp", patch),
   onError: (msg) => notice(msg, 10_000),
 });
@@ -305,6 +311,11 @@ panes.on("cam:meta", (m) => {
   fitLabel();
   clockWanted = !!m.clock;
   fitClock();
+  // While the panel is open the sliders are the truth; a meta refresh mid-drag mustn't snap them back.
+  if (pictureEl.classList.contains("hidden")) {
+    picture = { brightness: m.picture?.brightness ?? 1, contrast: m.picture?.contrast ?? 1 };
+    applyPicture();
+  }
   dewarper.setConfig(m.dewarp);
   dewarper.setInteractive(!m.locked);
   reportAspect();
@@ -315,8 +326,50 @@ panes.on("cam:command", ({ cmd }) => {
     dewarper.startCalibration(document.getElementById("calib"), document.getElementById("calib-hint"));
   } else if (cmd === "autodetect") {
     notice(dewarper.autoDetect() ? "Image circle detected." : "Couldn't find the image circle - use Adjust image circle instead.", 4_000);
+  } else if (cmd === "picture") {
+    pictureEl.classList.remove("hidden");
   }
 });
+
+// ---------------------------------------------------------------------------------------------
+// Adjust picture…: brightness / contrast as a CSS filter on the video and the 360° canvas. It's GPU-
+// cheap and cosmetic: it can't bring back shadow detail the camera's encoder already threw away.
+
+function applyPicture() {
+  const { brightness: b, contrast: c } = picture;
+  const filter = b === 1 && c === 1 ? "" : `brightness(${b}) contrast(${c})`;
+  video.style.filter = filter;
+  dewarpCanvas.style.filter = filter;
+  for (const [k, input] of Object.entries(picInputs)) {
+    input.value = String(Math.round(picture[k] * 100));
+    document.getElementById(`pic-${k}-val`).textContent = `${input.value}%`;
+  }
+}
+
+function savePicture(now = false) {
+  clearTimeout(pictureSave);
+  if (now) panes.send("cam:picture", picture);
+  else pictureSave = setTimeout(() => panes.send("cam:picture", picture), 250);
+}
+
+for (const [k, input] of Object.entries(picInputs)) {
+  input.addEventListener("input", () => {
+    picture = { ...picture, [k]: Number(input.value) / 100 };
+    applyPicture();
+    savePicture();
+  });
+}
+document.getElementById("pic-reset").addEventListener("click", () => {
+  picture = { brightness: 1, contrast: 1 };
+  applyPicture();
+  savePicture(true);
+});
+const closePicture = () => {
+  savePicture(true);
+  pictureEl.classList.add("hidden");
+};
+document.getElementById("pic-done").addEventListener("click", closePicture);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !pictureEl.classList.contains("hidden")) closePicture(); });
 
 panes.on("cam:highlight", () => {
   highlightEl.classList.remove("on");

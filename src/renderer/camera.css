@@ -70,6 +70,38 @@ video {
   cursor: pointer;
 }
 
+/* Adjust picture… panel (brightness / contrast) */
+.picture {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  width: min(340px, calc(100% - 16px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  background: rgba(12, 14, 16, 0.88);
+  -webkit-app-region: no-drag;
+}
+.picture label { display: grid; grid-template-columns: 70px 1fr 40px; align-items: center; gap: 8px; }
+.picture input { width: 100%; accent-color: var(--live); }
+.picture output { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.picture-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.picture-actions button {
+  border: 0;
+  border-radius: 4px;
+  padding: 4px 12px;
+  background: var(--live);
+  color: #04140b;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.picture-actions button.ghost { background: transparent; color: var(--text); font-weight: 400; }
+.picture-actions button.ghost:hover { background: rgba(255, 255, 255, 0.12); }
+
 .notice {
   position: absolute;
   top: 38px;

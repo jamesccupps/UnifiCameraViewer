@@ -147,7 +147,7 @@ async function mockSuite() {
     windows: {
       [keys.lobby]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 1 },
       [keys.dock]: { open: true, bounds: { x: 0, y: 290, width: 480, height: 270 }, channel: 2 },
-      [keys.quad]: { open: true, bounds: { x: 500, y: 0, width: 960, height: 540 }, channel: 1 },
+      [keys.quad]: { open: true, bounds: { x: 500, y: 0, width: 960, height: 540 }, channel: 1, picture: { brightness: 1.3, contrast: 1.1 } },
       [keys.pano]: {
         open: true, bounds: { x: 500, y: 560, width: 960, height: 540 }, channel: 1,
         dewarp: { mode: "panorama", mount: "ceiling", lensFov: 180, circle: null, views: [0, 90, -90, 180].map((pan) => ({ pan, tilt: -35, fov: 62 })), focus: -1, pano: { pan: 0, tilt: -35 } },
@@ -168,6 +168,7 @@ async function mockSuite() {
     { at: 9500, do: "menu-click", win: 1, label: "Show time" },
     { at: 10500, do: "menu-click", win: 0, label: "Quality: Medium" },
     { at: 11000, do: "menu-click", win: 0, label: "Show time: on" },
+    { at: 11500, do: "menu-click", win: 2, label: "Picture: 130% brightness, 110% contrast" },
   ];
   const { result, config } = await runApp({
     // 20 s: the Apply-to-all quality change at 10.5 s restarts two streams, and a runner without a
@@ -233,6 +234,12 @@ async function mockSuite() {
   check("Apply to all: open windows switched to the Medium stream", Object.values(keys).every((k) => cams[k]?.videoWidth === 1280 && cams[k]?.status === "live"),
     JSON.stringify(Object.values(keys).map((k) => `${cams[k]?.videoWidth}/${cams[k]?.status}`)));
   check("Apply to all: Show time on for every window", Object.values(keys).every((k) => cams[k]?.clock?.wanted === true && config.windows[k]?.clock === true));
+  const pic = "brightness(1.3) contrast(1.1)";
+  check("Apply to all: the 360 window's picture setting reached every camera, including one never opened",
+    result.actions.find((a) => a.act.label?.startsWith("Picture:"))?.ok
+      && Object.values(keys).every((k) => cams[k]?.picture?.filter === pic) && JSON.stringify(config.windows[stair]?.picture) === JSON.stringify({ brightness: 1.3, contrast: 1.1 }),
+    JSON.stringify(Object.values(keys).map((k) => cams[k]?.picture?.filter)));
+  check("the picture filter is on the 360° canvas too", cams[keys.quad]?.picture?.canvasFilter === pic && cams[keys.pano]?.picture?.canvasFilter === pic, JSON.stringify(cams[keys.quad]?.picture));
   console.log(`  results: ${results}`);
 }
 
@@ -1040,14 +1047,33 @@ async function rangeSuite() {
   const results = path.join(userData, "results");
   fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
     version: 1,
-    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Shadows", "Shadows Limited"] }],
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Shadows", "Shadows Limited", "Shadows Bright", "Shadows Panel"] }],
     windows: {
       [`${A}/aaaaaaaa-cam0`]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 },
       [`${A}/aaaaaaaa-cam1`]: { open: true, bounds: { x: 500, y: 0, width: 480, height: 270 }, channel: 2, range: "limited" },
+      [`${A}/aaaaaaaa-cam2`]: { open: true, bounds: { x: 0, y: 300, width: 480, height: 270 }, channel: 2, picture: { brightness: 2, contrast: 1 } },
+      [`${A}/aaaaaaaa-cam3`]: { open: true, bounds: { x: 500, y: 300, width: 480, height: 270 }, channel: 2 },
     },
     settings: { startHidden: true, showNames: false },
   }, null, 2));
-  const { result } = await runApp({ userData, results, seconds: 6, extraArgs: ["--mock"] });
+  // Shadows Panel: right-click -> Adjust picture…, drag Contrast to 50 %, Done.
+  const setContrast = `(() => {
+    const panel = document.getElementById("picture");
+    const s = document.getElementById("pic-contrast");
+    s.value = "50";
+    s.dispatchEvent(new Event("input"));
+    return { open: !panel.classList.contains("hidden"), shown: document.getElementById("pic-contrast-val").textContent };
+  })()`;
+  const { result, config } = await runApp({
+    userData, results, seconds: 8, extraArgs: ["--mock"],
+    env: {
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 3000, do: "menu-click", win: 3, label: "Adjust picture…" },
+        { at: 3600, do: "camera-js", win: 3, js: setContrast },
+        { at: 4200, do: "camera-js", win: 3, js: `document.getElementById("pic-done").click()` },
+      ]),
+    },
+  });
   const shot = (suffix) => path.join(results, Object.keys(result.windows).find((n) => n.endsWith(suffix)) ?? "missing.png");
   const auto = { left: regionLuma(shot("Building_Shadows.png"), [0.1, 0.15, 0.3, 0.6]), right: regionLuma(shot("Building_Shadows.png"), [0.6, 0.15, 0.3, 0.6]) };
   const limited = { right: regionLuma(shot("Shadows_Limited.png"), [0.6, 0.15, 0.3, 0.6]) };
@@ -1055,6 +1081,18 @@ async function rangeSuite() {
   check("both shadow cameras live", live);
   check("Auto shows full-range shadows (Y=24 displays ~24, not crushed)", auto.right > 19 && auto.right < 29 && auto.left < 4, JSON.stringify(auto));
   check("Limited override shows the crushed TV-range reading (~9)", limited.right > 4 && limited.right < 14, JSON.stringify(limited));
+
+  // CSS brightness(b) multiplies each channel; contrast(c) maps v to (v - 0.5) * c + 0.5 (0-1 scale).
+  const bright = regionLuma(shot("Shadows_Bright.png"), [0.6, 0.15, 0.3, 0.6]);
+  check("saved brightness 200 % doubles the picture (Y=24 shows ~48)", bright > 42 && bright < 54, bright.toFixed(1));
+  const [panelOpen, panelSet] = result.actions.map((a) => a.value ?? a.error ?? a.ok);
+  const panel = { left: regionLuma(shot("Shadows_Panel.png"), [0.1, 0.15, 0.3, 0.6]), right: regionLuma(shot("Shadows_Panel.png"), [0.6, 0.15, 0.3, 0.6]) };
+  const panelEnd = last(result)[`${A}/aaaaaaaa-cam3`]?.picture;
+  check("Adjust picture… opens the panel and the Contrast slider reads 50 %", panelOpen === true && panelSet?.open && panelSet.shown === "50%", JSON.stringify({ panelOpen, panelSet }));
+  check("contrast 50 % lifts black to ~64 and Y=24 to ~76 on screen", panel.left > 58 && panel.left < 70 && panel.right > 70 && panel.right < 82, JSON.stringify(panel));
+  check("Done closes the panel and saves the picture setting",
+    panelEnd && !panelEnd.panel && panelEnd.filter === "brightness(1) contrast(0.5)" && JSON.stringify(config.windows[`${A}/aaaaaaaa-cam3`]?.picture) === JSON.stringify({ brightness: 1, contrast: 0.5 }),
+    JSON.stringify({ panelEnd, saved: config.windows[`${A}/aaaaaaaa-cam3`]?.picture }));
   console.log(`  results: ${dir}  ${results}`);
 }
 

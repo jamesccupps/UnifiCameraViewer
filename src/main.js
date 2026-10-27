@@ -389,7 +389,7 @@ function arrangeWindows(templateId = "auto", display = arrangeDisplay(false)) {
 // Named layouts: a saved set of on-screen windows with their places and per-window settings.
 // Applying one closes the windows it doesn't include and opens or moves the ones it does.
 
-const LAYOUT_FIELDS = ["bounds", "channel", "onTop", "hideName", "clock", "range", "dewarp"];
+const LAYOUT_FIELDS = ["bounds", "channel", "onTop", "hideName", "clock", "range", "picture", "dewarp"];
 
 function layoutEntry(key) {
   const entry = store.data.windows[key] ?? {};
@@ -597,6 +597,7 @@ function cameraMeta(cw) {
     channels: cam ? channelList(cam).map(({ id, label }) => ({ id, label })) : [],
     fisheye: cam ? fisheyeInfo(cam).fisheye : !!entry.dewarp,
     dewarp: entry.dewarp ?? null,
+    picture: entry.picture ?? null,
   };
 }
 
@@ -683,6 +684,29 @@ function saveDewarpFromRenderer(cw, patch) {
   }
   store.save();
 }
+
+/**
+ * Brightness / contrast (Adjust picture…): a CSS filter in the camera window, so it's cheap and
+ * cosmetic. 1 is unchanged. Returns null for "unchanged", undefined for anything invalid.
+ */
+function cleanPicture(p) {
+  const b = num(p?.brightness, 0.5, 2);
+  const c = num(p?.contrast, 0.5, 2);
+  if (b === null || c === null) return undefined;
+  const r = (v) => Math.round(v * 100) / 100;
+  return r(b) === 1 && r(c) === 1 ? null : { brightness: r(b), contrast: r(c) };
+}
+
+function savePictureFromRenderer(cw, patch) {
+  const entry = store.data.windows[cw.key];
+  const pic = cleanPicture(patch);
+  if (!entry || pic === undefined) return;
+  if (pic) entry.picture = pic;
+  else delete entry.picture;
+  store.save();
+}
+
+const pictureLabel = (p) => (p ? `${Math.round(p.brightness * 100)}% brightness, ${Math.round(p.contrast * 100)}% contrast` : "normal");
 
 function sendCommand(cw, cmd) {
   if (!cw.win.isDestroyed()) cw.win.webContents.send("cam:command", { cmd });
@@ -772,6 +796,10 @@ function cleanChanges(c) {
   if (Number.isInteger(c?.channel) && c.channel >= 0 && c.channel < 10) out.channel = c.channel;
   for (const k of ["onTop", "hideName", "clock"]) if (typeof c?.[k] === "boolean") out[k] = c[k];
   if (RANGES.includes(c?.range)) out.range = c.range;
+  if (c && "picture" in c) {
+    const pic = c.picture === null ? null : cleanPicture(c.picture);
+    if (pic !== undefined) out.picture = pic;
+  }
   return out;
 }
 
@@ -796,6 +824,10 @@ function applyToAll(changes, consoleId = null) {
       else delete entry.hideName;
     }
     if ("clock" in changes) entry.clock = changes.clock;
+    if ("picture" in changes) {
+      if (changes.picture) entry.picture = { ...changes.picture };
+      else delete entry.picture;
+    }
     if (!cw || cw.win.isDestroyed()) continue;
     if (restart) {
       cw.stream.restart(); // a hidden window's paused stream stays paused and picks this up on Show
@@ -837,6 +869,7 @@ function applyAllMenu(cw) {
     hideName: !!entry.hideName,
     clock: showClock(entry),
     range: entry.range ?? "auto",
+    picture: entry.picture ?? null,
   };
   const item = (label, changes, extra = {}) => ({ label, click: () => applyToAllFromWindow(cw, changes), ...extra });
   return [
@@ -845,6 +878,7 @@ function applyAllMenu(cw) {
     item(`Show name: ${onOff(!values.hideName)}`, { hideName: values.hideName }),
     item(`Show time: ${onOff(values.clock)}`, { clock: values.clock }),
     item(`Color range: ${RANGE_LABELS[values.range].replace(" (recommended)", "")}`, { range: values.range }),
+    item(`Picture: ${pictureLabel(values.picture)}`, { picture: values.picture }),
     { type: "separator" },
     item("All of the above", values),
   ];
@@ -962,6 +996,7 @@ function cameraContextMenuTemplate(cw) {
       label: "Color range",
       submenu: RANGES.map((id) => ({ label: RANGE_LABELS[id], type: "radio", checked: (entry.range ?? "auto") === id, click: () => setRange(cw, id) })),
     },
+    { label: "Adjust picture…", click: () => sendCommand(cw, "picture") },
     { label: "Apply to all cameras", submenu: applyAllMenu(cw) },
     { type: "separator" },
     { label: "Always on top", type: "checkbox", checked: !!entry.onTop, click: () => toggleOnTop(cw) },
@@ -1224,6 +1259,7 @@ function registerIpc() {
   });
   ipcMain.on("cam:context-menu", (e) => { const cw = fromCamera(e); if (cw) cameraContextMenu(cw); });
   ipcMain.on("cam:dewarp", (e, patch) => { const cw = fromCamera(e); if (cw) saveDewarpFromRenderer(cw, patch); });
+  ipcMain.on("cam:picture", (e, patch) => { const cw = fromCamera(e); if (cw) savePictureFromRenderer(cw, patch); });
   ipcMain.on("cam:toggle-top", (e) => { const cw = fromCamera(e); if (cw) toggleOnTop(cw); });
   ipcMain.on("cam:close", (e) => { const cw = fromCamera(e); if (cw) cw.win.close(); });
 
