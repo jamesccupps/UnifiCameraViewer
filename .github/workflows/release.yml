@@ -1,0 +1,96 @@
+# Push a tag vX.Y.Z (matching package.json) to build, sign, check and publish a release.
+# The release key comes from the UPDATE_SIGNING_KEY secret, lives in a temp file for this job only,
+# and latest.json is checked against the public key built into the app before anything is published.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.20.0
+          cache: npm
+
+      - name: Tag must match package.json
+        shell: pwsh
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ("v$v" -ne $env:GITHUB_REF_NAME) { throw "tag $env:GITHUB_REF_NAME, but package.json says $v" }
+
+      - run: npm ci
+
+      - name: Make sure the Electron runtime is downloaded
+        run: node node_modules/electron/install.js
+
+      - name: npm test
+        run: npm test
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+
+      - name: Write the signing key for this job
+        shell: pwsh
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if (-not $env:UPDATE_SIGNING_KEY) { throw "The UPDATE_SIGNING_KEY secret isn't set; an unsigned release would never reach installed copies." }
+          $f = Join-Path $env:RUNNER_TEMP 'update-signing-key.pem'
+          [IO.File]::WriteAllText($f, $env:UPDATE_SIGNING_KEY.Trim() + "`n")
+          "PANES_SIGNING_KEY=$f" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build the zip, the installer and the signed latest.json
+        run: npm run build:win
+
+      - name: Remove the signing key
+        if: always()
+        shell: pwsh
+        run: Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $env:RUNNER_TEMP 'update-signing-key.pem')
+
+      - name: Verify latest.json against the key built into the app
+        run: node scripts/verify-release.mjs dist ${{ github.ref_name }}
+
+      - name: Install this installer, check its version, uninstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $p = Start-Process dist\ProtectPanes-Setup.exe -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exited with $($p.ExitCode)" }
+          $entry = Get-ChildItem HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall | Get-ItemProperty |
+            Where-Object { $_.DisplayName -like 'Protect Panes*' } | Select-Object -First 1
+          $dir = Split-Path ($entry.UninstallString -replace '^"([^"]+)".*$', '$1')
+          $exe = Join-Path $dir 'ProtectPanes.exe'
+          $v = (Get-Item $exe).VersionInfo.ProductVersion
+          if ("v$v" -ne $env:GITHUB_REF_NAME) { throw "installed $v, expected $env:GITHUB_REF_NAME" }
+          $uninstaller = Get-ChildItem $dir -Filter 'Uninstall *.exe' | Select-Object -First 1
+          Start-Process $uninstaller.FullName -ArgumentList '/S' -Wait
+          for ($i = 0; $i -lt 60 -and (Test-Path $exe); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $exe) { throw "uninstall left $exe behind" }
+          "installer ok: $v"
+
+      - name: Publish the GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $notes = "release-notes/$tag.md"
+          $opts = @('--title', "Protect Panes $($tag.TrimStart('v'))", '--verify-tag')
+          if (Test-Path $notes) { $opts += @('--notes-file', $notes) } else { $opts += '--generate-notes' }
+          gh release create $tag dist/ProtectPanes-Setup.exe dist/ProtectPanes-win32-x64.zip dist/latest.json @opts

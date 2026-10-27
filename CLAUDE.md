@@ -7,16 +7,11 @@ Hard requirements, all deliberate:
 - **Direct login by IP** with a local account. No ui.com/cloud, no MFA.
 - **Low resource use.** Medium channel by default, GPU decode via MSE, minimized windows stop streaming, WebGL only for 360° windows.
 
-Current version: **1.2.0**. On top of 1.1's 360° dewarping, it adds the ROADMAP.md items:
-- color-range fix for crushed shadows
-- name label collapse and per-window hide
-- clock on 360° views
-- Apply to all
-- Hide / Show cameras
-- named layouts with Protect liveview import
-- signed in-place updates
+Current version: **1.3.0**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
+- **1.2.0:** color-range fix for crushed shadows, name label collapse and per-window hide, clock on 360° views, Apply to all, Hide / Show cameras, named layouts with Protect liveview import, signed in-place updates.
+- **1.3.0:** the Setup.exe installer, Arrange and Close all, the layout editor, the tabbed camera list with hover tips, 360° Single view, and undici patched for security.
 
-The owner ran 1.0 and 1.1 on the real consoles. 1.2.0 is tested against them only through self-test runs from source on a copy of the config; the owner hasn't run the 1.2.0 build yet.
+The owner ran 1.0 and 1.1 on the real consoles. 1.2.0 and 1.3.0 are tested against them only through self-test runs from source on a copy of the config.
 
 ## Commands
 
@@ -66,6 +61,9 @@ scripts/build-win.js        @electron/packager folder + zip, then electron-build
 .github/workflows/test.yml  CI: npm test on windows-latest, plus a real Setup.exe install / start / uninstall on the runner
 scripts/sign-release.js     Writes latest.json {payload, signature} for a zip (Ed25519, private key outside the repo)
 scripts/make-signing-key.js One-time: create the signing key pair (refuses to overwrite)
+scripts/verify-release.mjs  Check a release folder like installed copies will (signature, sizes, hashes); the release workflow gates on it
+.github/workflows/release.yml  Tag vX.Y.Z -> test, sign with the UPDATE_SIGNING_KEY secret, verify, smoke-test the installer, publish
+release-notes/vX.Y.Z.md     Release text the workflow publishes
 ```
 
 ## How video flows
@@ -232,13 +230,31 @@ Action results carry `t` (epoch ms), so a check can compare against the samples 
 
 ## Releasing
 
-1. Bump `version` in package.json.
-2. `npm test`
-3. `npm run build:win`. This also signs `dist/latest.json` with `%USERPROFILE%\.protect-panes\update-signing-key.pem`.
-   - Never commit that private key. Back it up: without it, installed copies can't update in place.
-   - `scripts/make-signing-key.js` refuses to replace an existing key.
-4. Tag `vX.Y.Z`, push it, and create a GitHub release for the tag with `dist/ProtectPanes-Setup.exe`, `dist/ProtectPanes-win32-x64.zip` **and** `dist/latest.json` attached. Installed copies find it through `releases/latest/download/latest.json`. Installed copies pick the update up from Settings → Updates.
-   - For a first install, or a copy older than 1.2.0, hand over the zip instead. The owner quits the app and replaces the folder; settings in `%APPDATA%` carry over.
+Releases are built and published by `.github/workflows/release.yml` when a `vX.Y.Z` tag is pushed:
+1. Bump `version` in package.json (and the lockfile: `npm install --package-lock-only --ignore-scripts`).
+2. Write `release-notes/vX.Y.Z.md`, the release text. Without it the workflow falls back to GitHub's generated notes.
+3. `npm test`, commit, push `main`.
+4. `git tag -a vX.Y.Z -m "Protect Panes X.Y.Z"` and `git push origin vX.Y.Z`.
+
+The workflow:
+1. Checks the tag matches package.json.
+2. Runs `npm test`.
+3. Writes the `UPDATE_SIGNING_KEY` secret to a temp file for this job only.
+4. Builds the zip, Setup.exe and the signed `latest.json`.
+5. Deletes the key.
+6. Runs `scripts/verify-release.mjs`: the signature against the public key built into the app, then each file's size and SHA-256. A wrong secret stops here.
+7. Smoke-tests that exact installer (install, version, uninstall).
+8. Runs `gh release create` with all three files.
+
+Installed copies find the release through `releases/latest/download/latest.json`.
+
+The signing key:
+- The private key is `%USERPROFILE%\.protect-panes\update-signing-key.pem` on the maintainer's PC, and the same content is in the repo secret `UPDATE_SIGNING_KEY`.
+- Never commit it. Back it up: without it, installed copies can't update in place.
+- `scripts/make-signing-key.js` refuses to replace an existing key.
+- A local `npm run build:win` signs with the file, so a release can still be built by hand if CI is down. Attach the same three files.
+
+For a first install, or a copy older than 1.2.0, use the Setup.exe or replace the folder with the zip. Settings in `%APPDATA%` carry over.
 
 The exe is unsigned, so SmartScreen shows "Run anyway" on first launch.
 
