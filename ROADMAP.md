@@ -32,7 +32,9 @@ Possible app-side fix if (1) points at us: a per-window brightness/contrast adju
 
 ## 3. Time on 360° dewarp views
 
-**Status:** confirmed app limitation. Normal cameras show the camera's own timestamp bottom-right. The 360° quad shows none, because the timestamp is in a corner of the fisheye frame, outside the circle the dewarp samples.
+**Status:** built (2026-10-27), unreleased, as option (a) below. Right-click → **Show time** (`windows[key].clock`) overrides the default for any window. Format: `YYYY-MM-DD HH:MM:SS`. It shows only over live video and hides on windows too narrow for it. `npm run test:mock` covers it.
+
+Background: confirmed app limitation. Normal cameras show the camera's own timestamp bottom-right. The 360° quad shows none, because the timestamp is in a corner of the fisheye frame, outside the circle the dewarp samples.
 
 Options:
 - **(a) App-drawn clock** in a corner of the dewarp canvas, from the PC clock, offset by the measured live lag (~0.2-0.7 s). Simple and always legible. Tradeoff: it's PC time, not NVR time. If the PC isn't on NTP it won't match recordings.

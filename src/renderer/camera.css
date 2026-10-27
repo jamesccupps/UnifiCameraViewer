@@ -155,6 +155,18 @@ body.no-names .label { display: none; }
 /* Small window: just the status dot (see fitLabel in camera.js). */
 .label.compact { padding: 5px; border-radius: 999px; }
 .label.compact #label-text { display: none; }
+/* Time overlay: 360° views cut off the camera's own timestamp (see updateClock in camera.js). */
+.clock {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
 .dot.live { background: var(--live); }
 .dot.warn { background: var(--warn); }

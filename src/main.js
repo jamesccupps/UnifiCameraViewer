@@ -304,6 +304,7 @@ function cameraMeta(cw) {
     consoleName: multi ? consoleName(cw.consoleId) : "",
     // The global setting is the master switch; hideName turns the label off for one window.
     showNames: !!store.settings.showNames && !entry.hideName,
+    clock: showClock(entry),
     locked: !!store.settings.lockLayout,
     onTop: !!entry.onTop,
     channel: cw.stream?.channel ?? entry.channel ?? null,
@@ -467,6 +468,17 @@ function toggleOnTop(cw) {
   notifyManager();
 }
 
+// Dewarped views cut the camera's own timestamp out of the picture, so they get the app's clock
+// unless the window says otherwise (`clock` true/false overrides).
+const showClock = (entry) => entry.clock ?? ["quad", "panorama"].includes(entry.dewarp?.mode);
+
+function toggleClock(cw) {
+  const entry = store.data.windows[cw.key];
+  entry.clock = !showClock(entry);
+  store.save();
+  refreshCameraMeta(cw);
+}
+
 function toggleName(cw) {
   const entry = store.data.windows[cw.key];
   entry.hideName = !entry.hideName;
@@ -549,6 +561,7 @@ function cameraContextMenuTemplate(cw) {
     { type: "separator" },
     { label: "Always on top", type: "checkbox", checked: !!entry.onTop, click: () => toggleOnTop(cw) },
     { label: "Show name", type: "checkbox", checked: meta.showNames, enabled: !!store.settings.showNames, click: () => toggleName(cw) },
+    { label: "Show time", type: "checkbox", checked: meta.clock, click: () => toggleClock(cw) },
     { label: "Lock layout", type: "checkbox", checked: !!store.settings.lockLayout, click: () => setSetting("lockLayout", !store.settings.lockLayout) },
     { label: "Reconnect stream", click: () => cw.stream.restart() },
     { type: "separator" },

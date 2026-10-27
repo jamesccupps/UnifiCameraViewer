@@ -76,7 +76,7 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
 
 - `config.json`:
   - `consoles[]`: `{id, name, host, username, password: {enc: "safe" | "plain", data}}`
-  - `windows["<consoleId>/<cameraId>"]`: `{open, bounds, channel, onTop, name, hideName, hidden, dewarp}`. `hideName` hides one window's label; `settings.showNames` off hides all of them. `hidden` (with `open: true`) means taken off screen by Hide cameras / Hide all.
+  - `windows["<consoleId>/<cameraId>"]`: `{open, bounds, channel, onTop, name, hideName, hidden, clock, dewarp}`. `clock` true/false overrides the default (on in quad/panorama, off otherwise). `hideName` hides one window's label; `settings.showNames` off hides all of them. `hidden` (with `open: true`) means taken off screen by Hide cameras / Hide all.
   - `settings`: `{lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin}`
 - `protect-panes.log`: connection log. Rolls to `.log.1` at 2 MB.
 
@@ -98,6 +98,10 @@ Passwords are DPAPI-encrypted (`safeStorage`) and tied to the Windows user. `enc
 - **Circle auto-detect.** It scans 120 rays for the point where the picture goes dark for good, then fits with RANSAC + a Kasa least-squares fit. The test fixture deliberately includes an OSD timestamp and black boxes inside the circle. Keep both passing if you touch it.
 - **Name label auto-collapse.** `fitLabel()` in camera.js measures the full label on every resize and title change. When the label is wider than `LABEL_MAX_SHARE` (50%) of the window, only the status dot is shown. Measuring is deliberate, because a fixed breakpoint fits short names or long ones, never both.
 - **Aspect lock.** The renderer reports the aspect it wants: the video size normally, 16:9 in dewarp modes. Main calls `setAspectRatio` and snaps the window height. Calibration deliberately doesn't change aspect.
+- **App clock on 360° views.** The camera's own timestamp sits in a corner of the fisheye frame, which no dewarped view samples. `updateClock()` draws PC time minus the buffer lag, bottom right.
+  - It shows only while the stream is live: a ticking clock over a frozen picture would claim it's live.
+  - It hides when it would take more than 45% of the window width (below the label's 50%, so the two never overlap).
+  - It's PC time, not NVR time.
 - **Hidden vs closed vs minimized.**
   - Hide cameras (tray, list header) and Hide all (per console) apply to the windows on screen; minimized ones are skipped. Each window gets `win.hide()` plus `CameraStream.pause()`, so its renderer stays alive and Show only waits for a keyframe.
   - At launch, hidden windows aren't created at all. Show cameras creates them.

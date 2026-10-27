@@ -114,6 +114,8 @@ async function mockSuite() {
     { at: 8000, do: "resize", win: 1, size: [200, 113] },
     { at: 8000, do: "resize", win: 4, size: [480, 270] },
     { at: 9000, do: "menu-click", win: 3, label: "Show name" },
+    { at: 9500, do: "menu-click", win: 0, label: "Show time" },
+    { at: 9500, do: "menu-click", win: 1, label: "Show time" },
   ];
   const { result, config } = await runApp({
     userData, results, seconds: 14, extraArgs: ["--mock"],
@@ -148,6 +150,22 @@ async function mockSuite() {
   check("context menu has a checked Show name item", !!menu?.menu?.includes("[x] Show name"), JSON.stringify(menu?.menu));
   check("Show name in the menu hides that window's label and saves it", hideClick?.ok && cams[keys.pano]?.label?.shown === false && config.windows[keys.pano]?.hideName === true, hideClick?.error ?? `${label(cams[keys.pano])} hideName=${config.windows[keys.pano]?.hideName}`);
   check("other windows keep their labels", [keys.lobby, keys.dock, keys.quad, keys.ramp].every((k) => cams[k]?.label?.shown === true));
+
+  const clockAt = result.actions.find((a) => a.act.label === "Show time")?.t ?? 0;
+  const beforeClock = result.samples.filter((s) => s.t < clockAt).at(-1)?.cams ?? {};
+  const endT = result.samples.at(-1)?.t ?? 0;
+  const clockOk = (c) => {
+    const m = /^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)$/.exec(c?.clock?.text ?? "");
+    if (!m) return false;
+    const t = new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+    return c.clock.shown && Math.abs(t - endT) < 5_000;
+  };
+  const clk = (c) => c && JSON.stringify(c.clock);
+  check("360 quad view shows the time on its own", clockOk(cams[keys.quad]), clk(cams[keys.quad]));
+  check("360 panorama shows the time on its own", clockOk(cams[keys.pano]), clk(cams[keys.pano]));
+  check("normal cameras don't get the app's clock by default", beforeClock[keys.lobby]?.clock?.wanted === false && beforeClock[keys.ramp]?.clock?.shown === false, clk(beforeClock[keys.lobby]));
+  check("Show time in the menu turns the clock on and saves it", clockOk(cams[keys.lobby]) && config.windows[keys.lobby]?.clock === true, `${clk(cams[keys.lobby])} clock=${config.windows[keys.lobby]?.clock}`);
+  check("clock stays off on a window too small for it", cams[keys.dock]?.clock?.wanted === true && cams[keys.dock]?.clock?.shown === false, clk(cams[keys.dock]));
   console.log(`  results: ${results}`);
 }
 

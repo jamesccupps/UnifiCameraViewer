@@ -40,6 +40,7 @@ A fisheye camera opens in **quad view**: four virtual pan/tilt/zoom views of the
 - **Drag** inside a view to aim it, and **scroll** to zoom. Each view remembers where it's pointed.
 - **Double-click** a view to enlarge it to the whole window. Double-click again to return to the quad.
 - **Right-click → 360° view** to switch to **Panorama** (ceiling: the full 360° as two 180° strips; wall: one 180° strip) or back to the raw fisheye. The same menu has Mount, Lens field of view, Reset views and **Adjust image circle…**, for when the auto-detected circle is off: drag and scroll to fit the green circle to the edge of the round picture, then click Done.
+- Quad and panorama views show the date and time in the corner, since the camera's own timestamp is cut out by the dewarp. It's this PC's clock, so keep the PC's time synced. **Right-click → Show time** turns it on or off for any window.
 - **Lock layout** also locks the views, so a wall display can't get nudged.
 
 Dewarping is done by the graphics chip on the one stream that's already being decoded, so a 360° camera costs no extra bandwidth. Ordinary Intel integrated graphics (e.g. a Dell OptiPlex) handle it easily. If a PC has no working graphics driver, the app falls back to drawing on the CPU at reduced resolution and shows a one-time notice.

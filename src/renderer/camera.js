@@ -11,6 +11,7 @@ const statusEl = document.getElementById("status");
 const statusText = document.getElementById("status-text");
 const labelEl = document.getElementById("label");
 const labelText = document.getElementById("label-text");
+const clockEl = document.getElementById("clock");
 const dot = document.getElementById("dot");
 const barTitle = document.getElementById("bar-title");
 const barConsole = document.getElementById("bar-console");
@@ -23,6 +24,7 @@ const MAX_LAG_S = 1.5;        // jump to live if further behind than this
 const CATCHUP_LAG_S = 0.5;    // play slightly fast above this
 const KEEP_BEHIND_S = 12;     // seconds of decoded history to keep before trimming
 const LABEL_MAX_SHARE = 0.5;  // a name label wider than this share of the window shrinks to just the dot
+const CLOCK_MAX_SHARE = 0.45; // below the label's share, so the two bottom corners never meet
 
 let mediaSource = null;
 let sourceBuffer = null;
@@ -34,6 +36,8 @@ let lastAspect = "";
 let streamState = "connecting";
 let codecError = "";          // sticky: a live stream we can't decode stays an error
 let meta = { title: "", consoleName: "" };
+let clockWanted = false;
+let clockFits = true;
 
 // Exposed for the self-test harness only.
 const stats = { appended: 0, rebuilds: 0, jumps: 0, resetRequests: 0, errors: [] };
@@ -55,6 +59,7 @@ window.__panesStats = () => {
     mime,
     status: streamState,
     label: { shown: !document.body.classList.contains("no-names"), compact: labelEl.classList.contains("compact") },
+    clock: { wanted: clockWanted, shown: !clockEl.classList.contains("hidden"), text: clockEl.textContent },
     dewarp: dewarper.stats(),
   };
 };
@@ -285,6 +290,7 @@ panes.on("cam:status", ({ state, text }) => {
   else if (state === "live") hideStatus();
   else showStatus(state, text);
   updateDot();
+  updateClock();
 });
 
 panes.on("cam:meta", (m) => {
@@ -297,6 +303,8 @@ panes.on("cam:meta", (m) => {
   document.body.classList.toggle("locked", !!m.locked);
   btnTop.classList.toggle("active", !!m.onTop);
   fitLabel();
+  clockWanted = !!m.clock;
+  fitClock();
   dewarper.setConfig(m.dewarp);
   dewarper.setInteractive(!m.locked);
   reportAspect();
@@ -345,7 +353,33 @@ function fitLabel() {
   labelEl.classList.remove("compact");
   labelEl.classList.toggle("compact", labelEl.scrollWidth > window.innerWidth * LABEL_MAX_SHARE);
 }
-window.addEventListener("resize", fitLabel);
+window.addEventListener("resize", () => { fitLabel(); fitClock(); });
+
+// The PC's clock, set back by how far playback runs behind the newest buffered video. It's PC time,
+// not NVR time, so it agrees with recordings only as well as the two clocks do (keep both on NTP).
+function clockText() {
+  const b = video.buffered;
+  const lag = b.length ? Math.max(0, b.end(b.length - 1) - video.currentTime) : 0;
+  const d = new Date(Date.now() - lag * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+// Only over live video: a ticking clock on a frozen or reconnecting picture would claim it's live.
+function updateClock() {
+  const show = clockWanted && clockFits && streamState === "live" && !codecError;
+  if (show) clockEl.textContent = clockText();
+  clockEl.classList.toggle("hidden", !show);
+}
+
+// The text is fixed-width (tabular digits), so its width only needs measuring on resize.
+function fitClock() {
+  clockEl.textContent = clockText();
+  clockEl.classList.remove("hidden");
+  clockFits = clockEl.scrollWidth <= window.innerWidth * CLOCK_MAX_SHARE;
+  updateClock();
+}
+setInterval(() => { if (clockWanted) updateClock(); }, 250);
 
 function updateDot() {
   dot.className = "dot";
