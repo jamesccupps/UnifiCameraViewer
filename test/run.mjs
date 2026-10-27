@@ -50,6 +50,13 @@ function electronCommand() {
 async function runApp({ userData, results, seconds, extraArgs = [], env = {} }) {
   const { cmd, args } = electronCommand();
   fs.mkdirSync(results, { recursive: true });
+  // The default update location is GitHub; tests stay off the network unless a suite sets one.
+  const cfgFile = path.join(userData, "config.json");
+  const cfg = JSON.parse(fs.readFileSync(cfgFile, "utf8"));
+  if (cfg.settings?.updateSource === undefined) {
+    cfg.settings = { ...cfg.settings, updateSource: "" };
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2));
+  }
   const out = fs.createWriteStream(path.join(results, "app-output.log"));
   const child = spawn(cmd, [...args, ...extraArgs], {
     cwd: ROOT,

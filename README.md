@@ -9,7 +9,7 @@ UniFi Protect live view, one camera per window. Place each window anywhere on th
 
 ## Install (Windows 10/11, 64-bit)
 
-1. Unzip `ProtectPanes-win32-x64.zip` somewhere permanent, e.g. `C:\Program Files\Protect Panes` or `C:\Tools\Protect Panes`.
+1. Download `ProtectPanes-win32-x64.zip` from the [latest release](https://github.com/jamesccupps/UnifiCameraViewer/releases/latest) and unzip it somewhere permanent that you can write to, e.g. `C:\Tools\Protect Panes`. In-place updates need that folder to be writable, so avoid `C:\Program Files`.
 2. Run `ProtectPanes.exe`. The app isn't code-signed, so the first launch shows *Windows protected your PC*: click **More info**, then **Run anyway**.
 3. Optionally pin it to the taskbar, or turn on **Start with Windows** in the app.
 
@@ -69,11 +69,13 @@ Dewarping is done by the graphics chip on the one stream that's already being de
 
 From 1.2.0 on, Protect Panes can update itself.
 
-1. In the camera list, under **Settings → Updates**, enter the **update location**. That's the web address (`https://…`) or folder (for example `\\server\share\Protect Panes`) where new releases are published as `ProtectPanes-win32-x64.zip` plus `latest.json`.
+1. The camera list's **Settings → Updates** shows the **update location**. By default it's this project's latest GitHub release. To update from your own copy instead, set it to a folder (for example `\\server\share\Protect Panes`) or web address holding `ProtectPanes-win32-x64.zip` plus `latest.json`. Clear it to turn update checks off.
 2. Click **Check for updates**. A newer version is downloaded and checked first: it has to carry the release signature this copy of the app trusts, and match its signed checksum. Anything else is refused.
 3. Click **Install … and restart**. The app closes, swaps in the new version and opens again, in about a minute. Settings and layouts carry over.
 
-The folder the app lives in has to be one you can write to, e.g. `C:\Tools\Protect Panes`, not `C:\Program Files`. When an update location is set, the app also checks once at startup and says so in the list and the tray menu. It never downloads without a click.
+The folder the app lives in has to be one you can write to, e.g. `C:\Tools\Protect Panes`, not `C:\Program Files`. When an update location is set, the app also checks once at startup (one small request for `latest.json`) and says so in the list and the tray menu. It never downloads without a click.
+
+Copies older than 1.2.0 can't update themselves. Replace their folder with the 1.2.0 zip once.
 
 ## Keeping up with new Protect versions
 
@@ -97,4 +99,8 @@ npm test               # regression tests: mock cameras + fake UniFi OS consoles
 npm run build:win      # portable Windows build + zip in dist\
 ```
 
-See `CLAUDE.md` for architecture, gotchas and the test harness.
+See `CLAUDE.md` for architecture, gotchas and the test harness, and `ROADMAP.md` for what's been asked for and how each item was investigated.
+
+## License
+
+MIT. See `LICENSE`.

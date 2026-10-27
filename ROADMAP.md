@@ -89,7 +89,7 @@ Recommend (a) first, plus importing Protect liveviews as named layouts. Do (b) o
 - `npm run test:update` covers it, including the real helper.
 - Signing key: `%USERPROFILE%\.protect-panes\update-signing-key.pem`, public half in `src/update-key.js`.
 - Not built: the asar-only delta. Every update is the full zip.
-- Open: the default update location, which waits on the GitHub repo.
+- Default update location: this repo's latest GitHub release (`releases/latest/download`).
 
 Original notes: releases were an unsigned portable zip (~159 MB), and the owner replaced the folder by hand.
 

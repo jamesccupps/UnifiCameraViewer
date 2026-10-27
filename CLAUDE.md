@@ -94,7 +94,7 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
 - `config.json`:
   - `consoles[]`: `{id, name, host, username, password: {enc: "safe" | "plain", data}}`
   - `windows["<consoleId>/<cameraId>"]`: `{open, bounds, channel, onTop, name, hideName, hidden, clock, range, dewarp}`. `range` is `"full" | "limited"` (absent = auto). `clock` true/false overrides the default (on in quad/panorama, off otherwise). `hideName` hides one window's label; `settings.showNames` off hides all of them. `hidden` (with `open: true`) means taken off screen by Hide cameras / Hide all.
-  - `settings`: `{lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin, updateSource}`. `updateSource` is an `https://` base URL or a folder (UNC or drive path) holding `latest.json` and the zip. Plain http is refused.
+  - `settings`: `{lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin, updateSource}`. `updateSource` is an `https://` base URL or a folder (UNC or drive path) holding `latest.json` and the zip. Plain http is refused. It defaults to `https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download`, and blank turns checks off. `runApp()` in the tests blanks it unless a suite sets one, so tests never touch the network.
   - `layouts[]`: `{id, name, windows: {"<consoleId>/<cameraId>": {bounds, channel, onTop, hideName, clock, range, dewarp}}}`. Saving under an existing name (case-insensitive) replaces it.
 - `protect-panes.log`: connection log. Rolls to `.log.1` at 2 MB.
 
@@ -211,7 +211,7 @@ Action results carry `t` (epoch ms), so a check can compare against the samples 
 3. `npm run build:win`. This also signs `dist/latest.json` with `%USERPROFILE%\.protect-panes\update-signing-key.pem`.
    - Never commit that private key. Back it up: without it, installed copies can't update in place.
    - `scripts/make-signing-key.js` refuses to replace an existing key.
-4. Publish `dist/ProtectPanes-win32-x64.zip` **and** `dist/latest.json` together in the update location. Installed copies pick the update up from Settings → Updates.
+4. Tag `vX.Y.Z`, push it, and create a GitHub release for the tag with **both** `dist/ProtectPanes-win32-x64.zip` and `dist/latest.json` attached. Installed copies find it through `releases/latest/download/latest.json`. Installed copies pick the update up from Settings → Updates.
    - For a first install, or a copy older than 1.2.0, hand over the zip instead. The owner quits the app and replaces the folder; settings in `%APPDATA%` carry over.
 
 The exe is unsigned, so SmartScreen shows "Run anyway" on first launch.

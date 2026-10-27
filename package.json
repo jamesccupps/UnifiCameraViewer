@@ -4,6 +4,12 @@
   "version": "1.2.0",
   "description": "Free-floating UniFi Protect live-view windows, one per camera, across multiple consoles.",
   "license": "MIT",
+  "author": "James Cupps",
+  "homepage": "https://github.com/jamesccupps/UnifiCameraViewer",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jamesccupps/UnifiCameraViewer.git"
+  },
   "type": "module",
   "main": "src/main.js",
   "scripts": {
