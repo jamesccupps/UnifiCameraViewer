@@ -68,12 +68,32 @@ async function runApp({ userData, results, seconds, extraArgs = [], env = {} }) 
   const killer = setTimeout(() => child.kill(), (seconds + 60) * 1000);
   await new Promise((resolve) => child.on("exit", resolve));
   clearTimeout(killer);
+  appRuns.push({ userData, results });
   const file = path.join(results, "result.json");
   if (!fs.existsSync(file)) throw new Error(`app produced no result.json - see ${path.join(results, "app-output.log")}`);
   return {
     result: JSON.parse(fs.readFileSync(file, "utf8")),
     config: JSON.parse(fs.readFileSync(path.join(userData, "config.json"), "utf8")),
   };
+}
+
+// Every app launch, so a failing suite can print what the app itself logged (CI only shows stdout).
+const appRuns = [];
+function printAppLogs(runs) {
+  for (const { userData, results } of runs) {
+    for (const file of [path.join(userData, "protect-panes.log"), path.join(results, "app-output.log")]) {
+      if (!fs.existsSync(file)) continue;
+      const lines = fs.readFileSync(file, "utf8").trim().split(/\r?\n/).slice(-40);
+      console.log(`  --- ${file} (last ${lines.length} lines)\n${lines.map((l) => `  | ${l}`).join("\n")}`);
+    }
+  }
+}
+
+async function runSuite(fn) {
+  const failedBefore = failures;
+  const firstRun = appRuns.length;
+  await fn();
+  if (failures > failedBefore) printAppLogs(appRuns.slice(firstRun));
 }
 
 const last = (result) => result.samples[result.samples.length - 1]?.cams ?? {};
@@ -150,7 +170,9 @@ async function mockSuite() {
     { at: 11000, do: "menu-click", win: 0, label: "Show time: on" },
   ];
   const { result, config } = await runApp({
-    userData, results, seconds: 16, extraArgs: ["--mock"],
+    // 20 s: the Apply-to-all quality change at 10.5 s restarts two streams, and a runner without a
+    // GPU (software decode of five windows) needs several seconds to bring them back.
+    userData, results, seconds: 20, extraArgs: ["--mock"],
     env: { PANES_MOCK_FISHEYE: path.join(FIXTURES, "fisheye-ceiling.png"), PANES_MOCK_RESTART_SEC: "5", PANES_SELFTEST_ACTIONS: JSON.stringify(actions) },
   });
   const cams = last(result);
@@ -765,12 +787,12 @@ async function e2eSuite() {
 // ---------------------------------------------------------------------------------------------
 
 try {
-  if (suite === "mock" || suite === "all") await mockSuite();
-  if (suite === "hide" || suite === "all") await hideSuite();
-  if (suite === "range" || suite === "all") await rangeSuite();
-  if (suite === "layouts" || suite === "all") await layoutsSuite();
-  if (suite === "update" || suite === "all") await updateSuite();
-  if (suite === "e2e" || suite === "all") await e2eSuite();
+  if (suite === "mock" || suite === "all") await runSuite(mockSuite);
+  if (suite === "hide" || suite === "all") await runSuite(hideSuite);
+  if (suite === "range" || suite === "all") await runSuite(rangeSuite);
+  if (suite === "layouts" || suite === "all") await runSuite(layoutsSuite);
+  if (suite === "update" || suite === "all") await runSuite(updateSuite);
+  if (suite === "e2e" || suite === "all") await runSuite(e2eSuite);
 } catch (err) {
   console.error(`\nTest run failed: ${err.message}`);
   failures++;
