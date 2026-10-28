@@ -1479,6 +1479,18 @@ async function gridSuite() {
   // The camera list says which cameras play in a grid (they read as closed before).
   const rowText = `(() => Object.fromEntries([...document.querySelectorAll(".cams li")].map((li) => [li.querySelector(".cam-name b")?.textContent,
     { status: li.querySelector(".cam-name small")?.textContent, tip: li.querySelector(".switch")?.dataset.tip }])))()`;
+  // The 360° camera's snapshot is square. Its <img> has to be the thumbnail's size (contain letterboxes
+  // it); it used to take its own square shape and the 36 px box cut it off.
+  const squareThumb = `(async () => {
+    document.querySelector('[data-tab="cameras"]').click();
+    const row = () => [...document.querySelectorAll(".cams li")].find((li) => li.querySelector(".cam-name b")?.textContent === "Building 360");
+    for (let i = 0; i < 30 && !row()?.querySelector(".thumb img")?.naturalWidth; i++) await new Promise((r) => setTimeout(r, 100));
+    const img = row()?.querySelector(".thumb img");
+    const size = (r) => Math.round(r.width) + "x" + Math.round(r.height);
+    const out = img && { natural: img.naturalWidth + "x" + img.naturalHeight, img: size(img.getBoundingClientRect()), box: size(img.parentElement.getBoundingClientRect()), fit: getComputedStyle(img).objectFit };
+    document.querySelector('[data-tab="layouts"]').click();
+    return out ?? null;
+  })()`;
   const run1 = await runApp({
     userData, results: path.join(userData, "results-1"), seconds: 19, extraArgs: ["--mock"],
     env: {
@@ -1490,6 +1502,7 @@ async function gridSuite() {
         { at: 7300, do: "menu", tile: "Wall#0" },
         { at: 7500, do: "menu-click", tile: "Wall#1", label: "Low · 640×360" },
         { at: 8000, do: "manager-js", js: rowText },
+        { at: 8200, do: "manager-js", js: squareThumb },
         { at: 9500, do: "tray-click", label: "Hide cameras" },
         { at: 10300, do: "manager-js", js: `/*hidden*/ ${readRow}` },
         { at: 11000, do: "tray-click", label: "Show cameras" },
@@ -1497,6 +1510,10 @@ async function gridSuite() {
     },
   });
   const acts = run1.result.actions;
+  const sq = acts.find((a) => a.act.js === squareThumb);
+  check("a 360° camera's square preview fits whole in its row thumbnail (not cut to the 16:9 box)",
+    sq?.value && sq.value.natural.split("x")[0] === sq.value.natural.split("x")[1] && sq.value.img === sq.value.box && sq.value.fit === "contain",
+    JSON.stringify(sq?.value ?? sq?.error));
   const rows = acts.find((a) => a.act.js === rowText)?.value ?? {};
   check("the camera list says which cameras are showing in a grid, and that a window would be a second stream",
     /in grid Wall/.test(rows["Building Dock"]?.status ?? "") && /second stream/.test(rows["Building Dock"]?.tip ?? "") && !/in grid/.test(rows["Building Lobby"]?.status ?? ""),
