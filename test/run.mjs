@@ -1448,6 +1448,7 @@ async function gridSuite() {
         { at: 7500, do: "menu-click", tile: "Wall#1", label: "Low · 640×360" },
         { at: 8000, do: "manager-js", js: rowText },
         { at: 9500, do: "tray-click", label: "Hide cameras" },
+        { at: 10300, do: "manager-js", js: `/*hidden*/ ${readRow}` },
         { at: 11000, do: "tray-click", label: "Show cameras" },
       ]),
     },
@@ -1489,6 +1490,9 @@ async function gridSuite() {
   const hideAt = acts.find((a) => a.act.label === "Hide cameras")?.t;
   const showAt = acts.find((a) => a.act.label === "Show cameras")?.t;
   const hidden = run1.result.samples.filter((s) => s.t > hideAt && s.t < showAt).at(-1)?.cams ?? {};
+  const hiddenRow = acts.find((a) => a.act.js?.startsWith("/*hidden*/"))?.value;
+  check("a hidden grid's row offers Show, not just Close", /hidden/.test(hiddenRow?.text ?? "") && hiddenRow.buttons.includes("Show") && !hiddenRow.buttons.includes("Close"),
+    JSON.stringify(hiddenRow));
   check("Hide cameras hides the grid window and pauses its tiles", [0, 1, 3].every((i) => tile(hidden, i)?.visible === false && tile(hidden, i).status === "paused"),
     JSON.stringify([0, 1, 3].map((i) => tile(hidden, i) && `${tile(hidden, i).visible}/${tile(hidden, i).status}`)));
   check("Show cameras brings it back live", [0, 1, 3].every((i) => tile(end, i)?.visible === true), JSON.stringify([0, 1, 3].map((i) => tile(end, i)?.visible)));

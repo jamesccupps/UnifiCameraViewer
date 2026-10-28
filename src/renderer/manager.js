@@ -672,11 +672,14 @@ function renderGrid(g) {
   return el("li", { class: "grid-row", "data-key": g.id },
     el("b", { title: g.name }, g.name),
     el("small", {}, `grid window · ${plural(g.count, "camera")}${g.hidden ? " · hidden" : ""}`),
+    // A grid hidden by Hide cameras is still "open"; it offered only Close, so it couldn't be brought
+    // back on its own.
     el("button", {
       class: "small", "data-focus-key": `ga-${g.id}`,
-      tip: g.open ? "Close this grid window. It reopens where it was." : "Open this grid window: all its cameras in one window.",
-      onclick: () => panes.invoke(g.open ? "mgr:close-grid" : "mgr:open-grid", g.id).then(refresh),
-    }, g.open ? "Close" : "Open"),
+      tip: g.hidden ? "Put this hidden grid window back where it was."
+        : g.open ? "Close this grid window. It reopens where it was." : "Open this grid window: all its cameras in one window.",
+      onclick: () => panes.invoke(g.open && !g.hidden ? "mgr:close-grid" : "mgr:open-grid", g.id).then(refresh),
+    }, g.hidden ? "Show" : g.open ? "Close" : "Open"),
     el("button", { class: "small ghost", tip: "Change this grid's cameras or layout in the layout editor.", onclick: () => openEditor(g, "grid") }, "Edit"),
     el("button", {
       class: "small ghost",
