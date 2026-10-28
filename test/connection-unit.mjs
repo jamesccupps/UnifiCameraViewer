@@ -146,6 +146,42 @@ const out = {};
   out.neverStarts = { gaps: at.slice(1).map((t, i) => Math.round(t - at[i])) };
 }
 
+// CameraStream paused (a window minimized or hidden) while its subscription still has segments to
+// give, as the Access reader does with what it already queued: nothing more goes to the page, and the
+// status stays "paused" instead of flipping back to "live".
+{
+  const sends = [];
+  const sub = () => ({
+    state: "live",
+    initSegment: { codec: "avc1.4d401f", data: new Uint8Array(8) },
+    async *[Symbol.asyncIterator]() {
+      yield { type: "init", codec: "avc1.4d401f", data: new Uint8Array(8) };
+      for (let i = 0; i < 40; i++) { // ignores the abort, like segments already queued
+        await new Promise((r) => setTimeout(r, 5));
+        yield { type: "media", data: new Uint8Array(8) };
+      }
+    },
+    async [Symbol.asyncDispose]() {},
+  });
+  const cam = { isOnline: true, config: { channels: [{ id: 1, enabled: true }] }, livestream: sub };
+  const stream = new CameraStream({
+    getConnection: () => ({ state: "connected", name: "C", camera: () => cam }),
+    cameraId: "cam", resolveChannel: () => 1, send: (ch, p) => sends.push({ ch, state: p?.state }), log: quiet,
+  });
+  stream.start();
+  await until(() => sends.some((s) => s.ch === "cam:media"));
+  const at = sends.length;
+  stream.pause();
+  await new Promise((r) => setTimeout(r, 150));
+  const after = sends.slice(at);
+  out.pausedWithSegmentsLeft = {
+    mediaAfter: after.filter((s) => s.ch === "cam:media").length,
+    statusesAfter: after.filter((s) => s.ch === "cam:status").map((s) => s.state),
+    status: stream.status.state,
+  };
+  stream.stop();
+}
+
 // UniFi Access readers (bare-livestream.js). ffmpeg makes 2 s of real fragmented MP4 with an AAC
 // track; it goes into bareLivestream through a fake socket the way each kind of camera sends it.
 {
@@ -226,6 +262,23 @@ const out = {};
     media: framed.got.filter((s) => s.type === "media").length,
     sameBytes: framed.got.filter((s) => s.type === "media").every((s, k) => Buffer.compare(Buffer.from(s.data), Buffer.concat(fragments[k])) === 0),
   };
+
+  // Disposed (as CameraStream does on stop or pause) with segments still queued: the iteration ends
+  // there, quietly. It used to hand over everything queued first.
+  {
+    const on = {};
+    const sock = { addEventListener: (ev, fn) => { on[ev] = fn; }, close() {}, binaryType: "" };
+    const sub = bareLivestream({ resolveUrl: async () => "wss://fake", connect: () => sock, fps: 15, now: () => 0 });
+    await until(() => on.message);
+    on.message({ data: Buffer.concat([frame(248, Buffer.from("avc1.64000d,mp4a.40.2")), frame(250, init), frame(249), ...samples.slice(0, 20).map((s) => frame(252, s))]) });
+    const it = sub[Symbol.asyncIterator]();
+    const first = await it.next();
+    await sub[Symbol.asyncDispose]();
+    let after = 0;
+    let endedWith = null;
+    try { while (!(await it.next()).done) after++; } catch (err) { endedWith = err.message; }
+    out.disposedWithQueue = { first: first.value?.type, after, endedWith };
+  }
 }
 
 console.log(JSON.stringify(out));

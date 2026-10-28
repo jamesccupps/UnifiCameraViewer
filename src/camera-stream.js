@@ -158,6 +158,9 @@ export class CameraStream {
 
       try {
         for await (const seg of sub) {
+          // Stopped or paused: a subscription can still hand over what it had queued. Sent anyway, it
+          // reached the page after a pause and set the status back to "live" under a paused window.
+          if (signal.aborted) break;
           if (seg.type === "init") {
             sendInit(seg);
             continue;

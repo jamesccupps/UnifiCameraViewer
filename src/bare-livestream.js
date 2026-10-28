@@ -154,6 +154,7 @@ export function bareLivestream({ resolveUrl, fps = 30, signal, connect = null, n
     initSegment: null,
     async *[Symbol.asyncIterator]() {
       for (;;) {
+        if (done && !failure) return; // disposed or aborted: what's still queued is for nobody now
         if (queue.length) { yield queue.shift(); continue; }
         if (failure) throw failure;
         if (done) return;

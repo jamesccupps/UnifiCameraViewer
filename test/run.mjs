@@ -879,6 +879,9 @@ async function connectionSuite() {
   const near = (v, want) => v >= want * 0.8 && v < want * 1.8;
   check("a stream that never starts backs off, and video in between starts the back-off over",
     g.length >= 5 && near(g[0], 40) && near(g[1], 120) && near(g[2], 360) && near(g[3], 40) && near(g[4], 120), JSON.stringify(g));
+  const pw = out.pausedWithSegmentsLeft;
+  check("a paused stream sends nothing more and stays paused, though its subscription still has segments",
+    pw?.mediaAfter === 0 && pw.status === "paused" && !pw.statusesAfter.includes("live"), JSON.stringify(pw));
   const np = out.noPassword;
   check("a console with no saved password (imported) asks for it, and doesn't log in with none",
     np?.state === "authfailed" && /No password saved/.test(np.message) && np.calls === 0, JSON.stringify(np));
@@ -893,6 +896,9 @@ async function connectionSuite() {
   const fr = out.framedReader;
   check("Access reader that sends the usual begin/moof/mdat/end: segments as the library makes them, init untouched",
     fr?.initSame && fr.initCodec === "avc1.64000d,mp4a.40.2" && fr.media === fr.fragments && fr.sameBytes, JSON.stringify(fr));
+  const dq = out.disposedWithQueue;
+  check("Access reader: disposed with segments still queued, it ends there, without them and without an error",
+    dq?.first === "init" && dq.after === 0 && dq.endedWith === null, JSON.stringify(dq));
 }
 
 // ---------------------------------------------------------------------------------------------
