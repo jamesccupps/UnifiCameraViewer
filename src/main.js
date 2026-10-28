@@ -641,39 +641,32 @@ function deleteLayout(id) {
 }
 
 /**
- * Turn a Protect liveview into a layout: its slots tiled as an even grid on the display the camera
- * list is on, each window the largest 16:9 that fits its cell. Protect's uneven layouts (one big
- * tile plus small ones) become even grids. The cameras keep their current per-window settings.
+ * A Protect liveview as a layout editor draft, saved only from the editor. It takes the editor
+ * template with as many tiles as the liveview has slots (Protect offers the same set: 1, 2x2,
+ * 1+5 … 5x5), or the next bigger one, with the slots in order, on the screen the camera list is on.
+ * A slot that cycles through several cameras in Protect shows its first one.
  */
-function importLiveview(consoleId, liveviewId) {
+function liveviewDraft(consoleId, liveviewId) {
   const conn = connections.get(consoleId);
   const lv = conn?.liveviews?.().find((l) => l.id === liveviewId);
   if (!lv) throw new Error("That liveview isn't on the console any more.");
-  const n = Math.max(1, lv.slots.length);
-  const cols = Math.ceil(Math.sqrt(n));
-  const rows = Math.ceil(n / cols);
-  const area = (managerWin && !managerWin.isDestroyed() ? screen.getDisplayMatching(managerWin.getBounds()) : screen.getPrimaryDisplay()).workArea;
-  const cellW = Math.floor(area.width / cols);
-  const cellH = Math.floor(area.height / rows);
-  const width = Math.max(160, Math.floor(Math.min(cellW, (cellH * 16) / 9)));
-  const height = Math.max(90, Math.floor((width * 9) / 16));
-  const windows = {};
-  lv.slots.forEach((cameraId, i) => {
-    if (!cameraId) return;
-    const key = `${consoleId}/${cameraId}`;
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    windows[key] = {
-      ...layoutEntry(key),
-      bounds: {
-        x: area.x + col * cellW + Math.floor((cellW - width) / 2),
-        y: area.y + row * cellH + Math.floor((cellH - height) / 2),
-        width,
-        height,
-      },
-    };
+  const bySize = TEMPLATES.filter((t) => t.cells).sort((a, b) => a.cells.length - b.cells.length);
+  const tpl = bySize.find((t) => t.cells.length >= lv.slots.length) ?? bySize.at(-1);
+  const seen = new Set();
+  const cells = tpl.cells.map((_, i) => {
+    const key = lv.slots[i] ? `${consoleId}/${lv.slots[i]}` : null;
+    if (!key || seen.has(key)) return null;
+    seen.add(key);
+    return { key, mode: "quad" };
   });
-  return putLayout(`${consoleName(consoleId)} · ${lv.name}`, windows);
+  const display = managerWin && !managerWin.isDestroyed() ? screen.getDisplayMatching(managerWin.getBounds()) : screen.getPrimaryDisplay();
+  return {
+    name: `${consoleName(consoleId)} · ${lv.name}`,
+    displayId: display.id,
+    templateId: tpl.id,
+    cells,
+    left: lv.slots.slice(tpl.cells.length).filter(Boolean).length,
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1765,7 +1758,7 @@ function managerState() {
         hiddenCount: hiddenKeys(c.id).length,
         shownCount: shown(c.id),
         openCount: Object.entries(store.data.windows).filter(([key, w]) => w.open && key.startsWith(`${c.id}/`)).length,
-        liveviews: (conn?.liveviews?.() ?? []).map((lv) => ({ id: lv.id, name: lv.name, count: lv.slots.filter(Boolean).length })),
+        liveviews: (conn?.liveviews?.() ?? []).map((lv) => ({ id: lv.id, name: lv.name, count: new Set(lv.slots.filter(Boolean)).size })),
         cameras,
       };
     }),
@@ -1926,7 +1919,7 @@ function registerIpc() {
   handle("mgr:save-editor-layout", (input) => saveEditorLayout(input));
   handle("mgr:apply-layout", (id) => applyLayout(String(id)));
   handle("mgr:delete-layout", (id) => deleteLayout(String(id)));
-  handle("mgr:import-liveview", ({ consoleId, liveviewId } = {}) => importLiveview(String(consoleId), String(liveviewId)));
+  handle("mgr:liveview-draft", ({ consoleId, liveviewId } = {}) => liveviewDraft(String(consoleId), String(liveviewId)));
   handle("mgr:bring-to-front", () => bringAllToFront());
   handle("mgr:reset-positions", () => tileOpenWindows());
   handle("mgr:open-all", (consoleId) => openAllCameras(String(consoleId)));

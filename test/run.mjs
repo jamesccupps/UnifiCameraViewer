@@ -868,7 +868,7 @@ async function layoutsSuite() {
     version: 1,
     consoles: [
       { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Stair"],
-        mockLiveviews: [{ id: "lv1", name: "Entrances", slots: [0, 2, null, 1] }] },
+        mockLiveviews: [{ id: "lv1", name: "Entrances", slots: [0, 2, null, 1] }, { id: "lv2", name: "Big lobby", slots: [0, 1, 0, 2, null, null] }] },
       { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp"] },
     ],
     windows: {
@@ -876,7 +876,9 @@ async function layoutsSuite() {
       [keys.dock]: { open: true, bounds: { x: 0, y: 290, width: 480, height: 270 }, channel: 2 },
       [keys.ramp]: { open: true, bounds: { x: 500, y: 0, width: 480, height: 270 }, channel: 2 },
     },
-    settings: { startHidden: false },
+    // Quality from tile size would put the imported 2x2 on High: three 1080p mock encodes starting at
+    // once, which can take longer than this suite waits. The editor suite covers that setting.
+    settings: { startHidden: false, arrangeQuality: false },
   }, null, 2));
 
   const saveJs = `(() => {
@@ -886,12 +888,37 @@ async function layoutsSuite() {
     f.requestSubmit();
     return true;
   })()`;
-  const importJs = `(() => {
+  const importJs = (lv = "lv1") => `(() => {
     const sel = document.getElementById("import-liveview");
     const options = [...sel.options].map((o) => o.textContent);
-    sel.value = ${JSON.stringify(`${A}|lv1`)};
+    sel.value = ${JSON.stringify(`${A}|`)} + ${JSON.stringify(lv)};
     sel.dispatchEvent(new Event("change"));
     return options;
+  })()`;
+  const unevenJs = `(() => {
+    const seen = {
+      template: document.getElementById("editor-template").value,
+      cells: [...document.querySelectorAll("#editor-preview .cell")].map((c) => c.querySelector("b")?.textContent ?? null),
+    };
+    document.getElementById("editor-cancel").click();
+    return seen;
+  })()`;
+  // The import opens the editor with the liveview filled in; save it as separate windows.
+  const draftJs = `(async () => {
+    const as = document.getElementById("editor-as");
+    const seen = {
+      saved: (await panes.invoke("mgr:state")).layouts.map((l) => l.name),
+      open: document.getElementById("editor-dialog").open,
+      title: document.getElementById("editor-title").textContent,
+      as: as.value, locked: as.disabled,
+      name: document.getElementById("editor-name").value,
+      template: document.getElementById("editor-template").value,
+      cells: [...document.querySelectorAll("#editor-preview .cell")].map((c) => c.querySelector("b")?.textContent ?? null),
+    };
+    as.value = "windows";
+    as.dispatchEvent(new Event("change"));
+    document.getElementById("editor-form").requestSubmit(document.getElementById("editor-save"));
+    return seen;
   })()`;
   const applyJs = (name) => `(() => {
     const li = [...document.querySelectorAll("#layout-list li")].find((l) => l.querySelector("b")?.textContent === ${JSON.stringify(name)});
@@ -904,9 +931,12 @@ async function layoutsSuite() {
     env: {
       PANES_SELFTEST_ACTIONS: JSON.stringify([
         { at: 2500, do: "manager-js", js: saveJs },
-        { at: 3500, do: "manager-js", js: importJs },
+        { at: 3500, do: "manager-js", js: importJs() },
+        { at: 4200, do: "manager-js", js: draftJs },
         { at: 5000, do: "manager-js", js: applyJs("Building · Entrances") },
         { at: 9500, do: "tray-click", label: "Everything" }, // a newly opened window can take ~3 s to go live
+        { at: 11000, do: "manager-js", js: importJs("lv2") },
+        { at: 11800, do: "manager-js", js: unevenJs },
       ]),
     },
   });
@@ -920,8 +950,21 @@ async function layoutsSuite() {
   const names = config.layouts?.map((l) => l.name) ?? [];
 
   check("Save current layout stored the on-screen windows", names.includes("Everything") && Object.keys(config.layouts.find((l) => l.name === "Everything").windows).length === 3, JSON.stringify(names));
-  check("Protect liveview offered for import", byJs("import-liveview")?.value?.includes("Entrances (3 cameras)"), JSON.stringify(byJs("import-liveview")?.value ?? byJs("import-liveview")?.error));
-  check("imported liveview saved as a layout", names.includes("Building · Entrances"), JSON.stringify(names));
+  const offered = byJs("import-liveview");
+  check("Protect liveviews offered for import, each camera counted once", offered?.value?.includes("Entrances (3 cameras)") && offered.value.includes("Big lobby (3 cameras)"),
+    JSON.stringify(offered?.value ?? offered?.error));
+  const uneven = result.actions.find((a) => a.act.js === unevenJs);
+  check("a 6-slot liveview opens as 1 + 5, slots in order, a repeated camera only once",
+    uneven?.value?.template === "1+5" && JSON.stringify(uneven.value.cells) === JSON.stringify(["Building Lobby", "Building Dock", null, "Building Stair", null, null]),
+    JSON.stringify(uneven?.value ?? uneven?.error));
+  const draft = result.actions.find((a) => a.act.js === draftJs)?.value;
+  check("import opens the editor filled in: 2x2, slots in order, as a grid window, still changeable",
+    draft?.open && draft.title === "Import a Protect liveview" && draft.as === "grid" && !draft.locked && draft.name === "Building · Entrances"
+      && draft.template === "2x2" && JSON.stringify(draft.cells) === JSON.stringify(["Building Lobby", "Building Stair", null, "Building Dock"]),
+    JSON.stringify(draft ?? result.actions.find((a) => a.act.js === draftJs)?.error));
+  check("the draft saved as a layout of separate windows, and nothing before the editor's Save",
+    names.includes("Building · Entrances") && !config.grids?.length && draft && !draft.saved.includes("Building · Entrances"),
+    JSON.stringify({ names, before: draft?.saved, grids: config.grids?.length }));
   check("applying the liveview layout opened exactly its cameras", applyAct?.value === true && openSet(mid) === "dock,lobby,stair", `${openSet(mid)} ${applyAct?.error ?? ""}`);
   const [l, s, d] = [mid[keys.lobby]?.bounds, mid[keys.stair]?.bounds, mid[keys.dock]?.bounds];
   check("liveview slots tiled as a 2x2 grid (lobby, stair / empty, dock)",
@@ -2192,6 +2235,11 @@ async function e2eSuite() {
       sel.dispatchEvent(new Event("change"));
       return options;
     })()`;
+    // Save the imported draft the way it opens: as one grid window.
+    const saveDraftJs = `(() => {
+      document.getElementById("editor-form").requestSubmit(document.getElementById("editor-save"));
+      return document.getElementById("editor-as").value;
+    })()`;
     // A console added through the dialog: its password goes through encryptStringAsync.
     const addJs = `(() => {
       document.getElementById("btn-add").click();
@@ -2216,8 +2264,9 @@ async function e2eSuite() {
       env: {
         PANES_SELFTEST_ACTIONS: JSON.stringify([
           { at: 5000, do: "manager-js", js: importJs },
+          { at: 5800, do: "manager-js", js: saveDraftJs },
           { at: 10000, do: "manager-js", js: thumbsJs },
-          { at: 6000, do: "manager-js", js: addJs },
+          { at: 6800, do: "manager-js", js: addJs },
           { at: 12000, do: "menu-click", win: 4, label: "Reconnect stream" },
         ]),
       },
@@ -2249,12 +2298,12 @@ async function e2eSuite() {
     check("normal cameras don't create a WebGL context", cams[keys.garage]?.dewarp?.gl === false);
     const opts = result.actions[0]?.value ?? [];
     check("Protect liveviews read through the library", opts.includes("Building Entrances (3 cameras)") && opts.includes("Garage Entrances (3 cameras)"), JSON.stringify(result.actions[0]?.value ?? result.actions[0]?.error));
-    const imported = config.layouts?.find((l) => l.name === "Building · Building Entrances");
-    const slotKeys = [1, 0, 2].map((i) => `${ids.B}/${cam(P.building, i)}`);
-    const ib = slotKeys.map((k) => imported?.windows[k]?.bounds);
-    check("imported liveview: first camera of each slot, empty slot skipped, grid order kept",
-      imported && Object.keys(imported.windows).length === 3 && ib.every(Boolean) && ib[0].x < ib[1].x && ib[2].y > ib[0].y && Math.abs(ib[2].x - ib[1].x) < 3,
-      JSON.stringify(imported && Object.keys(imported.windows)));
+    const imported = config.grids?.find((g) => g.name === "Building · Building Entrances");
+    const slotKeys = [1, 0, null, 2].map((i) => (i === null ? null : `${ids.B}/${cam(P.building, i)}`));
+    check("imported liveview saved as a 2x2 grid window: first camera of each slot, empty slot kept, slot order kept",
+      imported?.templateId === "2x2" && JSON.stringify(imported.tiles.map((t) => t?.key ?? null)) === JSON.stringify(slotKeys)
+        && result.actions.find((a) => a.act.js === saveDraftJs)?.value === "grid",
+      JSON.stringify(imported ? { templateId: imported.templateId, tiles: imported.tiles.map((t) => t?.key ?? null) } : result.actions.find((a) => a.act.js === saveDraftJs)));
     if (legacy) {
       check("a password saved by 1.3.x (sync safeStorage) still logs in", config.consoles.find((c) => c.id === ids.G)?.password?.enc === "safe" && conn[ids.G]?.state === "connected",
         JSON.stringify(conn[ids.G]));

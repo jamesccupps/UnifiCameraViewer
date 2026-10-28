@@ -112,7 +112,7 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
 - **Camera → main:** `cam:ready`, `cam:aspect {width,height}`, `cam:reset`, `cam:unsupported`, `cam:context-menu`, `cam:toggle-top`, `cam:close`, `cam:dewarp {views?, pano?, focus?, circle?, auto?}`, `cam:picture {brightness, contrast}`
 - **Main → camera:** `cam:init`, `cam:media`, `cam:status`, `cam:meta`, `cam:highlight`, `cam:command {cmd: "calibrate" | "autodetect" | "picture"}`
 - **Grid window page:** in `grid:layout {rects, filled}`, out `grid:context-menu tileIndex|null`.
-- **Camera list (invoke):** `mgr:state`, `mgr:save-console`, `mgr:remove-console`, `mgr:reconnect`, `mgr:trust-cert consoleId`, `mgr:open-camera`, `mgr:close-camera`, `mgr:find-camera`, `mgr:set-channel`, `mgr:set-setting`, `mgr:bring-to-front`, `mgr:reset-positions`, `mgr:open-all`, `mgr:hide-cameras consoleId|null`, `mgr:show-cameras consoleId|null`, `mgr:apply-all {consoleId|null, changes}`, `mgr:save-layout name`, `mgr:apply-layout id`, `mgr:delete-layout id`, `mgr:import-liveview {consoleId, liveviewId}`, `mgr:set-update-source`, `mgr:check-update`, `mgr:install-update`, `mgr:close-all consoleId`, `mgr:arrange {templateId}`, `mgr:save-editor-layout {id?, as: "windows" | "grid", name, displayId, templateId, cells: [{key, mode} | null], apply}`, `mgr:set-list-hidden {key, hidden}`, `mgr:preview key` (→ `{url, at}` or null), `mgr:open-grid id`, `mgr:close-grid id`, `mgr:delete-grid id`, `mgr:open-log-folder`, `mgr:open-project` (a fixed URL; the renderer can't pass one), `mgr:quit`. `changes` goes through `cleanChanges()`, which keeps only `channel`, `onTop`, `hideName`, `clock`, `range` and `picture`.
+- **Camera list (invoke):** `mgr:state`, `mgr:save-console`, `mgr:remove-console`, `mgr:reconnect`, `mgr:trust-cert consoleId`, `mgr:open-camera`, `mgr:close-camera`, `mgr:find-camera`, `mgr:set-channel`, `mgr:set-setting`, `mgr:bring-to-front`, `mgr:reset-positions`, `mgr:open-all`, `mgr:hide-cameras consoleId|null`, `mgr:show-cameras consoleId|null`, `mgr:apply-all {consoleId|null, changes}`, `mgr:save-layout name`, `mgr:apply-layout id`, `mgr:delete-layout id`, `mgr:liveview-draft {consoleId, liveviewId}` (→ an editor draft `{name, displayId, templateId, cells, left}`; nothing is saved), `mgr:set-update-source`, `mgr:check-update`, `mgr:install-update`, `mgr:close-all consoleId`, `mgr:arrange {templateId}`, `mgr:save-editor-layout {id?, as: "windows" | "grid", name, displayId, templateId, cells: [{key, mode} | null], apply}`, `mgr:set-list-hidden {key, hidden}`, `mgr:preview key` (→ `{url, at}` or null), `mgr:open-grid id`, `mgr:close-grid id`, `mgr:delete-grid id`, `mgr:open-log-folder`, `mgr:open-project` (a fixed URL; the renderer can't pass one), `mgr:quit`. `changes` goes through `cleanChanges()`, which keeps only `channel`, `onTop`, `hideName`, `clock`, `range` and `picture`.
 - **Main → camera list:** `mgr:changed` (throttled). The list also polls every 3 s while visible, for online/offline status. Both skip the re-render while a dialog, a ⋯ menu or a dropdown is open (`select:open`, not a focused select: a used quality select keeps the focus, which once stopped status updates for hours). ⋯ menus close on Esc and when the list loses focus. `mgr:state` carries `openEditor: gridId` once when a tile's menu asked for Edit grid….
 
 ## Config and logs
@@ -216,9 +216,13 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
   - Layouts are switchable from the tray (Layouts submenu) and the camera list.
 - **Protect liveview import.**
   - `ConsoleConnection.liveviews()` maps `client.liveviews` to `{id, name, slots: [firstCameraId | null]}`. Protect slots can cycle through several cameras; only the first is used.
-  - `importLiveview()` tiles the slots as an even ceil(√n) grid on the display the camera list is on, each window the largest 16:9 that fits its cell. Protect's uneven layouts become even grids.
-  - The import only saves a layout; Apply is a separate click, so the current arrangement isn't thrown away.
-  - The fake console serves one liveview, including an empty slot and a cycling slot.
+  - `liveviewDraft()` makes a layout editor draft and saves nothing.
+    - The template is the one with as many tiles as the liveview has slots, or the next bigger one. Protect's liveview layouts and the editor's templates are the same set (1, 2x2, 1+5 … 5x5), so a 6-slot liveview opens as 1 + 5.
+    - A camera in two slots fills only the first.
+    - Slots past the biggest template's last tile are counted (`left`), and the editor says how many came out.
+  - The editor opens it as new, set to one grid window, with "Open as" still changeable. Saving goes through the editor's normal path. So separate windows get the editor's tile rects and quality from tile size, not the old even grid at each window's current quality.
+  - Unverified: that Protect's slot order for an uneven layout (1 + 5, 2 + 8, 1 + 12) matches the editor's cell order (big tiles first, then reading order). Only 2x2 liveviews have been checked against the library, using the fake console's. Check an uneven liveview on a real console.
+  - The fake console serves one 2x2 liveview, including an empty slot and a cycling slot. The mock serves whatever `mockLiveviews` lists.
 - **In-place updates (updater.js).** The exe is unsigned, so the Ed25519 signature on `latest.json` is the only gate before downloaded code runs. Keep these steps in this order:
   1. Verify the manifest signature against `UPDATE_PUBLIC_KEY`.
   2. Validate the payload: `app`, an x.y.z version, sha256, size, and a bare `.zip` file name.
@@ -384,7 +388,7 @@ Owner-requested features, with findings and open questions, are in `ROADMAP.md`.
 - Live view only: no playback, timeline, events, audio or two-way talk.
 - PTZ cameras can't be steered; only the 360° virtual PTZ exists.
 - One window per camera: the same camera can't have two floating windows (it can be in a window and in grid tiles).
-- Imported Protect liveviews become even grids of separate windows. Uneven layouts and slot cycling aren't reproduced, and they don't import as grid windows.
+- Imported Protect liveviews don't reproduce slot cycling: each slot shows its first camera.
 - Grid windows have no per-tile cycling.
 - Doorbell package-camera lens isn't exposed (the library supports `source: {type: "lens"}`).
 - Desk-mount panorama and lens FOV > 180° are implemented but have only light test coverage.

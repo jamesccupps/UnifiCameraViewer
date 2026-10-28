@@ -67,7 +67,7 @@ Original notes: quality (`channel`), always-on-top and dewarp settings were per 
 
 **Status:** built (2026-10-27) as (a) plus Protect liveview import, shipped in 1.2.0.
 - Named layouts are saved from the camera list and switched from the list or the tray.
-- Import tiles a liveview's slots as an even grid, using the first camera of each slot. Uneven layouts and slot cycling aren't reproduced.
+- Import opens the liveview in the layout editor (since 1.4.3), as a grid window or separate windows. It keeps the same grid and the first camera of each slot. Slot cycling isn't reproduced.
 - `npm run test:layouts` and the e2e suite cover it; the e2e suite checks the real library's `client.liveviews`.
 - (b), the grid window: built for 1.4.0 at the owner's request.
   - The layout editor's **Open as → One grid window** makes one framed window with a WebContentsView per tile running the ordinary camera page. Each tile keeps 360° dewarp and PTZ, the clock, picture and the right-click menu.
@@ -75,7 +75,8 @@ Original notes: quality (`channel`), always-on-top and dewarp settings were per 
   - Grids are managed from the tile menu (Layout, Edit grid…, Full screen, Close grid, Remove from grid; "Put a camera here" on an empty tile), the Layouts tab and the tray.
   - They reopen at launch and hide with Hide cameras. `npm run test:grid` covers it.
   - "Enlarge this tile": built for 1.4.3 (double-click or the tile menu; the other tiles hide and pause until it goes back).
-  - Not built: slot cycling, and importing a Protect liveview as a grid.
+  - Importing a Protect liveview as a grid: built for 1.4.3 (the import fills in the layout editor).
+  - Not built: slot cycling.
 
 Original notes:
 

@@ -753,12 +753,16 @@ importSelect.addEventListener("change", async () => {
   const [consoleId, liveviewId] = importSelect.value.split("|");
   importSelect.value = "";
   if (!consoleId || !liveviewId) return;
+  let draft;
   try {
-    await panes.invoke("mgr:import-liveview", { consoleId, liveviewId });
+    draft = await panes.invoke("mgr:liveview-draft", { consoleId, liveviewId });
   } catch (err) {
     alert(rpcError(err));
+    return;
   }
-  refresh();
+  openEditor({ name: draft.name, editor: draft }, "grid");
+  const tpl = editorTemplates().find((t) => t.id === ed.templateId);
+  if (draft.left) editorError.textContent = `${plural(draft.left, "camera")} didn't fit in ${tpl.label} and came out of the layout.`;
 });
 
 document.getElementById("btn-save-layout").addEventListener("click", () => {
@@ -804,7 +808,10 @@ const editorApply = document.getElementById("editor-apply");
 const cameraByKey = () => new Map(state.consoles.flatMap((c) => c.cameras.map((cam) => [cam.key, { ...cam, consoleName: c.name }])));
 const editorTemplates = () => state.templates.filter((t) => t.cells);
 
-/** A saved layout, or with as = "grid" a saved grid window, or null for a new one. */
+/**
+ * A saved layout, or with as = "grid" a saved grid window, or null for a new one. A layout without
+ * an id is a draft (an imported Protect liveview): new, but filled in.
+ */
 function openEditor(layout = null, as = "windows") {
   const screens = state.screens;
   const fallbackScreen = screens.find((s) => s.primary) ?? screens[0];
@@ -820,10 +827,10 @@ function openEditor(layout = null, as = "windows") {
   ed.templateId = tpl.id;
   ed.cells = Array.from({ length: tpl.cells.length }, (_, i) => e?.cells?.[i] ?? null);
   const kind = as === "grid" ? "grid window" : "layout";
-  document.getElementById("editor-title").textContent = layout ? `Edit ${kind}` : "New layout";
+  document.getElementById("editor-title").textContent = ed.id ? `Edit ${kind}` : layout ? "Import a Protect liveview" : "New layout";
   // A saved layout stays a layout and a saved grid stays a grid; only a new one picks.
   editorAs.value = as;
-  editorAs.disabled = !!layout;
+  editorAs.disabled = !!ed.id;
   showEditorAs();
   editorName.value = layout?.name ?? "";
   editorError.textContent = "";
