@@ -34,7 +34,12 @@ export class GridWindow {
   get id() { return this.grid.id; }
   get isOpen() { return !!this.win && !this.win.isDestroyed(); }
   get players() { return this.#tiles.filter(Boolean).map((t) => t.player); }
-  get template() { return templateById(this.grid.templateId) ?? templateById("2x2"); }
+  // Only templates with fixed cells: "auto" (Arrange's) or an unknown id from a hand-edited config
+  // would otherwise crash at startup.
+  get template() {
+    const t = templateById(this.grid.templateId);
+    return t?.cells ? t : templateById("2x2");
+  }
 
   open() {
     if (this.isOpen) return;

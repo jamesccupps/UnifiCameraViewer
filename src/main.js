@@ -58,8 +58,13 @@ if (!app.requestSingleInstanceLock()) {
   app.on("before-quit", () => { quitting = true; store?.flush(); });
   // After repeated GPU process crashes Chromium quietly falls back to software decoding; leave a trace.
   app.on("child-process-gone", (_e, d) => { if (d.type === "GPU") log?.warn(`GPU process gone (${d.reason}, exit ${d.exitCode})`); });
+  // A failed start used to exit with nothing on screen and nothing in the log, every launch.
   app.whenReady().then(init).catch((err) => {
     console.error(err);
+    log?.error(`startup failed: ${err?.stack ?? err}`);
+    if (!process.env.PANES_SELFTEST_DIR) {
+      dialog.showErrorBox("Protect Panes couldn't start", `${err?.message ?? err}\n\nDetails are in protect-panes.log in ${app.getPath("userData")}.`);
+    }
     app.exit(1);
   });
 }

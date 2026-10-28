@@ -94,12 +94,18 @@ export class Store {
       }
     }
     const d = defaults();
+    const isObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
     return {
+      ...(isObject(raw) ? raw : {}), // keys a newer version wrote survive a downgrade and upgrade
       version: 1,
       consoles: Array.isArray(raw.consoles) ? raw.consoles.filter((c) => c && c.id && c.host) : [],
-      windows: raw.windows && typeof raw.windows === "object" ? raw.windows : {},
+      // A hand-edited or future-version entry that isn't an object used to crash startup, every launch.
+      windows: isObject(raw.windows) ? Object.fromEntries(Object.entries(raw.windows).filter(([, w]) => isObject(w))) : {},
       settings: { ...d.settings, ...(raw.settings ?? {}) },
-      layouts: Array.isArray(raw.layouts) ? raw.layouts.filter((l) => l && l.id && l.name && l.windows && typeof l.windows === "object") : [],
+      layouts: Array.isArray(raw.layouts)
+        ? raw.layouts.filter((l) => l && l.id && l.name && isObject(l.windows))
+          .map((l) => ({ ...l, windows: Object.fromEntries(Object.entries(l.windows).filter(([, w]) => isObject(w))) }))
+        : [],
       grids: Array.isArray(raw.grids)
         ? raw.grids.filter((g) => g && g.id && g.name && typeof g.templateId === "string" && Array.isArray(g.tiles))
           .map((g) => ({ ...g, tiles: g.tiles.map((t) => (t && typeof t.key === "string" ? t : null)) }))

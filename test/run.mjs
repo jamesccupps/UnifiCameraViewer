@@ -562,6 +562,19 @@ async function configSuite() {
   fs.rmSync(file);
   const r3 = await runApp({ userData, results: path.join(userData, "results-3"), seconds: 4, extraArgs: ["--mock"] });
   check("with config.json missing, the backup is loaded", loaded(r3) && r3.config?.consoles?.[0]?.id === A, JSON.stringify({ loaded: loaded(r3), files: files() }));
+
+  // 4. Odd shapes (hand edits, or a newer version) must not stop the app starting: a null window
+  // entry, a grid on Arrange's "auto" template, a null layout entry, and a key this version doesn't know.
+  const odd = JSON.parse(good);
+  odd.windows[`${A}/aaaaaaaa-cam9`] = null;
+  odd.grids = [{ id: "g-auto", name: "Auto grid", templateId: "auto", bounds: { x: 500, y: 0, width: 640, height: 400 }, open: true, tiles: [{ key: `${A}/aaaaaaaa-cam0`, channel: 2 }] }];
+  odd.layouts = [{ id: "l-1", name: "Odd", windows: { [`${A}/aaaaaaaa-cam0`]: null } }];
+  odd.future = { kept: true };
+  fs.writeFileSync(file, JSON.stringify(odd, null, 2));
+  const r4 = await runApp({ userData, results: path.join(userData, "results-4"), seconds: 5, extraArgs: ["--mock"] });
+  check("odd config shapes don't stop the app starting, and its grid opens",
+    loaded(r4) && Object.keys(last(r4.result)).some((k) => k.startsWith("grid:Auto grid#")), JSON.stringify({ loaded: loaded(r4), cams: Object.keys(last(r4.result) ?? {}) }));
+  check("keys this version doesn't know are kept when it saves", r4.config?.future?.kept === true, JSON.stringify(r4.config?.future));
   console.log(`  results: ${userData}`);
 }
 
