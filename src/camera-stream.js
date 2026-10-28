@@ -57,6 +57,12 @@ export class CameraStream {
     this.start();
   }
 
+  /** Stop and stay stopped with an error, until restart() (or a resume after pause()). */
+  halt(text) {
+    this.stop();
+    this.#setStatus("error", text);
+  }
+
   /** Stop pulling video while the window is minimized - saves bandwidth and CPU. */
   pause() {
     this.#paused = true;

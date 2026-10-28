@@ -425,16 +425,17 @@ async function streamsSuite() {
   })()`;
   const userData = tmpDir("streams");
   const A = "aaaaaaaa-0000-4000-8000-000000000001";
-  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, broken: `${A}/aaaaaaaa-cam2`, rewind: `${A}/aaaaaaaa-cam3`, stair: `${A}/aaaaaaaa-cam4`, fish: `${A}/aaaaaaaa-cam360` };
-  // Dock goes offline 4 s after the console connects and comes back at 10 s. The library would keep
+  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, broken: `${A}/aaaaaaaa-cam2`, rewind: `${A}/aaaaaaaa-cam3`, stair: `${A}/aaaaaaaa-cam4`, fish: `${A}/aaaaaaaa-cam360`, bogus: `${A}/aaaaaaaa-cam5` };
+  // Dock goes offline 6 s after the console connects and comes back at 12 s. The library would keep
   // its stream "recovering" (renegotiating every few seconds) the whole time. Broken's fragments
   // fail to decode every time. Rewind's encoder restarts 12 s in without flagging the discontinuity:
   // its picture would freeze until the new timestamps caught up with the playhead, another 12 s.
   // Stair's window and a grid tile of Lobby have their renderers crashed 8 s in. The 360° window's
-  // WebGL context is lost and restored three times at 6 s, then lost for good at 12 s.
+  // WebGL context is lost and restored three times at 6 s, then lost for good at 12 s. Bogus sends a
+  // codec nothing can play.
   fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
     version: 1,
-    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Broken", "Rewind", "Stair"], mockDropout: { camera: "Dock", offMs: 4000, onMs: 10000 } }],
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Broken", "Rewind", "Stair", "Bogus"], mockDropout: { camera: "Dock", offMs: 6000, onMs: 12000 } }],
     windows: {
       [keys.lobby]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 },
       [keys.dock]: { open: true, bounds: { x: 500, y: 0, width: 480, height: 270 }, channel: 2 },
@@ -442,6 +443,7 @@ async function streamsSuite() {
       [keys.rewind]: { open: true, bounds: { x: 500, y: 300, width: 480, height: 270 }, channel: 2, clock: true },
       [keys.stair]: { open: true, bounds: { x: 1000, y: 0, width: 480, height: 270 }, channel: 2 },
       [keys.fish]: { open: true, bounds: { x: 0, y: 600, width: 480, height: 270 }, channel: 2 },
+      [keys.bogus]: { open: true, bounds: { x: 500, y: 600, width: 480, height: 270 }, channel: 2 },
     },
     grids: [{ id: "grid-1", name: "G", templateId: "2x2", bounds: { x: 1000, y: 300, width: 640, height: 400 }, open: true, tiles: [{ key: keys.lobby, channel: 2 }, null, null, null] }],
     settings: { startHidden: true },
@@ -507,6 +509,12 @@ async function streamsSuite() {
     restored?.active && !restored.glLost && restored.glSetups === 4, JSON.stringify(restored));
   const fishEnd = result.samples.at(-1)?.cams[keys.fish]?.dewarp;
   check("a context that never comes back falls back to the raw fisheye picture", fishEnd?.glBroken && fishEnd.active === false, JSON.stringify(fishEnd));
+  // Nothing here can play it: the window says so and the console isn't asked for its video any more.
+  const bogusEnd = result.samples.at(-1)?.cams[keys.bogus];
+  const conn = result.connections[A];
+  check("a stream with a codec this PC can't play is stopped, and the window says why",
+    /codec isn't supported/.test(bogusEnd?.statusText ?? "") && conn?.subscriptions?.["aaaaaaaa-cam5"] === 1 && conn?.active?.["aaaaaaaa-cam5"] === 0,
+    JSON.stringify({ status: bogusEnd?.statusText, subscriptions: conn?.subscriptions?.["aaaaaaaa-cam5"], active: conn?.active?.["aaaaaaaa-cam5"] }));
   check("the crashes are logged", (appLog.match(/camera page for \S+ gone \(crashed/g) ?? []).length === 2,
     appLog.split(/\r?\n/).filter((l) => l.includes("gone")).join(" | "));
   console.log(`  results: ${userData}`);

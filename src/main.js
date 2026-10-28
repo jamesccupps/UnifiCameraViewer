@@ -1730,6 +1730,15 @@ function registerIpc() {
     log.info(`renderer requested reset for ${cw.cameraId}: ${String(reason).slice(0, 80)}`);
     cw.stream.restart();
   });
+  // The page can't decode this stream at all (no codec it supports, e.g. H.265 without hardware
+  // decode). Stop pulling it until something could change that: another quality, Reconnect stream,
+  // a reload, or a restore after minimizing.
+  ipcMain.on("cam:unsupported", (e) => {
+    const cw = fromCamera(e);
+    if (!cw) return;
+    log.warn(`${cw.cameraId} ch${cw.stream.channel}: no codec this PC can play; stream stopped`);
+    cw.stream.halt("This PC can't play this stream");
+  });
   ipcMain.on("cam:context-menu", (e) => { const cw = fromCamera(e); if (cw) cameraContextMenu(cw); });
   ipcMain.on("cam:dewarp", (e, patch) => { const cw = fromCamera(e); if (cw) saveDewarpFromRenderer(cw, patch); });
   ipcMain.on("cam:picture", (e, patch) => { const cw = fromCamera(e); if (cw) savePictureFromRenderer(cw, patch); });

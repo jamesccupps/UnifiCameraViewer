@@ -160,6 +160,7 @@ function rebuild(codec, initData) {
       : `This stream's codec isn't supported (${codec}).`;
     showStatus("error", codecError);
     updateDot();
+    panes.send("cam:unsupported"); // no point pulling video nothing here can play
     return;
   }
   codecError = "";
@@ -350,7 +351,7 @@ panes.on("cam:media", (data) => {
 
 panes.on("cam:status", ({ state, text }) => {
   streamState = state;
-  if (state === "live" && codecError) showStatus("error", codecError);
+  if ((state === "live" || state === "error") && codecError) showStatus("error", codecError); // the detailed advice wins
   else if (state === "live" && failedResets >= DECODE_HELP_AFTER) showStatus("error", DECODE_HELP);
   else if (state === "live") hideStatus();
   else showStatus(state, text);

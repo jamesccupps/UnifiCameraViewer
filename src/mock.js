@@ -48,6 +48,7 @@ export class MockConnection extends EventEmitter {
   /** Snapshot requests that reached the "console", for the self-test result. */
   get snapshotCount() { return this.#cams.reduce((n, c) => n + c.snapshots, 0); }
   get subscriptionCounts() { return Object.fromEntries(this.#cams.map((c) => [c.id, c.subscriptions])); }
+  get activeSubscriptions() { return Object.fromEntries(this.#cams.map((c) => [c.id, c.live.size])); }
 
   start() {
     this.#set("connecting", "Connecting…");
@@ -100,6 +101,8 @@ class MockCamera {
     // fragments (timestamps from zero) land behind the playhead: appends succeed, the picture freezes
     // until the new timeline reaches the old one (another 12 s), unless something restarts it.
     this.rewind = /\bRewind\b/.test(name);
+    // "... Bogus" sends a codec nothing here can play: a made-up codec string and no avcC to derive one.
+    this.bogus = /\bBogus\b/.test(name);
     this.isOnline = online;
     this.snapshots = 0;
     this.subscriptions = 0;
@@ -145,7 +148,7 @@ class MockCamera {
     this.subscriptions++;
     const sub = new MockSubscription({
       channel: source?.channel ?? 0, hue: this.index * 70, label: this.name, signal, restartSec, flagRestart: !this.rewind,
-      image: this.image, shadows: this.shadows, broken: this.broken,
+      image: this.image, shadows: this.shadows, broken: this.broken, bogus: this.bogus,
       onDone: () => this.live.delete(sub),
     });
     this.live.add(sub);
@@ -236,7 +239,8 @@ class MockSubscription {
             initParts = [];
             haveInit = true;
             const first = !this.initSegment;
-            this.initSegment = { codec: avcCodec(data), data };
+            if (this.#opts.bogus) data.write("xxxx", data.indexOf("avcC", 0, "latin1"), "latin1");
+            this.initSegment = { codec: this.#opts.bogus ? "bogus.1" : avcCodec(data), data };
             if (first) this.#push({ type: "init", data, codec: this.initSegment.codec });
           }
         } else if (type === "moof") {
