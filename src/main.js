@@ -1738,6 +1738,8 @@ function managerState() {
         return {
           ...cam, key, open: !!cw || hidden, hidden, listHidden: !!w?.listHidden,
           channel: cw?.stream?.channel ?? w?.channel ?? null, onTop: !!w?.onTop, status: cw?.stream?.status ?? null,
+          // Grids it's on screen in: the row said "closed" while the camera played in a grid.
+          inGrids: [...gridWins.values()].filter((gw) => gw.isOpen && !gw.grid.hidden && gw.grid.tiles.some((t) => t?.key === key)).map((gw) => gw.grid.name),
         };
       });
       return {

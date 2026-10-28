@@ -1421,6 +1421,9 @@ async function gridSuite() {
     const li = [...document.querySelectorAll("#layout-list li.grid-row")].find((l) => l.querySelector("b")?.textContent === "Wall");
     return li ? { text: li.querySelector("small").textContent, buttons: [...li.querySelectorAll("button")].map((b) => b.textContent) } : null;
   })()`;
+  // The camera list says which cameras play in a grid (they read as closed before).
+  const rowText = `(() => Object.fromEntries([...document.querySelectorAll(".cams li")].map((li) => [li.querySelector(".cam-name b")?.textContent,
+    { status: li.querySelector(".cam-name small")?.textContent, tip: li.querySelector(".switch")?.dataset.tip }])))()`;
   const run1 = await runApp({
     userData, results: path.join(userData, "results-1"), seconds: 16, extraArgs: ["--mock"],
     env: {
@@ -1431,12 +1434,17 @@ async function gridSuite() {
         { at: 7200, do: "camera-js", tile: "Wall#1", js: `getComputedStyle(document.getElementById("bar")).display` },
         { at: 7300, do: "menu", tile: "Wall#0" },
         { at: 7500, do: "menu-click", tile: "Wall#1", label: "Low · 640×360" },
+        { at: 8000, do: "manager-js", js: rowText },
         { at: 9500, do: "tray-click", label: "Hide cameras" },
         { at: 11000, do: "tray-click", label: "Show cameras" },
       ]),
     },
   });
   const acts = run1.result.actions;
+  const rows = acts.find((a) => a.act.js === rowText)?.value ?? {};
+  check("the camera list says which cameras are showing in a grid, and that a window would be a second stream",
+    /in grid Wall/.test(rows["Building Dock"]?.status ?? "") && /second stream/.test(rows["Building Dock"]?.tip ?? "") && !/in grid/.test(rows["Building Lobby"]?.status ?? ""),
+    JSON.stringify({ dock: rows["Building Dock"], lobby: rows["Building Lobby"] }));
   const [applyLabel, row, barDisplay] = acts.map((a) => a.value ?? a.error);
   const grid = run1.config.grids?.[0];
   check("the layout editor's Open as: One grid window saves a grid (Save and open)",

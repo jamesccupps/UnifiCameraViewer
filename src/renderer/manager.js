@@ -530,7 +530,12 @@ function renderTucked(c, tucked) {
 
 function renderCamera(cam) {
   const toggleId = `t-${cam.key}`;
-  const toggle = el("label", { class: "switch", tip: cam.open ? "Close this camera's window. It remembers its place." : "Open a window for this camera." },
+  const grids = cam.inGrids ?? [];
+  const inGrid = grids.length ? `in grid ${grids.join(", ")}` : "";
+  const toggleTip = cam.open ? "Close this camera's window. It remembers its place."
+    : grids.length ? `Open a window for this camera. It's already showing in grid ${grids.join(", ")}; a window adds a second stream of it.`
+      : "Open a window for this camera.";
+  const toggle = el("label", { class: "switch", tip: toggleTip },
     el("input", {
       type: "checkbox",
       id: toggleId,
@@ -551,6 +556,7 @@ function renderCamera(cam) {
   if (!cam.online) statusText = cam.stale ? "not available" : "offline";
   else if (cam.hidden) statusText = "window hidden";
   else if (cam.open && cam.status?.state && cam.status.state !== "live") statusText = cam.status.text;
+  else if (!cam.open && inGrid) statusText = inGrid;
 
   const name = el("div", { class: "cam-name" },
     el("span", { class: `dot ${dot}` }),
