@@ -95,7 +95,9 @@ export class ConsoleConnection extends EventEmitter {
         if (cfg.isAdopted === false) continue;
         out.push({
           id: cam.id,
-          name: cam.name,
+          // Text whatever the console sends: one null or numeric name made the sort below throw,
+          // and with it every camera list render and Apply to all.
+          name: String(cam.name ?? "Camera"),
           online: cam.isOnline,
           model: cfg.marketName || cfg.type || "",
           channels: channelList(cam),
@@ -115,7 +117,7 @@ export class ConsoleConnection extends EventEmitter {
     try {
       return this.#client.liveviews.map((lv) => ({
         id: lv.id,
-        name: lv.name,
+        name: String(lv.name ?? "Liveview"),
         slots: (lv.slots ?? []).map((s) => s?.cameras?.[0] ?? null),
       }));
     } catch {

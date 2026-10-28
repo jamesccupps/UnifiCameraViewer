@@ -80,6 +80,18 @@ const out = {};
   await conn.stop().catch(() => {});
 }
 
+// Odd camera names from a console (null, a number) must not break the camera list.
+{
+  const cam = (id, name) => ({ id, name, isOnline: true, config: { channels: [{ id: 1, enabled: true }] } });
+  const conn = new ConsoleConnection({ id: "c5", host: "h" }, async () => "pw", quiet, {
+    connect: async () => ({ ...fakeClient(), cameras: [cam("a", null), cam("b", 42), cam("c", "Lobby")] }),
+  });
+  conn.start();
+  await until(() => conn.state === "connected");
+  try { out.oddNames = conn.cameras().map((c) => c.name); } catch (err) { out.oddNames = String(err); }
+  await conn.stop();
+}
+
 // CameraStream: a stream that never starts is tried later and later; video in between resets that.
 // The camera's stream fails to establish 3 times, sends one fragment, then fails for good.
 {

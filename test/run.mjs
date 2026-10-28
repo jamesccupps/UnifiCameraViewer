@@ -655,6 +655,7 @@ async function connectionSuite() {
   const ud = out.undecryptable;
   check("a saved password that can't be decrypted says to enter it again, and isn't retried",
     ud?.state === "authfailed" && /Enter it again/.test(ud.message) && ud.calls === 0, JSON.stringify(ud));
+  check("a camera with a null or numeric name doesn't break the camera list", JSON.stringify(out.oddNames) === JSON.stringify(["42", "Camera", "Lobby"]), JSON.stringify(out.oddNames));
   const tl = out.throwingListener;
   check("a state listener that throws doesn't turn a connect into a failure or a second login",
     tl?.state === "connected" && tl.calls === 1 && !tl.threw, JSON.stringify(tl));
