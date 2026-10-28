@@ -160,7 +160,10 @@ export class ConsoleConnection extends EventEmitter {
         }
         this.#client = client;
         this.#watch(client);
-        this.#log.info(`connected to ${client.controllerName ?? this.#cfg.host}, ${client.cameras.length} cameras`);
+        // What the camera list shows. client.cameras also has every camera the console can see on the
+        // network, adopted by another console included: 29 on a console with 14.
+        const cams = this.cameras();
+        this.#log.info(`connected to ${client.controllerName ?? this.#cfg.host}, ${cams.length} cameras (${cams.filter((c) => c.online).length} online)`);
         this.#set("connected", "");
         return;
       } catch (err) {
