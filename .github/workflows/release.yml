@@ -1,6 +1,12 @@
 # Push a tag vX.Y.Z (matching package.json) to build, sign, check and publish a release.
-# The release key comes from the UPDATE_SIGNING_KEY secret, lives in a temp file for this job only,
-# and latest.json is checked against the public key built into the app before anything is published.
+# Two jobs, so the release key never meets the build's dependencies:
+# - build installs them (npm ci), tests, builds and smoke-tests the files, unsigned, with a read-only
+#   token and no secrets;
+# - publish starts from a fresh checkout with no node_modules, signs latest.json from the
+#   UPDATE_SIGNING_KEY secret with Node's own modules only, checks it against the public key built
+#   into the app, and publishes.
+# A compromised dependency could still tamper with what it builds, but it can't take the key and
+# sign whatever it likes later.
 name: Release
 
 on:
@@ -8,14 +14,15 @@ on:
     tags: ["v*.*.*"]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
-  release:
+  build:
+    name: Build and test
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -45,28 +52,8 @@ jobs:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
 
-      - name: Write the signing key for this job
-        shell: pwsh
-        env:
-          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
-        run: |
-          if (-not $env:UPDATE_SIGNING_KEY) { throw "The UPDATE_SIGNING_KEY secret isn't set; an unsigned release would never reach installed copies." }
-          $f = Join-Path $env:RUNNER_TEMP 'update-signing-key.pem'
-          [IO.File]::WriteAllText($f, $env:UPDATE_SIGNING_KEY.Trim() + "`n")
-          "PANES_SIGNING_KEY=$f" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: Build the zip, the installer and the signed latest.json
+      - name: Build the zip, the installer and the small update (unsigned here)
         run: npm run build:win
-
-      - name: Remove the signing key
-        if: always()
-        shell: pwsh
-        run: Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $env:RUNNER_TEMP 'update-signing-key.pem')
-
-      - name: Verify latest.json against the key built into the app
-        shell: pwsh
-        # The tag through the environment, not pasted into the script: nothing a ref name holds runs.
-        run: node scripts/verify-release.mjs dist $env:GITHUB_REF_NAME
 
       # npm test runs the app from source; only the packaged app loads its pages from app.asar through
       # the install's own path. Run it from a plain folder and an awkward one and check its IPC works.
@@ -91,13 +78,67 @@ jobs:
           if (Test-Path $exe) { throw "uninstall left $exe behind" }
           "installer ok: $v"
 
+      # The three files exactly as tested above. They're compressed already, so no compression here.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: |
+            dist/ProtectPanes-Setup.exe
+            dist/ProtectPanes-win32-x64.zip
+            dist/ProtectPanes-app.asar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    name: Sign and publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      # The repository's own scripts and lockfile; no npm ci, so no dependency code runs in this job.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.20.0
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: dist
+
+      - name: Sign latest.json
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -z "$UPDATE_SIGNING_KEY" ]; then
+            echo "::error::The UPDATE_SIGNING_KEY secret isn't set; an unsigned release would never reach installed copies."
+            exit 1
+          fi
+          key="$RUNNER_TEMP/update-signing-key.pem"
+          umask 077
+          printf '%s\n' "$UPDATE_SIGNING_KEY" | tr -d '\r' > "$key"
+          PANES_SIGNING_KEY="$key" node scripts/sign-release.js dist/ProtectPanes-win32-x64.zip
+
+      - name: Remove the signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/update-signing-key.pem"
+
+      - name: Verify latest.json against the key built into the app
+        # The tag through the environment, not pasted into the script: nothing a ref name holds runs.
+        run: node scripts/verify-release.mjs dist "$GITHUB_REF_NAME"
+
       - name: Publish the GitHub release
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          $notes = "release-notes/$tag.md"
-          $opts = @('--title', "Protect Panes $($tag.TrimStart('v'))", '--verify-tag')
-          if (Test-Path $notes) { $opts += @('--notes-file', $notes) } else { $opts += '--generate-notes' }
-          gh release create $tag dist/ProtectPanes-Setup.exe dist/ProtectPanes-win32-x64.zip dist/ProtectPanes-app.asar.gz dist/latest.json @opts
+          tag="$GITHUB_REF_NAME"
+          notes="release-notes/$tag.md"
+          opts=(--repo "$GITHUB_REPOSITORY" --title "Protect Panes ${tag#v}" --verify-tag)
+          if [ -f "$notes" ]; then opts+=(--notes-file "$notes"); else opts+=(--generate-notes); fi
+          gh release create "$tag" dist/ProtectPanes-Setup.exe dist/ProtectPanes-win32-x64.zip dist/ProtectPanes-app.asar.gz dist/latest.json "${opts[@]}"

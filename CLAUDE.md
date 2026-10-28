@@ -87,7 +87,7 @@ scripts/sign-release.js     Writes latest.json {payload, signature} for a zip, i
 scripts/make-signing-key.js One-time: create the signing key pair (refuses to overwrite)
 scripts/verify-release.mjs  Check a release folder like installed copies will (signature, sizes, hashes); the release workflow gates on it
 scripts/check-packaged.mjs  Run the built app from a plain and an awkward install folder; checks its pages still get IPC answers (release workflow)
-.github/workflows/release.yml  Tag vX.Y.Z -> test, sign with the UPDATE_SIGNING_KEY secret, verify, smoke-test the installer, publish
+.github/workflows/release.yml  Tag vX.Y.Z -> build job: test, build, smoke-test the installer; publish job (no dependencies installed): sign with the UPDATE_SIGNING_KEY secret, verify, publish
 release-notes/vX.Y.Z.md     Release text the workflow publishes
 site/                       The project page, https://jamesccupps.github.io/UnifiCameraViewer/ (see Project page); left out of the build
 .github/workflows/pages.yml Publishes site/ plus assets/icon.png to GitHub Pages when they change on main
@@ -374,15 +374,24 @@ Releases are built and published by `.github/workflows/release.yml` when a `vX.Y
 3. `npm test`, commit, push `main`.
 4. `git tag -a vX.Y.Z -m "Protect Panes X.Y.Z"` and `git push origin vX.Y.Z`.
 
-The workflow:
+The workflow has two jobs, so the signing key never meets the build's dependencies. Until 1.4.3 the key sat in a file while `npm run build:win` ran the packager and electron-builder, and any compromised package could have read it and signed updates for every installed copy.
+
+**build** (Windows, read-only token, no secrets):
 1. Checks the tag matches package.json.
-2. Runs `npm test`.
-3. Writes the `UPDATE_SIGNING_KEY` secret to a temp file for this job only.
-4. Builds the zip, Setup.exe and the signed `latest.json`.
-5. Deletes the key.
-6. Runs `scripts/verify-release.mjs`: the signature against the public key built into the app, then each file's size and SHA-256. A wrong secret stops here.
-7. Runs the packaged app from two install folders (`scripts/check-packaged.mjs`), then smoke-tests that exact installer (install, version, uninstall).
-8. Runs `gh release create` with all four files (Setup.exe, the zip, `ProtectPanes-app.asar.gz`, `latest.json`).
+2. Runs `npm ci`, then `npm test`.
+3. Builds the zip, Setup.exe and `ProtectPanes-app.asar.gz`, unsigned: there's no key on the runner.
+4. Runs the packaged app from two install folders (`scripts/check-packaged.mjs`), then smoke-tests that exact installer (install, version, uninstall).
+5. Uploads the three files as the `release-files` artifact.
+
+**publish** (Ubuntu, `contents: write`, the only job that reads the `UPDATE_SIGNING_KEY` secret):
+1. Checks out the tag fresh, with no `npm ci`. Only Node's own modules and the repo's scripts run here.
+2. Downloads the three files.
+3. Writes the key to a temp file and signs `latest.json` (`scripts/sign-release.js`). The Electron version comes from package-lock.json, and the unpacked app.asar hash from gunzipping the .gz, so no node_modules or build folder is needed.
+4. Deletes the key.
+5. Runs `scripts/verify-release.mjs`: the signature against the public key built into the app, then each file's size and SHA-256. A wrong secret stops here.
+6. Runs `gh release create` with all four files (Setup.exe, the zip, `ProtectPanes-app.asar.gz`, `latest.json`).
+
+The limit: a compromised dependency can still tamper with what it builds, and publish signs that. It can't take the key and sign something else later. The split was checked by running publish's sign and verify steps in a copy of the repo with no node_modules, on a local build, with a throwaway key. It runs for real on the first release after it.
 
 Installed copies find the release through `releases/latest/download/latest.json`.
 
