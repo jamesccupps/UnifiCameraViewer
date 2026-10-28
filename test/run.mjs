@@ -598,6 +598,11 @@ async function connectionSuite() {
   const ud = out.undecryptable;
   check("a saved password that can't be decrypted says to enter it again, and isn't retried",
     ud?.state === "authfailed" && /Enter it again/.test(ud.message) && ud.calls === 0, JSON.stringify(ud));
+  // Gaps with delays [40, 120, 360]: three failures (40, 120, 360), video, then from the start (40, 120).
+  const g = out.neverStarts?.gaps ?? [];
+  const near = (v, want) => v >= want * 0.8 && v < want * 1.8;
+  check("a stream that never starts backs off, and video in between starts the back-off over",
+    g.length >= 5 && near(g[0], 40) && near(g[1], 120) && near(g[2], 360) && near(g[3], 40) && near(g[4], 120), JSON.stringify(g));
 }
 
 // ---------------------------------------------------------------------------------------------

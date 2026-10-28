@@ -1,10 +1,14 @@
-import { ProtectAuthorizationError, ProtectCodecChangeError, ProtectLivestreamUnavailableError } from "unifi-protect";
+import { ProtectCodecChangeError, ProtectLivestreamUnavailableError } from "unifi-protect";
 import { applyRange } from "./avc-range.js";
 import { channelList } from "./console-connection.js";
 import { errorText } from "./util.js";
 
 // How long a live view tolerates no video before the library declares a stall and reconnects.
 const URGENCY_MS = 5_000;
+// A stream that never starts (the library gives up establishing it: a camera that answers the
+// negotiate but sends nothing, a 403) is tried again later and later, not every 10 s forever. Any
+// video resets it.
+const UNAVAILABLE_RETRY_MS = [10_000, 30_000, 120_000, 300_000];
 
 /*
  * Pumps one camera's Protect livestream (fMP4 over the console's own websocket - no RTSP/RTSPS)
@@ -32,6 +36,7 @@ export class CameraStream {
    * @param {() => string} [opts.getRange]   - "auto" | "full" | "limited" (see avc-range.js)
    * @param {(channel: string, payload: any) => void} opts.send
    * @param {object} opts.log
+   * @param {number[]} [opts.unavailableRetryMs] - replaces UNAVAILABLE_RETRY_MS (unit tests)
    */
   constructor(opts) {
     this.#opts = opts;
@@ -83,6 +88,7 @@ export class CameraStream {
 
   async #loop(signal) {
     const { getConnection, cameraId, log } = this.#opts;
+    let unavailable = 0; // establish failures in a row
 
     while (!signal.aborted) {
       const conn = getConnection();
@@ -157,6 +163,7 @@ export class CameraStream {
             sendInit(init);
           }
           if (this.#status.state !== "live") this.#setStatus("live", "");
+          unavailable = 0;
           // Copy: seg.data may be a view into a larger pooled buffer.
           this.#send("cam:media", new Uint8Array(seg.data));
         }
@@ -176,14 +183,11 @@ export class CameraStream {
           log.info(`codec changed on ${cameraId}; restarting stream`);
           continue;
         }
-        if (err instanceof ProtectAuthorizationError) {
-          this.#setStatus("error", "This account can't view this camera");
-          await this.#sleep(60_000, signal);
-          continue;
-        }
-        log.warn(`livestream ${cameraId} ch${this.channel}: ${errorText(err)}`);
+        const retry = this.#opts.unavailableRetryMs ?? UNAVAILABLE_RETRY_MS;
+        const wait = err instanceof ProtectLivestreamUnavailableError ? retry[Math.min(unavailable++, retry.length - 1)] : 3_000;
+        log.warn(`livestream ${cameraId} ch${this.channel}: ${errorText(err)}; trying again in ${Math.round(wait / 1000)} s`);
         this.#setStatus("reconnecting", "Reconnecting…");
-        await this.#sleep(err instanceof ProtectLivestreamUnavailableError ? 10_000 : 3_000, signal);
+        await this.#sleep(wait, signal);
       } finally {
         clearInterval(monitor);
         try { await sub[Symbol.asyncDispose](); } catch { /* already closed */ }

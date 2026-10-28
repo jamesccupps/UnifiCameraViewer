@@ -1,7 +1,8 @@
 // Unit checks for ConsoleConnection with a fake ProtectClient.connect. test/run.mjs runs this under
 // Electron's Node (ELECTRON_RUN_AS_NODE=1), since unifi-protect needs Node >= 22.20. Prints one
 // JSON object of results; run.mjs makes the assertions.
-import { ProtectAuthError } from "unifi-protect";
+import { ProtectAuthError, ProtectLivestreamUnavailableError } from "unifi-protect";
+import { CameraStream } from "../src/camera-stream.js";
 import { ConsoleConnection } from "../src/console-connection.js";
 
 const quiet = { debug() {}, info() {}, warn() {}, error() {} };
@@ -64,6 +65,36 @@ const out = {};
   await new Promise((r) => setTimeout(r, 200));
   out.undecryptable = { state: conn.state, message: conn.message, calls };
   await conn.stop();
+}
+
+// CameraStream: a stream that never starts is tried later and later; video in between resets that.
+// The camera's stream fails to establish 3 times, sends one fragment, then fails for good.
+{
+  const at = [];
+  let n = 0;
+  const failing = () => ({ next: async () => { throw new ProtectLivestreamUnavailableError("never started", { attempts: 4, phase: "establish" }); } });
+  const sub = () => {
+    at.push(performance.now());
+    const ok = ++n === 4;
+    let sent = false;
+    return {
+      state: ok ? "live" : "connecting",
+      initSegment: { codec: "avc1.4d401f", data: new Uint8Array(8) },
+      [Symbol.asyncIterator]: () => (ok
+        ? { next: async () => { if (sent) throw new ProtectLivestreamUnavailableError("gone", {}); sent = true; return { value: { type: "media", data: new Uint8Array(8) }, done: false }; } }
+        : failing()),
+      async [Symbol.asyncDispose]() {},
+    };
+  };
+  const cam = { isOnline: true, config: { channels: [{ id: 1, enabled: true }] }, livestream: sub };
+  const stream = new CameraStream({
+    getConnection: () => ({ state: "connected", name: "C", camera: () => cam }),
+    cameraId: "cam", resolveChannel: () => 1, send: () => {}, log: quiet, unavailableRetryMs: [40, 120, 360],
+  });
+  stream.start();
+  await until(() => at.length >= 6, 3_000);
+  stream.stop();
+  out.neverStarts = { gaps: at.slice(1).map((t, i) => Math.round(t - at[i])) };
 }
 
 console.log(JSON.stringify(out));
