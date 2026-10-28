@@ -94,7 +94,7 @@ release-notes/vX.Y.Z.md     Release text the workflow publishes
 2. `CameraStream` → `cam.livestream({ source: { type: "channel", channel }, urgency: () => 5000, discardOnDispose: true })`, an async iterable of `Segment`s:
    - `{ type: "init", codec, data }`
    - `{ type: "media", data, discontinuity? }`
-3. Main forwards these to the window as `cam:init` `{ codec, data, reset }` and `cam:media` (a `Uint8Array` copy; `seg.data` can be a view into a pooled buffer). `cam:status` carries live / connecting / reconnecting / waiting / offline / paused / error.
+3. Main forwards these to the window as `cam:init` `{ codec, data, reset }` and `cam:media`. Media segments go as the library built them (each in its own buffer, `Buffer.alloc`, offset 0; IPC copies anyway). Only a view into a larger buffer is copied first, so no neighbouring bytes go along. `cam:status` carries live / connecting / reconnecting / waiting / offline / paused / error.
 4. The renderer appends to a MediaSource `SourceBuffer`:
    - It holds about 0.2-0.7 s behind live: it plays 1.15× faster when behind, and jumps forward past 1.5 s.
    - It trims history older than 12 s.

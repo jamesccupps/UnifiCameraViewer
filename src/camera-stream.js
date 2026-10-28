@@ -165,8 +165,11 @@ export class CameraStream {
           }
           if (this.#status.state !== "live") this.#setStatus("live", "");
           unavailable = 0;
-          // Copy: seg.data may be a view into a larger pooled buffer.
-          this.#send("cam:media", new Uint8Array(seg.data));
+          // The library builds each media segment in a buffer of its own (Buffer.alloc, offset 0), and
+          // IPC copies what it sends anyway, so that goes as is. Only a view into a larger buffer (a
+          // pooled one, like the mock's small segments) is copied, so no neighbouring bytes go along.
+          const d = seg.data;
+          this.#send("cam:media", d.byteOffset === 0 && d.byteLength === d.buffer.byteLength ? d : new Uint8Array(d));
         }
         if (signal.aborted) return;
         if (dropped) {
