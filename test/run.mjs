@@ -1714,11 +1714,20 @@ async function listSuite() {
     document.querySelector('[data-tab="cameras"]').click();
     return out;
   })()`;
+  // At the list's 560 px minimum, camera names keep room of their own (they were squeezed to "B…" or
+  // to nothing while the model and status text kept its width).
+  const narrowNames = `(() => {
+    document.documentElement.style.width = "560px";
+    const widths = [...document.querySelectorAll(".cams li .cam-name b")].map((b) => b.clientWidth);
+    document.documentElement.style.width = "";
+    return widths;
+  })()`;
   const { result, config } = await runApp({
     userData, results, seconds: 19, extraArgs: ["--mock"],
     env: {
       PANES_SELFTEST_ACTIONS: JSON.stringify([
         { at: 18000, do: "manager-js", js: editorTip },
+        { at: 17200, do: "manager-js", js: narrowNames },
         { at: 13300, do: "manager-js", js: markForPatch },
         { at: 17800, do: "manager-js", js: afterPatch },
         { at: 2500, do: "manager-js", js: clickRow("Building Dock", "Hide") },
@@ -1738,6 +1747,8 @@ async function listSuite() {
     act(focusQuality)?.value === true && act(rerendered)?.value?.rerendered === true, JSON.stringify([act(focusQuality), act(rerendered)].map((a) => a?.value ?? a?.error)));
   check("an open console menu closes when the list loses focus", act(menuThenBlur)?.value?.opened === true && act(menuThenBlur).value.closed === true,
     JSON.stringify(act(menuThenBlur)?.value ?? act(menuThenBlur)?.error));
+  const nn = act(narrowNames)?.value;
+  check("at the list's narrowest, every camera name keeps at least 60 px", Array.isArray(nn) && nn.length >= 3 && nn.every((w) => w >= 60), JSON.stringify(nn));
   const et = act(editorTip)?.value;
   check("hover tips show inside the layout editor, above the dialog", et?.dialogOpen && et.open && et.text.startsWith("Separate windows"), JSON.stringify(et ?? act(editorTip)?.error));
   const marked = act(markForPatch)?.value;

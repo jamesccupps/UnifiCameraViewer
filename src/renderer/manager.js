@@ -558,13 +558,21 @@ function renderCamera(cam) {
     el("small", {}, [cam.model, cam.fisheye ? "360°" : null, statusText].filter(Boolean).join(" · ")),
   );
 
+  // "Medium · 720p", not "Medium · 1280×720": the long form took the name's room on a narrow list.
+  // The full sizes are in the tip. Square (360°) streams keep both numbers.
+  const shortLabel = (ch) => {
+    const name = ch.label.split(" · ")[0];
+    if (!ch.height) return name;
+    return ch.width === ch.height ? `${name} · ${ch.width}×${ch.height}` : `${name} · ${ch.height}p`;
+  };
+  const sizes = cam.channels.filter((ch) => ch.width).map((ch) => `${ch.label.split(" · ")[0]} ${ch.width}×${ch.height}`).join(", ");
   const channelSelect = cam.channels.length
     ? el("select", {
       "aria-label": `Quality for ${cam.name}`,
       "data-focus-key": `q-${cam.key}`,
-      tip: "Stream quality. Medium suits most windows; High (up to 4K) costs the most graphics power.",
+      tip: `Stream quality. Medium suits most windows; High (up to 4K) costs the most graphics power.${sizes ? ` ${sizes}.` : ""}`,
       onchange: (e) => panes.invoke("mgr:set-channel", { key: cam.key, channel: Number(e.target.value) }).then(refresh),
-    }, cam.channels.map((ch) => el("option", { value: String(ch.id), selected: ch.id === (cam.channel ?? 1) }, ch.label)))
+    }, cam.channels.map((ch) => el("option", { value: String(ch.id), selected: ch.id === (cam.channel ?? 1) }, shortLabel(ch))))
     : el("span");
 
   const find = el("button", {
