@@ -1505,7 +1505,8 @@ function cameraContextMenuTemplate(cw) {
 // Settings
 
 function setSetting(name, value) {
-  if (!(name in DEFAULT_SETTINGS) || typeof value !== "boolean") return;
+  // Own boolean settings only: `in` also took "toString" and the like, and a boolean updateSource.
+  if (!Object.hasOwn(DEFAULT_SETTINGS, name) || typeof DEFAULT_SETTINGS[name] !== "boolean" || typeof value !== "boolean") return;
   store.settings[name] = value;
   store.save();
   switch (name) {
@@ -1839,11 +1840,16 @@ function registerIpc() {
   handle("mgr:show-cameras", (consoleId) => showHiddenCameras(consoleId ? String(consoleId) : null));
   handle("mgr:find-camera", (key) => openCameraWindow(String(key)));
   handle("mgr:set-channel", ({ key, channel } = {}) => {
+    // A camera on a known console, and a real channel id. "__proto__" as the key used to write
+    // .channel onto Object.prototype (every object then had one); NaN or 1.5 used to be saved.
     const k = String(key);
+    const [consoleId, cameraId] = k.split("/");
+    if (!cameraId || k.split("/").length !== 2 || !store.data.consoles.some((c) => c.id === consoleId)) return;
+    if (!Number.isInteger(channel) || channel < 0 || channel > 9) return;
     const cw = camWins.get(k);
-    if (cw) return setChannel(cw, Number(channel));
+    if (cw) return setChannel(cw, channel);
     const entry = (store.data.windows[k] ??= { open: false, bounds: null, channel: null, onTop: false, name: "" });
-    entry.channel = Number(channel);
+    entry.channel = channel;
     store.save();
   });
   handle("mgr:set-setting", ({ name, value } = {}) => setSetting(String(name), value));

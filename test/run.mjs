@@ -599,7 +599,16 @@ async function securitySuite() {
   const where = "location.pathname.split('/').pop()";
   const tryOpen = "(() => { const w = window.open('about:blank'); return w === null; })()";
   const askPermission = "Notification.requestPermission()";
-  const { result } = await runApp({
+  // What a page that got hold of the camera list's IPC could send.
+  const badIpc = `(async () => {
+    await panes.invoke("mgr:set-channel", { key: "__proto__", channel: 7 });
+    await panes.invoke("mgr:set-channel", { key: ${JSON.stringify(lobby)}, channel: 1.5 });
+    await panes.invoke("mgr:set-channel", { key: ${JSON.stringify(`${A}/never-seen`)}, channel: NaN });
+    await panes.invoke("mgr:set-setting", { name: "updateSource", value: true });
+    await panes.invoke("mgr:set-setting", { name: "toString", value: true });
+    return true;
+  })()`;
+  const { result, config } = await runApp({
     userData, results: path.join(userData, "results"), seconds: 7, extraArgs: ["--mock"],
     env: {
       PANES_SELFTEST_ACTIONS: JSON.stringify([
@@ -609,10 +618,15 @@ async function securitySuite() {
         { at: 3500, do: "camera-js", win: 0, js: where },
         { at: 3600, do: "manager-js", js: tryOpen },
         { at: 3700, do: "camera-js", win: 0, js: askPermission },
+        { at: 4000, do: "manager-js", js: badIpc },
       ]),
     },
   });
   const val = (doing, js) => result.actions.find((a) => a.act.do === doing && a.act.js === js);
+  check("IPC input that isn't a camera key, a channel or a setting is ignored",
+    val("manager-js", badIpc)?.value === true && result.objectPrototype?.length === 0 && config.windows[lobby]?.channel === 2
+      && !(`${A}/never-seen` in config.windows) && config.settings.updateSource === "" && !Object.hasOwn(config.settings, "toString"),
+    JSON.stringify({ act: val("manager-js", badIpc)?.error, proto: result.objectPrototype, lobby: config.windows[lobby]?.channel, settings: config.settings }));
   check("pages can't be navigated away (what a dropped file or link does)",
     val("manager-js", where)?.value === "manager.html" && val("camera-js", where)?.value === "camera.html",
     JSON.stringify([val("manager-js", where), val("camera-js", where)].map((a) => a?.value ?? a?.error)));

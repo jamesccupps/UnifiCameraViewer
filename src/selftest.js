@@ -204,6 +204,7 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
       samples,
       actions: results,
       displays: screen.getAllDisplays().map((d) => ({ id: d.id, bounds: d.bounds, workArea: d.workArea, scaleFactor: d.scaleFactor })),
+      objectPrototype: Object.keys(Object.prototype), // anything here means something polluted it
     };
     for (const [id, c] of connections) result.connections[id] = { state: c.state, message: c.message, cameras: c.cameras().length, snapshots: c.snapshotCount, subscriptions: c.subscriptionCounts, active: c.activeSubscriptions };
     if (process.env.PANES_SELFTEST_SHOWBAR) {
