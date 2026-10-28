@@ -725,6 +725,23 @@ async function configSuite() {
   check("odd config shapes don't stop the app starting, and its grid opens",
     loaded(r4) && Object.keys(last(r4.result)).some((k) => k.startsWith("grid:Auto grid#")), JSON.stringify({ loaded: loaded(r4), cams: Object.keys(last(r4.result) ?? {}) }));
   check("keys this version doesn't know are kept when it saves", r4.config?.future?.kept === true, JSON.stringify(r4.config?.future));
+
+  // 5. config.json deleted while the app runs (a sync tool, antivirus): the next save writes it again.
+  // Before, moving the missing file to .bak threw first, so that save and every later one failed.
+  fs.writeFileSync(file, good);
+  const lockKey = `${A}/aaaaaaaa-cam0`;
+  const saveFailures = () => (logOf().match(/config save failed[^\n]*/g) ?? []);
+  const failedBefore = saveFailures().length;
+  const remove = setTimeout(() => fs.rmSync(file, { force: true }), 2500);
+  const r5 = await runApp({
+    userData, results: path.join(userData, "results-5"), seconds: 6, extraArgs: ["--mock"],
+    env: { PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 3500, do: "tray-click", label: "Hide cameras" }]) },
+  });
+  clearTimeout(remove);
+  const failed = saveFailures().slice(failedBefore);
+  check("a config.json deleted while the app runs is written again by the next save",
+    r5.config?.windows?.[lockKey]?.hidden === true && !failed.length,
+    JSON.stringify({ hidden: r5.config?.windows?.[lockKey]?.hidden ?? null, files: files(), failed: failed[0] ?? null }));
   console.log(`  results: ${userData}`);
 }
 

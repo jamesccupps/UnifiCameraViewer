@@ -154,7 +154,16 @@ export class Store {
       } finally {
         fs.closeSync(fd);
       }
-      if (this.#fileIsGood) fs.renameSync(this.#file, this.#file + ".bak");
+      if (this.#fileIsGood) {
+        try {
+          fs.renameSync(this.#file, this.#file + ".bak");
+        } catch (err) {
+          // Deleted while the app ran (a sync tool, antivirus): there's nothing to keep, so write it
+          // again. Throwing here failed this save and every later one, and the .bak stays as it was.
+          if (err.code !== "ENOENT") throw err;
+          this.#log?.warn("config.json was gone; writing it again");
+        }
+      }
       fs.renameSync(tmp, this.#file);
       this.#fileIsGood = true;
     } catch (err) {
