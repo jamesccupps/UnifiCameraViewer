@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { CameraStream } from "./camera-stream.js";
 import { ConsoleConnection, channelList, fisheyeInfo, pickChannel, resolveChannel } from "./console-connection.js";
 import { autoGrid, cellRects, channelForTile, fitAspect, readingOrder, templateById, TEMPLATES } from "./grid.js";
-import { GridWindow } from "./grid-window.js";
+import { cycleSeconds, GridWindow, MAX_CYCLE, tileMembers } from "./grid-window.js";
 import { createLogger } from "./log.js";
 import { consoleKey, installCertPinning } from "./cert-pins.js";
 import { Previews } from "./previews.js";
@@ -103,7 +103,7 @@ async function init() {
   for (const key of Object.keys(store.data.windows)) {
     if (!consoleIds.has(key.split("/")[0])) delete store.data.windows[key];
   }
-  for (const g of store.data.grids) g.tiles = g.tiles.map((t) => (t && consoleIds.has(t.key.split("/")[0]) ? t : null));
+  for (const g of store.data.grids) g.tiles = g.tiles.map((t) => pruneTile(t, (key) => consoleIds.has(key.split("/")[0])));
 
   updater = new Updater({
     currentVersion: app.getVersion(),
@@ -272,7 +272,7 @@ async function removeConsole(id) {
   for (const cw of [...camWins.values()]) if (cw.consoleId === id) cw.win.close();
   for (const key of Object.keys(store.data.windows)) if (key.startsWith(`${id}/`)) delete store.data.windows[key];
   for (const g of store.data.grids) {
-    g.tiles = g.tiles.map((t) => (t?.key.startsWith(`${id}/`) ? null : t));
+    g.tiles = g.tiles.map((t) => pruneTile(t, (key) => !key.startsWith(`${id}/`)));
     gridWins.get(g.id)?.sync();
   }
   store.data.consoles = store.data.consoles.filter((c) => c.id !== id);
@@ -644,7 +644,7 @@ function deleteLayout(id) {
  * A Protect liveview as a layout editor draft, saved only from the editor. It takes the editor
  * template with as many tiles as the liveview has slots (Protect offers the same set: 1, 2x2,
  * 1+5 … 5x5), or the next bigger one, with the slots in order, on the screen the camera list is on.
- * A slot that cycles through several cameras in Protect shows its first one.
+ * A slot that cycles through several cameras in Protect keeps its cycle (grid windows only).
  */
 function liveviewDraft(consoleId, liveviewId) {
   const conn = connections.get(consoleId);
@@ -654,10 +654,13 @@ function liveviewDraft(consoleId, liveviewId) {
   const tpl = bySize.find((t) => t.cells.length >= lv.slots.length) ?? bySize.at(-1);
   const seen = new Set();
   const cells = tpl.cells.map((_, i) => {
-    const key = lv.slots[i] ? `${consoleId}/${lv.slots[i]}` : null;
-    if (!key || seen.has(key)) return null;
+    const keys = (lv.slots[i]?.cameras ?? []).map((id) => `${consoleId}/${id}`);
+    // Each camera is the first of one tile only; it can still come round in other tiles' cycles.
+    const key = keys.find((k) => !seen.has(k));
+    if (!key) return null;
     seen.add(key);
-    return { key, mode: "quad" };
+    const others = keys.filter((k) => k !== key);
+    return others.length ? { key, mode: "quad", cycle: { keys: others, seconds: cycleSeconds(lv.slots[i].seconds) } } : { key, mode: "quad" };
   });
   const display = managerWin && !managerWin.isDestroyed() ? screen.getDisplayMatching(managerWin.getBounds()) : screen.getPrimaryDisplay();
   return {
@@ -665,7 +668,7 @@ function liveviewDraft(consoleId, liveviewId) {
     displayId: display.id,
     templateId: tpl.id,
     cells,
-    left: lv.slots.slice(tpl.cells.length).filter(Boolean).length,
+    left: lv.slots.slice(tpl.cells.length).filter((s) => s.cameras.length).length,
   };
 }
 
@@ -697,15 +700,22 @@ function screensForEditor() {
     }));
 }
 
-/** The editor's cells, checked: [{ key, mode } | null], one per tile of tpl, each camera once. */
+/**
+ * The editor's cells, checked: [{ key, mode, cycle? } | null], one per tile of tpl, each camera
+ * first in one tile only. cycle is { keys: [the other cameras], seconds }.
+ */
 function editorCells(input, tpl) {
   const consoleIds = new Set(store.data.consoles.map((c) => c.id));
+  const known = (k) => typeof k === "string" && consoleIds.has(k.split("/")[0]) && !!k.split("/")[1];
   const seen = new Set();
   return (Array.isArray(input?.cells) ? input.cells : []).slice(0, tpl.cells.length).map((c) => {
     const key = typeof c?.key === "string" ? c.key : "";
-    if (!consoleIds.has(key.split("/")[0]) || !key.split("/")[1] || seen.has(key)) return null;
+    if (!known(key) || seen.has(key)) return null;
     seen.add(key);
-    return { key, mode: VIEW_MODES.includes(c.mode) ? c.mode : "quad" };
+    const cell = { key, mode: VIEW_MODES.includes(c.mode) ? c.mode : "quad" };
+    const others = [...new Set(Array.isArray(c.cycle?.keys) ? c.cycle.keys.filter((k) => known(k) && k !== key) : [])].slice(0, MAX_CYCLE - 1);
+    if (others.length) cell.cycle = { keys: others, seconds: cycleSeconds(c.cycle.seconds) };
+    return cell;
   });
 }
 
@@ -763,6 +773,16 @@ const gridPlayers = () => [...gridWins.values()].flatMap((gw) => gw.players);
 const TILE_FIELDS = ["range", "picture", "hideName", "clock"]; // what a new tile copies from the camera's window
 let pendingEditor = null; // grid id the camera list should open in the editor (tile menu → Edit grid…)
 
+/** A tile with only the cameras `keep` accepts, changed in place; null when its own camera goes. */
+function pruneTile(t, keep) {
+  if (!t || !keep(t.key)) return null;
+  if (t.cycle) {
+    t.cycle.then = t.cycle.then.filter((m) => keep(m.key));
+    if (!t.cycle.then.length) delete t.cycle;
+  }
+  return t;
+}
+
 function saveEditorGrid(input, tpl, display, cells) {
   const name = String(input?.name ?? "").trim().slice(0, 60);
   if (!name) throw new Error("Give the grid a name.");
@@ -779,6 +799,12 @@ function saveEditorGrid(input, tpl, display, cells) {
     const dewarp = dewarpForView(c.key, c.mode, kept?.dewarp ?? store.data.windows[c.key]?.dewarp);
     if (dewarp) tile.dewarp = dewarp;
     else delete tile.dewarp;
+    if (c.cycle) {
+      // The other cameras of a cycle have settings of their own, kept the same way. The editor
+      // doesn't show their 360° views, so a new one starts with its window's.
+      const before = new Map((kept?.cycle?.then ?? []).map((m) => [m.key, m]));
+      tile.cycle = { seconds: c.cycle.seconds, then: c.cycle.keys.map((k) => before.get(k) ?? newTile(k)) };
+    } else delete tile.cycle;
     return tile;
   });
   let grid = existing;
@@ -837,9 +863,11 @@ function gridWindow(grid) {
   return gw;
 }
 
-function makeTilePlayer({ gw, index, tile, wc }) {
+function makeTilePlayer({ gw, index, tile, wc, like = null }) {
   const [consoleId, cameraId] = tile.key.split("/");
-  const cw = { key: tile.key, consoleId, cameraId, win: gw.win, wc, wcId: wc.id, gw, tile, index, stream: null, aspect: null, autoChannel: null };
+  // A cycling tile's next camera takes over the tile's size-based quality, so it starts on the right
+  // channel instead of Medium and a restart once tileQuality catches up.
+  const cw = { key: tile.key, consoleId, cameraId, win: gw.win, wc, wcId: wc.id, gw, tile, index, stream: null, aspect: null, autoChannel: like?.autoChannel ?? null };
   cw.stream = new CameraStream({
     getConnection: () => connections.get(consoleId),
     cameraId,
@@ -969,7 +997,7 @@ function gridMenuItems(gw) {
 /** Right-click on an empty tile (or the gaps): put a camera there, or the grid's own items. */
 function gridPageMenuTemplate(gw, index) {
   const empty = Number.isInteger(index) && !gw.grid.tiles[index];
-  const inGrid = new Set(gw.grid.tiles.filter(Boolean).map((t) => t.key));
+  const inGrid = new Set(gw.grid.tiles.flatMap(tileMembers).map((t) => t.key));
   const pick = empty
     ? [{
       label: "Put a camera here",
@@ -1104,7 +1132,7 @@ function applyLens(d, lens) {
 const lensCopies = (key) => [
   store.data.windows[key]?.dewarp,
   ...store.data.layouts.map((l) => l.windows[key]?.dewarp),
-  ...store.data.grids.flatMap((g) => g.tiles.filter((t) => t?.key === key).map((t) => t.dewarp)),
+  ...store.data.grids.flatMap((g) => g.tiles.flatMap(tileMembers).filter((t) => t.key === key).map((t) => t.dewarp)),
 ].filter(Boolean);
 
 function shareLens(key, lens, from = null) {
@@ -1712,9 +1740,13 @@ function managerState() {
       name: g.name,
       open: !!gridWins.get(g.id)?.isOpen,
       hidden: !!g.hidden,
-      count: g.tiles.filter(Boolean).length,
+      count: new Set(g.tiles.flatMap(tileMembers).map((t) => t.key)).size,
       // In the editor's own terms, so Edit reopens it as it was saved.
-      editor: { displayId: g.editor?.displayId ?? null, templateId: g.templateId, cells: g.tiles.map((t) => (t ? { key: t.key, mode: viewOf(t.dewarp) } : null)) },
+      editor: {
+        displayId: g.editor?.displayId ?? null,
+        templateId: g.templateId,
+        cells: g.tiles.map((t) => (t ? { key: t.key, mode: viewOf(t.dewarp), ...(t.cycle && { cycle: { keys: t.cycle.then.map((m) => m.key), seconds: t.cycle.seconds } }) } : null)),
+      },
     })),
     openEditor: editing,
     screens: screensForEditor(),
@@ -1742,7 +1774,7 @@ function managerState() {
           channel: cw?.stream?.channel ?? (cam.channels?.length ? pickChannel(cam.channels.map((ch) => ch.id), w?.channel) : w?.channel ?? null),
           onTop: !!w?.onTop, status: cw?.stream?.status ?? null,
           // Grids it's on screen in: the row said "closed" while the camera played in a grid.
-          inGrids: [...gridWins.values()].filter((gw) => gw.isOpen && !gw.grid.hidden && gw.grid.tiles.some((t) => t?.key === key)).map((gw) => gw.grid.name),
+          inGrids: [...gridWins.values()].filter((gw) => gw.isOpen && !gw.grid.hidden && gw.grid.tiles.some((t) => tileMembers(t).some((m) => m.key === key))).map((gw) => gw.grid.name),
         };
       });
       return {
@@ -1758,7 +1790,7 @@ function managerState() {
         hiddenCount: hiddenKeys(c.id).length,
         shownCount: shown(c.id),
         openCount: Object.entries(store.data.windows).filter(([key, w]) => w.open && key.startsWith(`${c.id}/`)).length,
-        liveviews: (conn?.liveviews?.() ?? []).map((lv) => ({ id: lv.id, name: lv.name, count: new Set(lv.slots.filter(Boolean)).size })),
+        liveviews: (conn?.liveviews?.() ?? []).map((lv) => ({ id: lv.id, name: lv.name, count: new Set(lv.slots.flatMap((sl) => sl.cameras)).size })),
         cameras,
       };
     }),

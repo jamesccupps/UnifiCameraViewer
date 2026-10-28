@@ -64,7 +64,7 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
     for (const { id, cw, bounds, visible } of gridTiles()) {
       try {
         const stats = await cw.wc.executeJavaScript("window.__panesStats && window.__panesStats()");
-        row.cams[id] = { ...stats, visible, bounds, channel: cw.stream.channel };
+        row.cams[id] = { ...stats, visible, bounds, channel: cw.stream.channel, key: cw.key };
       } catch (err) { row.cams[id] = { error: String(err) }; }
     }
     samples.push(row);

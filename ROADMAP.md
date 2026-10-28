@@ -67,7 +67,7 @@ Original notes: quality (`channel`), always-on-top and dewarp settings were per 
 
 **Status:** built (2026-10-27) as (a) plus Protect liveview import, shipped in 1.2.0.
 - Named layouts are saved from the camera list and switched from the list or the tray.
-- Import opens the liveview in the layout editor (since 1.4.3), as a grid window or separate windows. It keeps the same grid and the first camera of each slot. Slot cycling isn't reproduced.
+- Import opens the liveview in the layout editor (since 1.4.3), as a grid window or separate windows. It keeps the same grid and each slot's cameras. In a grid window a slot that cycles keeps cycling on Protect's interval; separate windows show the slot's first camera.
 - `npm run test:layouts` and the e2e suite cover it; the e2e suite checks the real library's `client.liveviews`.
 - (b), the grid window: built for 1.4.0 at the owner's request.
   - The layout editor's **Open as → One grid window** makes one framed window with a WebContentsView per tile running the ordinary camera page. Each tile keeps 360° dewarp and PTZ, the clock, picture and the right-click menu.
@@ -76,7 +76,10 @@ Original notes: quality (`channel`), always-on-top and dewarp settings were per 
   - They reopen at launch and hide with Hide cameras. `npm run test:grid` covers it.
   - "Enlarge this tile": built for 1.4.3 (double-click or the tile menu; the other tiles hide and pause until it goes back).
   - Importing a Protect liveview as a grid: built for 1.4.3 (the import fills in the layout editor).
-  - Not built: slot cycling.
+  - Slot cycling: built for 1.4.3, from Protect liveviews only (`npm run test:cycle`).
+    - It cycles on time only. Protect's `cycleMode` values aren't known, so a motion-triggered mode, if there is one, isn't reproduced.
+    - Each switch starts the next camera's stream from scratch, so a tile shows "Connecting…" for about a second.
+    - Not built: making or editing a cycle in the editor, and pre-buffering the next camera so a switch has no gap.
 
 Original notes:
 

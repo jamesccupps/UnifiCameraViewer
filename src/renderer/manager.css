@@ -331,6 +331,7 @@ dialog.editor { width: min(1040px, 96vw); max-height: 94vh; padding: 16px 18px; 
 .cell .empty { color: var(--muted); font-size: 11px; }
 .cell b { font-weight: 500; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cell small { color: var(--muted); font-size: 10.5px; }
+.cell small.cycle { color: var(--accent); max-width: 95%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cell select { font-size: 11px; padding: 1px 4px; max-width: 95%; }
 .cell .x { position: absolute; right: 3px; top: 2px; border: 0; background: transparent; padding: 0 5px; font-size: 13px; color: var(--muted); }
 .cell .x:hover:not(:disabled) { color: var(--bad); background: transparent; }

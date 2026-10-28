@@ -12,13 +12,23 @@ import { placeWindow, windowBounds } from "./window-bounds.js";
  *
  * The saved record, store.data.grids[]:
  *   { id, name, templateId, bounds, open, hidden?, onTop?,
- *     tiles: [{ key, channel?, range?, picture?, hideName?, clock?, dewarp? } | null] }
+ *     tiles: [{ key, channel?, range?, picture?, hideName?, clock?, dewarp?, cycle? } | null] }
  * A tile's channel left out means "match the tile's size" (or Medium with that setting off).
+ *
+ * A tile with cycle: { seconds, then: [{ key, ...the same settings }] } (from a Protect liveview
+ * slot) shows its own camera, then each of `then` in turn. Each camera keeps its own settings, so a
+ * player's `tile` is whichever of those records it shows. A switch replaces the tile's page rather
+ * than reloading it: a message the old page sent late can't be taken for the new camera's.
  */
+export const MAX_CYCLE = 16;
+export const cycleSeconds = (s) => Math.min(3600, Math.max(3, Math.round(Number(s) || 10)));
+/** The cameras a tile shows: its own record, then its cycle's. */
+export const tileMembers = (t) => (t ? [t, ...(t.cycle?.then ?? [])] : []);
+
 export class GridWindow {
   win = null;
   #deps;
-  #tiles = []; // index -> { view, player } | null
+  #tiles = []; // index -> { view, player, tile (the saved record), step, timer, seconds } | null
   // A tile enlarged to fill the window (double-click, or "Enlarge this tile"); the others are hidden
   // with their streams paused until it goes back. Not saved: a grid always reopens as a grid.
   #enlarged = null;
@@ -26,7 +36,7 @@ export class GridWindow {
   /**
    * @param {object} grid - the saved record (mutated in place by main.js)
    * @param {object} deps - { settings(), save(), fitBounds(b), boundsFrozen(), defaultBounds(), icon, gridPage, gridPreload,
-   *   cameraPage, cameraPreload, makePlayer({ gw, index, tile, wc }), dropPlayer(player),
+   *   cameraPage, cameraPreload, makePlayer({ gw, index, tile, wc, like }), dropPlayer(player),
    *   tilesResized(gw, rects), closed(gw) }
    */
   constructor(grid, deps) {
@@ -102,13 +112,20 @@ export class GridWindow {
   sync() {
     if (!this.isOpen) return;
     const n = this.template.cells.length;
-    const keep = new Map(this.#tiles.filter(Boolean).map((t) => [t.player.tile, t]));
+    const keep = new Map(this.#tiles.filter(Boolean).map((t) => [t.tile, t]));
     const next = this.grid.tiles.slice(0, n).map((tile, index) => {
       if (!tile) return null;
       const t = keep.get(tile);
       if (!t) return this.#make(tile, index);
       keep.delete(tile);
+      // Edit grid… took the camera it was showing out of its cycle: start over from its own.
+      if (!tileMembers(tile).includes(t.player.tile)) {
+        this.#drop(t, true);
+        return this.#make(tile, index);
+      }
       t.player.index = index;
+      t.step = tileMembers(tile).indexOf(t.player.tile);
+      this.#arm(t);
       return t;
     });
     for (const t of keep.values()) this.#drop(t, true);
@@ -161,6 +178,13 @@ export class GridWindow {
   }
 
   #make(tile, index) {
+    const t = { tile, step: 0, timer: null, seconds: null, ...this.#page(tile, index) };
+    this.#arm(t);
+    return t;
+  }
+
+  /** A tile page and its player for one of the tile's cameras; `like` is the player it takes over from. */
+  #page(member, index, like = null) {
     const d = this.#deps;
     const view = new WebContentsView({
       webPreferences: { preload: d.cameraPreload, contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false, spellcheck: false },
@@ -168,12 +192,35 @@ export class GridWindow {
     view.setBackgroundColor("#000000");
     this.win.contentView.addChildView(view);
     view.webContents.loadFile(d.cameraPage, { query: { tile: "1" } });
-    const player = d.makePlayer({ gw: this, index, tile, wc: view.webContents });
+    const player = d.makePlayer({ gw: this, index, tile: member, wc: view.webContents, like });
     if (this.grid.hidden || this.win.isMinimized() || !this.#tileShown(index)) player.stream.pause();
     return { view, player };
   }
 
-  #drop({ view, player }, detach) {
+  /** Start, change or stop a tile's cycle timer to match its record. */
+  #arm(t) {
+    const seconds = tileMembers(t.tile).length > 1 ? cycleSeconds(t.tile.cycle.seconds) : null;
+    if (seconds === t.seconds) return;
+    clearInterval(t.timer);
+    t.seconds = seconds;
+    t.timer = seconds ? setInterval(() => this.#advance(t), seconds * 1000) : null;
+  }
+
+  /** A cycling tile's next camera. One nobody can see (hidden, minimized, behind an enlarged tile) waits. */
+  #advance(t) {
+    const index = this.#tiles.indexOf(t);
+    if (index < 0 || !this.isOpen || this.grid.hidden || this.win.isMinimized() || !this.#tileShown(index)) return;
+    const members = tileMembers(t.tile);
+    t.step = (t.step + 1) % members.length;
+    const rect = t.view.getBounds();
+    const old = { view: t.view, player: t.player };
+    Object.assign(t, this.#page(members[t.step], index, old.player));
+    t.view.setBounds(rect);
+    this.#drop(old, true);
+  }
+
+  #drop({ view, player, timer }, detach) {
+    clearInterval(timer);
     this.#deps.dropPlayer(player);
     if (detach && this.isOpen) this.win.contentView.removeChildView(view);
     // A WebContentsView's page isn't closed with its window; without this its renderer lingers.

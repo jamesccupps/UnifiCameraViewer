@@ -109,8 +109,10 @@ export class ConsoleConnection extends EventEmitter {
   }
 
   /**
-   * Protect's saved liveviews (the web UI's camera grids) as { id, name, slots: [cameraId | null] }.
-   * A slot can cycle through several cameras in Protect; only its first camera is used here.
+   * Protect's saved liveviews (the web UI's camera grids) as
+   * { id, name, slots: [{ cameras: [cameraId], seconds }] }. A slot with several cameras cycles
+   * through them every `seconds` (Protect's cycleInterval). cycleMode isn't read: the library
+   * doesn't say what values it takes, so every cycling slot cycles on time.
    */
   liveviews() {
     if (!this.#client) return [];
@@ -118,7 +120,10 @@ export class ConsoleConnection extends EventEmitter {
       return this.#client.liveviews.map((lv) => ({
         id: lv.id,
         name: String(lv.name ?? "Liveview"),
-        slots: (lv.slots ?? []).map((s) => s?.cameras?.[0] ?? null),
+        slots: (lv.slots ?? []).map((s) => ({
+          cameras: [...new Set((Array.isArray(s?.cameras) ? s.cameras : []).filter((id) => typeof id === "string" && id))],
+          seconds: Number(s?.cycleInterval) || null,
+        })),
       }));
     } catch {
       return [];

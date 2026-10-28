@@ -31,6 +31,7 @@
     "test:editor": "node test/run.mjs editor",
     "test:list": "node test/run.mjs list",
     "test:grid": "node test/run.mjs grid",
+    "test:cycle": "node test/run.mjs cycle",
     "sign-release": "node scripts/sign-release.js",
     "test:e2e": "node test/run.mjs e2e"
   },

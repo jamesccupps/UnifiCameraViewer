@@ -38,6 +38,7 @@ npm run test:arrange      # layout geometry (unit) + Arrange / Close all on real
 npm run test:editor       # layout editor: synthetic drag-and-drop into tiles, 360° view per tile, Edit, fill from screen
 npm run test:list         # camera list: Hide from list, previews (thumbnails, hover, request caching, setting)
 npm run test:grid         # grid windows: built in the editor, tiles live, tile/grid menus, Hide/Show, relaunch, layout switch
+npm run test:cycle        # cycling grid tiles: order, per-camera settings, stops when hidden, no leftover streams, import and re-save
 npm run test:e2e          # fake UniFi OS consoles over HTTPS/WSS through the real unifi-protect library (incl. snapshots, 1.3.x passwords)
 npm run build:win         # dist/Protect Panes-win32-x64/ + zip + ProtectPanes-Setup.exe + ProtectPanes-app.asar.gz + latest.json (signed)
 ```
@@ -124,7 +125,7 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
   - `windows["<consoleId>/<cameraId>"]`: `{open, bounds, channel, onTop, name, hideName, hidden, listHidden, clock, range, picture, dewarp}`. `range` is `"full" | "limited"` (absent = auto). `clock` true/false overrides the default (on in quad/panorama, off otherwise). `hideName` hides one window's label; `settings.showNames` off hides all of them. `hidden` (with `open: true`) means taken off screen by Hide cameras / Hide all. `listHidden` is Hide from list. `picture` is `{brightness, contrast}` (0.5-2, absent = both 1).
   - `settings`: `{lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin, arrangeQuality, showPreviews, updateSource}`. `arrangeQuality` (default on) lets Arrange set each camera's channel from its tile's physical width: up to 700 px Low, up to 1400 px Medium, above that High. `updateSource` is an `https://` base URL or a folder (UNC or drive path) holding `latest.json` and the zip. Plain http is refused. It defaults to `https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download`, and blank turns checks off. `runApp()` in the tests blanks it unless a suite sets one, so tests never touch the network.
   - `layouts[]`: `{id, name, windows: {"<consoleId>/<cameraId>": {bounds, channel, onTop, hideName, clock, range, picture, dewarp}}, editor?}`. Saving under an existing name (case-insensitive) replaces it. `editor: {displayId, templateId, cells}` is present only on layouts built in the layout editor, and is what its Edit button reopens.
-  - `grids[]`: `{id, name, templateId, bounds, open, hidden?, onTop?, editor: {displayId}, tiles: [{key, channel?, range?, picture?, hideName?, clock?, dewarp?} | null]}`. A tile has its own settings, separate from the camera's window, so a 360° camera can be Panorama in a grid and Quad in its window. A tile with no `channel` follows its tile size.
+  - `grids[]`: `{id, name, templateId, bounds, open, hidden?, onTop?, editor: {displayId}, tiles: [{key, channel?, range?, picture?, hideName?, clock?, dewarp?, cycle?: {seconds, then: [{key, ...the same settings}]}} | null]}`. A tile has its own settings, separate from the camera's window, so a 360° camera can be Panorama in a grid and Quad in its window. A tile with no `channel` follows its tile size.
 - `config.json.bak`: the config.json from before the last save. Each save writes `config.json.tmp`, fsyncs it, moves config.json to `.bak`, then moves the new one in. NTFS journals renames but not data, so before 1.4.3 a power cut just after a save could leave config.json full of zeros, and the app started empty without a word. Loading falls back to `.bak` when config.json is missing (a save cut off between the two moves) or unreadable. An unreadable file is kept as `config.json.corrupt-<time>`, and it never becomes the next `.bak`. Load and save problems go to the log (`store.setLogger()`; the store exists before the logger).
 - Loading drops window and layout entries that aren't objects, and a grid on a template without fixed cells (`auto`, or an unknown id) shows as 2×2. Either one used to crash startup on every launch. Top-level keys this version doesn't know are carried through, so a downgrade and upgrade keeps them. A startup failure goes to the log and, outside test runs, a `showErrorBox`; before, it exited with nothing shown.
 - `protect-panes.log`: connection log. Rolls to `.log.1` at 2 MB.
@@ -215,14 +216,25 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
   - `applyLayout()` closes every open window not in the layout, writes the saved fields over each entry, moves or restarts existing windows, and calls `openCameraWindow`, which creates the window or un-hides it.
   - Layouts are switchable from the tray (Layouts submenu) and the camera list.
 - **Protect liveview import.**
-  - `ConsoleConnection.liveviews()` maps `client.liveviews` to `{id, name, slots: [firstCameraId | null]}`. Protect slots can cycle through several cameras; only the first is used.
+  - `ConsoleConnection.liveviews()` maps `client.liveviews` to `{id, name, slots: [{cameras: [cameraId], seconds}]}`. `seconds` is Protect's `cycleInterval`.
+  - `cycleMode` isn't read. The library types it as a plain string, and the fake console's "time" is the only value seen. So every slot with several cameras cycles on time, and a mode that switches on motion (if Protect has one) isn't reproduced. Unverified on a real console: the mode values, and that `cycleInterval` is in seconds.
   - `liveviewDraft()` makes a layout editor draft and saves nothing.
     - The template is the one with as many tiles as the liveview has slots, or the next bigger one. Protect's liveview layouts and the editor's templates are the same set (1, 2x2, 1+5 … 5x5), so a 6-slot liveview opens as 1 + 5.
-    - A camera in two slots fills only the first.
+    - A camera is the first camera of one tile only: a slot whose first camera is already placed starts with its next one. It can still come round in other tiles' cycles.
+    - A slot with more cameras becomes a cell with `cycle: {keys: [the others], seconds}`. The editor shows "↻ cycles N cameras". Separate windows ignore the cycle and show the first camera.
     - Slots past the biggest template's last tile are counted (`left`), and the editor says how many came out.
   - The editor opens it as new, set to one grid window, with "Open as" still changeable. Saving goes through the editor's normal path. So separate windows get the editor's tile rects and quality from tile size, not the old even grid at each window's current quality.
   - Unverified: that Protect's slot order for an uneven layout (1 + 5, 2 + 8, 1 + 12) matches the editor's cell order (big tiles first, then reading order). Only 2x2 liveviews have been checked against the library, using the fake console's. Check an uneven liveview on a real console.
-  - The fake console serves one 2x2 liveview, including an empty slot and a cycling slot. The mock serves whatever `mockLiveviews` lists.
+  - The fake console serves one 2x2 liveview, including an empty slot and a cycling slot. The mock serves whatever `mockLiveviews` lists (a slot can be an array of camera indexes; `seconds` per liveview).
+- **Cycling grid tiles (grid-window.js).**
+  - A tile with `cycle: {seconds, then: [{key, ...tile settings}]}` shows its own camera, then each of `then`, every `seconds` (clamped to 3-3600). `tileMembers(tile)` is `[tile, ...then]`; anything that looks for a camera in a grid (lens sharing, "in grid X", Put a camera here, removing a console) goes through it.
+  - Each member is a settings record of its own, and the player's `cw.tile` is the member it shows. So quality, picture and the 360° view are per camera, and a menu change while Dock is showing changes Dock's.
+  - A switch makes a new WebContentsView and closes the old one rather than reloading the page. A reload kept the webContents id, so a message the old page sent late (an auto-detected circle, an aspect) would be taken for the new camera's. The cost is a renderer process per switch and a black tile with "Connecting…" until the new stream is live. There's no pre-buffering.
+  - The new player takes over the old one's `autoChannel` (`makePlayer({like})`), so it starts on the tile's size-based quality instead of Medium and a restart.
+  - A tile nobody can see (grid hidden or minimized, behind an enlarged tile) doesn't switch. The timer keeps ticking and skips.
+  - The editor keeps a cell's cycle when the camera is dragged to another tile. Dropping a camera onto a cycling tile replaces the cycle. Edit grid… gets cycles back from `mgr:state` (`editor.cells[i].cycle`), and saving keeps each member's record (matched by key).
+  - `store.js` `loadTile()` drops a cycle with no valid members.
+  - `npm run test:cycle` covers it.
 - **In-place updates (updater.js).** The exe is unsigned, so the Ed25519 signature on `latest.json` is the only gate before downloaded code runs. Keep these steps in this order:
   1. Verify the manifest signature against `UPDATE_PUBLIC_KEY`.
   2. Validate the payload: `app`, an x.y.z version, sha256, size, and a bare `.zip` file name.
@@ -388,7 +400,6 @@ Owner-requested features, with findings and open questions, are in `ROADMAP.md`.
 - Live view only: no playback, timeline, events, audio or two-way talk.
 - PTZ cameras can't be steered; only the 360° virtual PTZ exists.
 - One window per camera: the same camera can't have two floating windows (it can be in a window and in grid tiles).
-- Imported Protect liveviews don't reproduce slot cycling: each slot shows its first camera.
-- Grid windows have no per-tile cycling.
+- Tile cycling comes only from Protect liveviews: the editor can't make or change a cycle, only keep or drop one. Cycling is on time only, and each switch shows "Connecting…" for about as long as a stream takes to start.
 - Doorbell package-camera lens isn't exposed (the library supports `source: {type: "lens"}`).
 - Desk-mount panorama and lens FOV > 180° are implemented but have only light test coverage.

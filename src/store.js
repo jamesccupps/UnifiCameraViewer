@@ -12,7 +12,7 @@ import path from "node:path";
  *   windows:  { "<consoleId>/<cameraId>": { open, hidden, listHidden, bounds: {x,y,width,height}, channel, onTop, name, hideName, clock, range, dewarp } },
  *   settings: { lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin },
  *   layouts:  [{ id, name, windows: { "<consoleId>/<cameraId>": { bounds, channel, onTop, hideName, clock, range, picture, dewarp } }, editor? }],
- *   grids:    [{ id, name, templateId, bounds, open, hidden, onTop, editor?, tiles: [{ key, channel, range, picture, hideName, clock, dewarp } | null] }]
+ *   grids:    [{ id, name, templateId, bounds, open, hidden, onTop, editor?, tiles: [{ key, channel, range, picture, hideName, clock, dewarp, cycle? } | null] }]
  * }
  * (grids: see src/grid-window.js)
  *
@@ -36,6 +36,17 @@ export const DEFAULT_SETTINGS = Object.freeze({
 
 function defaults() {
   return { version: 1, consoles: [], windows: {}, settings: { ...DEFAULT_SETTINGS }, layouts: [], grids: [] };
+}
+
+/** A saved grid tile, or null if it isn't one; a cycle without other cameras is dropped. */
+function loadTile(t) {
+  if (!t || typeof t.key !== "string") return null;
+  const then = Array.isArray(t.cycle?.then) ? t.cycle.then.filter((m) => m && typeof m.key === "string") : [];
+  if (!then.length) {
+    const { cycle, ...rest } = t;
+    return rest;
+  }
+  return { ...t, cycle: { ...t.cycle, then } };
 }
 
 /*
@@ -108,7 +119,7 @@ export class Store {
         : [],
       grids: Array.isArray(raw.grids)
         ? raw.grids.filter((g) => g && g.id && g.name && typeof g.templateId === "string" && Array.isArray(g.tiles))
-          .map((g) => ({ ...g, tiles: g.tiles.map((t) => (t && typeof t.key === "string" ? t : null)) }))
+          .map((g) => ({ ...g, tiles: g.tiles.map(loadTile) }))
         : [],
     };
   }

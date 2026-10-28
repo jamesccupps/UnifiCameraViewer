@@ -2300,8 +2300,10 @@ async function e2eSuite() {
     check("Protect liveviews read through the library", opts.includes("Building Entrances (3 cameras)") && opts.includes("Garage Entrances (3 cameras)"), JSON.stringify(result.actions[0]?.value ?? result.actions[0]?.error));
     const imported = config.grids?.find((g) => g.name === "Building · Building Entrances");
     const slotKeys = [1, 0, null, 2].map((i) => (i === null ? null : `${ids.B}/${cam(P.building, i)}`));
-    check("imported liveview saved as a 2x2 grid window: first camera of each slot, empty slot kept, slot order kept",
+    check("imported liveview saved as a 2x2 grid window: first camera of each slot, empty slot kept, slot order kept, the cycling slot's cycle read",
       imported?.templateId === "2x2" && JSON.stringify(imported.tiles.map((t) => t?.key ?? null)) === JSON.stringify(slotKeys)
+        && imported.tiles[3]?.cycle?.seconds === 10 && JSON.stringify(imported.tiles[3].cycle.then.map((m) => m.key)) === JSON.stringify([`${ids.B}/${cam(P.building, 0)}`])
+        && imported.tiles.slice(0, 3).every((t) => !t?.cycle)
         && result.actions.find((a) => a.act.js === saveDraftJs)?.value === "grid",
       JSON.stringify(imported ? { templateId: imported.templateId, tiles: imported.tiles.map((t) => t?.key ?? null) } : result.actions.find((a) => a.act.js === saveDraftJs)));
     if (legacy) {
@@ -2374,6 +2376,107 @@ async function e2eSuite() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Cycling grid tiles (mock consoles): a tile that cycles through cameras like a Protect liveview
+// slot, each camera with its own tile settings; a cycling liveview imported through the editor.
+
+async function cycleSuite() {
+  console.log("\nCycling tiles suite (mock consoles)");
+  const userData = tmpDir("cycle");
+  const results = path.join(userData, "results");
+  const A = "aaaaaaaa-0000-4000-8000-000000000001";
+  const B = "bbbbbbbb-0000-4000-8000-000000000002";
+  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, stair: `${A}/aaaaaaaa-cam2`, yard: `${A}/aaaaaaaa-cam3`, ramp: `${B}/bbbbbbbb-cam0` };
+  fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [
+      { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Stair", "Yard"],
+        mockLiveviews: [{ id: "lv", name: "Rotation", seconds: 7, slots: [[0, 1, 2], null, 3, null] }] },
+      { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp"] },
+    ],
+    windows: {},
+    // Lobby on Medium and Dock on Low: each camera of the cycle keeps its own tile settings.
+    grids: [{
+      id: "g-cyc", name: "Cycle", templateId: "2x2", bounds: { x: 0, y: 0, width: 640, height: 400 }, open: true,
+      tiles: [{ key: keys.lobby, channel: 1, cycle: { seconds: 5, then: [{ key: keys.dock, channel: 2 }, { key: keys.stair }] } }, { key: keys.ramp }, null, null],
+    }, {
+      // Hand-edited into nonsense: loading drops the cycle and keeps the tile.
+      id: "g-bad", name: "Broken cycle", templateId: "1", bounds: { x: 700, y: 0, width: 320, height: 200 }, open: false,
+      tiles: [{ key: keys.yard, cycle: { seconds: "soon", then: [null, { key: 5 }, "x"] } }],
+    }],
+    settings: { startHidden: false },
+  }, null, 2));
+
+  const importJs = `(() => {
+    const sel = document.getElementById("import-liveview");
+    sel.value = ${JSON.stringify(`${A}|lv`)};
+    sel.dispatchEvent(new Event("change"));
+    return true;
+  })()`;
+  const saveDraftJs = `(() => {
+    const cell = document.querySelector('#editor-preview [data-cell="0"] .cycle');
+    const seen = { text: cell?.textContent ?? null, tip: cell?.dataset.tip ?? null };
+    document.getElementById("editor-form").requestSubmit(document.getElementById("editor-save"));
+    return seen;
+  })()`;
+  // Edit grid… and Save, unchanged: the cycle has to come back from the camera list's state.
+  const resaveJs = `(async () => {
+    const g = (await panes.invoke("mgr:state")).grids.find((x) => x.name === "Building · Rotation");
+    await panes.invoke("mgr:save-editor-layout", { id: g.id, as: "grid", name: g.name, displayId: g.editor.displayId, templateId: g.editor.templateId, cells: g.editor.cells, apply: false });
+    return g.editor.cells[0];
+  })()`;
+  const ENLARGE_AT = 13500;
+  const { result, config } = await runApp({
+    userData, results, seconds: 20, extraArgs: ["--mock"],
+    env: {
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 2000, do: "manager-js", js: importJs },
+        { at: 2800, do: "manager-js", js: saveDraftJs },
+        { at: 4000, do: "manager-js", js: resaveJs },
+        // Tile 0 is hidden behind the enlarged tile 1 from here on: it should stop cycling.
+        { at: ENLARGE_AT, do: "menu-click", tile: "Cycle#1", label: "Enlarge this tile" },
+      ]),
+    },
+  });
+  const name = (key) => Object.entries(keys).find(([, v]) => v === key)?.[0] ?? key;
+  const enlargeAct = result.actions.find((a) => a.act.do === "menu-click");
+  const t0 = result.samples.map((s) => ({ t: s.t, ...s.cams["grid:Cycle#0"] })).filter((s) => s.key);
+  const before = t0.filter((s) => s.t < (enlargeAct?.t ?? Infinity));
+  const after = t0.filter((s) => s.t > (enlargeAct?.t ?? Infinity) + 1000);
+  const order = before.map((s) => name(s.key)).filter((k, i, a) => k !== a[i - 1]);
+  check("a cycling tile shows its cameras in turn (Lobby, Dock, Stair)", order.slice(0, 3).join(",") === "lobby,dock,stair", order.join(","));
+  check("each camera in the cycle reaches live in the tile", ["lobby", "dock"].every((n) => t0.some((s) => name(s.key) === n && s.status === "live")),
+    JSON.stringify(t0.map((s) => `${name(s.key)}:${s.status}`)));
+  const channelsOf = (n) => [...new Set(t0.filter((s) => name(s.key) === n && s.channel !== null).map((s) => s.channel))];
+  check("each camera in the cycle keeps its own tile settings (Lobby Medium, Dock Low)",
+    JSON.stringify(channelsOf("lobby")) === "[1]" && JSON.stringify(channelsOf("dock")) === "[2]",
+    JSON.stringify({ lobby: channelsOf("lobby"), dock: channelsOf("dock") }));
+  check("a cycling tile hidden behind an enlarged tile stops cycling",
+    enlargeAct?.ok && after.length >= 2 && new Set(after.map((s) => s.key)).size === 1,
+    JSON.stringify({ act: enlargeAct?.error, after: after.map((s) => name(s.key)) }));
+  const t1 = result.samples.map((s) => s.cams["grid:Cycle#1"]).filter(Boolean);
+  check("the tile next to it keeps its camera and stays live", t1.length && t1.every((s) => s.key === keys.ramp) && t1.at(-1).status === "live",
+    JSON.stringify(t1.map((s) => `${name(s.key)}:${s.status}`)));
+  const active = result.connections[A]?.active ?? {};
+  check("cameras cycled away from leave no stream running", Object.values(active).every((n) => n === 0), JSON.stringify(active));
+
+  const draft = result.actions.find((a) => a.act.js === saveDraftJs)?.value;
+  check("an imported cycling slot shows its cycle in the editor", draft?.text === "↻ cycles 3 cameras, 7 s each" && /Building Dock, Building Stair and back, 7 s each/.test(draft.tip ?? ""), JSON.stringify(draft));
+  const imported = config.grids?.find((g) => g.name === "Building · Rotation");
+  const cyc = imported?.tiles[0]?.cycle;
+  check("the imported grid keeps the slot's cycle and its interval, and the other slots",
+    imported?.tiles[0]?.key === keys.lobby && cyc?.seconds === 7 && JSON.stringify(cyc.then.map((m) => m.key)) === JSON.stringify([keys.dock, keys.stair])
+      && imported.tiles[2]?.key === keys.yard && !imported.tiles[2].cycle && imported.tiles[1] === null,
+    JSON.stringify(imported?.tiles));
+  const round = result.actions.find((a) => a.act.js === resaveJs)?.value;
+  check("Edit grid… gets the cycle back, and saving it again keeps it",
+    JSON.stringify(round?.cycle) === JSON.stringify({ keys: [keys.dock, keys.stair], seconds: 7 }) && cyc?.then.length === 2,
+    JSON.stringify(round ?? result.actions.find((a) => a.act.js === resaveJs)?.error));
+  const bad = config.grids?.find((g) => g.id === "g-bad");
+  check("a broken cycle in config.json is dropped on load, its tile kept", bad?.tiles[0]?.key === keys.yard && !("cycle" in bad.tiles[0]), JSON.stringify(bad?.tiles));
+  console.log(`  results: ${results}`);
+}
+
+// ---------------------------------------------------------------------------------------------
 
 try {
   if (suite === "mock" || suite === "all") await runSuite(mockSuite);
@@ -2389,6 +2492,7 @@ try {
   if (suite === "editor" || suite === "all") await runSuite(editorSuite);
   if (suite === "list" || suite === "all") await runSuite(listSuite);
   if (suite === "grid" || suite === "all") await runSuite(gridSuite);
+  if (suite === "cycle" || suite === "all") await runSuite(cycleSuite);
   if (suite === "update" || suite === "all") await runSuite(updateSuite);
   if (suite === "e2e" || suite === "all") await runSuite(e2eSuite);
 } catch (err) {

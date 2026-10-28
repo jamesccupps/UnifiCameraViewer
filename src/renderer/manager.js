@@ -859,7 +859,8 @@ function place(index, key, mode = null) {
   const from = ed.cells.findIndex((c) => c?.key === key);
   const was = from >= 0 ? ed.cells[from] : null;
   if (from >= 0) ed.cells[from] = null;
-  ed.cells[index] = { key, mode: mode ?? was?.mode ?? "quad" };
+  // A camera moved to another tile takes its cycle along; whatever was in this tile (cycle too) goes.
+  ed.cells[index] = { key, mode: mode ?? was?.mode ?? "quad", ...(was?.cycle && { cycle: was.cycle }) };
   renderEditor();
 }
 
@@ -909,6 +910,12 @@ function renderEditor() {
       ? [
         el("b", { title: cam?.name ?? filled.key }, cam?.name ?? "Camera not available"),
         el("small", {}, cam ? cam.consoleName : "removed from its console"),
+        filled.cycle
+          ? el("small", {
+            class: "cycle",
+            tip: `Cycles to ${filled.cycle.keys.map((k) => cams.get(k)?.name ?? "a camera that isn't available").join(", ")} and back, ${filled.cycle.seconds} s each, like the Protect liveview. Only in a grid window: separate windows show the first camera. Drop a camera here to stop cycling.`,
+          }, `↻ cycles ${plural(filled.cycle.keys.length + 1, "camera")}, ${filled.cycle.seconds} s each`)
+          : null,
         cam?.fisheye
           ? el("select", {
             "aria-label": `360° view for ${cam.name}`,
