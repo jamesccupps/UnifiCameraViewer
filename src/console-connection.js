@@ -195,7 +195,13 @@ export class ConsoleConnection extends EventEmitter {
     if (this.state === state && this.message === message) return;
     this.state = state;
     this.message = message;
-    this.emit("state");
+    // A listener that throws mustn't reach #run: inside its try it looked like a failed connect
+    // (the live client leaked and a second one logged in), outside it the loop died unhandled.
+    try {
+      this.emit("state");
+    } catch (err) {
+      this.#log.error(`a connection state listener failed: ${errorText(err)}`);
+    }
   }
 
   #libLog() {

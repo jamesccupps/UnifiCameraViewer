@@ -67,6 +67,19 @@ const out = {};
   await conn.stop();
 }
 
+// A "state" listener that throws must not be taken for a failed connect (a leaked client and a
+// second login) or kill the connect loop.
+{
+  let calls = 0;
+  const conn = new ConsoleConnection({ id: "c4", host: "h" }, async () => "pw", quiet, { connect: async () => { calls++; return fakeClient(); } });
+  conn.on("state", () => { if (conn.state === "connected" || conn.state === "connecting") throw new Error("listener bug"); });
+  let threw = false;
+  try { conn.start(); } catch { threw = true; }
+  await new Promise((r) => setTimeout(r, 300));
+  out.throwingListener = { state: conn.state, calls, threw };
+  await conn.stop().catch(() => {});
+}
+
 // CameraStream: a stream that never starts is tried later and later; video in between resets that.
 // The camera's stream fails to establish 3 times, sends one fragment, then fails for good.
 {
