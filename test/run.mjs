@@ -289,7 +289,7 @@ async function hideSuite() {
     version: 1,
     consoles: [
       { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock"] },
-      { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp"] },
+      { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp", "Gate NoMedium"] },
     ],
     windows: {
       [keys.lobby]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 },
@@ -319,11 +319,19 @@ async function hideSuite() {
     garage: [...[...document.querySelectorAll("article.panel")].find((a) => a.querySelector(".console-head b")?.textContent === "Garage").querySelectorAll("button")].map((b) => b.textContent),
     rampStatus: [...document.querySelectorAll(".cam-name")].find((n) => n.querySelector("b")?.textContent === "Garage Ramp")?.querySelector("small")?.textContent,
   }))()`;
+  // A closed camera whose Medium channel is off in Protect: its quality select shows what its window
+  // would open at (Low), not High.
+  const gateQuality = `(() => {
+    const li = [...document.querySelectorAll(".cams li")].find((l) => l.querySelector(".cam-name b")?.textContent === "Garage Gate NoMedium");
+    const sel = li?.querySelector("select");
+    return sel ? { value: sel.value, shown: sel.selectedOptions[0]?.textContent } : null;
+  })()`;
 
   const run1 = await runApp({
     userData, results: path.join(userData, "results-1"), seconds: 11, extraArgs: ["--mock"],
     env: {
       PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 2600, do: "manager-js", js: gateQuality },
         { at: 3000, do: "manager-js", js: clickInCard("Garage", "Hide all") },
         { at: 4500, do: "manager-js", js: readButtons },
         { at: 5000, do: "tray-click", label: "Show cameras" },
@@ -345,6 +353,8 @@ async function hideSuite() {
   const buttons = run1.result.actions.find((a) => a.act.js === readButtons)?.value;
   const vis = (cams) => JSON.stringify(Object.fromEntries(Object.entries(keys).map(([n, k]) => [n, cams[k]?.visible])));
 
+  const gate = run1.result.actions.find((a) => a.act.js === gateQuality)?.value;
+  check("a closed camera with Medium off shows the quality its window would open at (Low)", gate?.value === "2" && /^Low/.test(gate.shown ?? ""), JSON.stringify(gate));
   check("Garage Hide all clicked in the camera list", hideB?.value === true, hideB?.error);
   check("Hide all hid only Garage's window and paused its stream",
     afterHideB[keys.ramp]?.visible === false && afterHideB[keys.ramp]?.status === "paused" && afterHideB[keys.lobby]?.visible && afterHideB[keys.dock]?.visible,
@@ -754,6 +764,7 @@ async function connectionSuite() {
   const ud = out.undecryptable;
   check("a saved password that can't be decrypted says to enter it again, and isn't retried",
     ud?.state === "authfailed" && /Enter it again/.test(ud.message) && ud.calls === 0, JSON.stringify(ud));
+  check("the channel a window will use: the wish, else the next lower quality, else anything", JSON.stringify(out.pickChannel) === "[1,2,2,0,0]", JSON.stringify(out.pickChannel));
   check("a camera with a null or numeric name doesn't break the camera list", JSON.stringify(out.oddNames) === JSON.stringify(["42", "Camera", "Lobby"]), JSON.stringify(out.oddNames));
   const tl = out.throwingListener;
   check("a state listener that throws doesn't turn a connect into a failure or a second login",

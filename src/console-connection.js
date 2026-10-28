@@ -266,7 +266,12 @@ export function channelList(cam) {
  * fraction of the decode cost of High. Falls back to the closest available channel.
  */
 export function resolveChannel(cam, wanted) {
-  const ids = channelList(cam).map((c) => c.id);
+  return pickChannel(channelList(cam).map((c) => c.id), wanted);
+}
+
+/** resolveChannel's choice from a list of enabled channel ids (the camera list has only those). */
+export function pickChannel(ids, wanted) {
+  ids = [...ids];
   if (!ids.length) return 0;
   const want = Number.isInteger(wanted) ? wanted : 1;
   if (ids.includes(want)) return want;

@@ -108,13 +108,14 @@ class MockCamera {
     this.subscriptions = 0;
     this.live = new Set();
     const sizes = image ? SQUARE : SIZES;
+    const noMedium = /\bNoMedium\b/.test(name); // "... NoMedium": its Medium channel is turned off in Protect
     this.config = {
       marketName: image ? "AI 360" : "G5 Bullet",
       featureFlags: { hasFisheye: !!image },
       ispSettings: { mountPosition: mount },
-      channels: [0, 1, 2].map((ch) => ({ id: ch, name: ["High", "Medium", "Low"][ch], enabled: true, width: sizes[ch][0], height: sizes[ch][1] })),
+      channels: [0, 1, 2].map((ch) => ({ id: ch, name: ["High", "Medium", "Low"][ch], enabled: !(noMedium && ch === 1), width: sizes[ch][0], height: sizes[ch][1] })),
     };
-    this.channelList = this.config.channels.map((c) => ({ id: c.id, label: `${c.name} · ${c.width}×${c.height}`, width: c.width, height: c.height }));
+    this.channelList = this.config.channels.filter((c) => c.enabled).map((c) => ({ id: c.id, label: `${c.name} · ${c.width}×${c.height}`, width: c.width, height: c.height }));
   }
 
   /** One JPEG of the camera's picture, like Protect's /snapshot endpoint (Camera.snapshot in the library). */

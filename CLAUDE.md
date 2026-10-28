@@ -71,7 +71,7 @@ src/renderer/camera.*       Camera page: MSE playback, live-edge tracking, codec
 src/renderer/dewarp.js      360°: WebGL fisheye dewarp (quad / panorama), PTZ input, circle auto-detect, calibration UI
 src/renderer/grid-window.*  The page under a grid window's tiles: empty-tile placeholders, right-click
 src/renderer/manager.*      Camera list: Cameras / Layouts / Settings tabs, previews, hover tips (data-tip), vanilla DOM, no innerHTML with camera/console names
-src/mock.js                 Dev-only fake consoles/cameras (--mock); PANES_MOCK_FISHEYE adds a 360 camera, cfg.mockOffline marks cameras offline, cfg.mockDropout takes one offline and back mid-run, "… Broken" never decodes, "… Rewind" freezes
+src/mock.js                 Dev-only fake consoles/cameras (--mock); PANES_MOCK_FISHEYE adds a 360 camera, cfg.mockOffline marks cameras offline, cfg.mockDropout takes one offline and back mid-run, "… Broken" never decodes, "… Rewind" freezes, "… Bogus" has no playable codec, "… NoMedium" has Medium off
 src/selftest.js             Dev-only harness, active only when PANES_SELFTEST_DIR is set
 test/run.mjs                Test runner (all the suites above, with assertions)
 test/legacy-password.cjs    Writes a password the way 1.3.x did (sync safeStorage), for the e2e upgrade check

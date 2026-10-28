@@ -80,6 +80,13 @@ const out = {};
   await conn.stop().catch(() => {});
 }
 
+// The channel a window will use, from the enabled ones: the wish if it's there, else the next lower
+// quality, else anything; Medium when nothing was asked for.
+{
+  const { pickChannel } = await import("../src/console-connection.js");
+  out.pickChannel = [pickChannel([0, 1, 2], undefined), pickChannel([0, 2], undefined), pickChannel([0, 2], 1), pickChannel([0], 2), pickChannel([], 1)];
+}
+
 // Odd camera names from a console (null, a number) must not break the camera list.
 {
   const cam = (id, name) => ({ id, name, isOnline: true, config: { channels: [{ id: 1, enabled: true }] } });

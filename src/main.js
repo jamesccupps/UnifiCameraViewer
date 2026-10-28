@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CameraStream } from "./camera-stream.js";
-import { ConsoleConnection, channelList, fisheyeInfo, resolveChannel } from "./console-connection.js";
+import { ConsoleConnection, channelList, fisheyeInfo, pickChannel, resolveChannel } from "./console-connection.js";
 import { autoGrid, cellRects, channelForTile, fitAspect, readingOrder, templateById, TEMPLATES } from "./grid.js";
 import { GridWindow } from "./grid-window.js";
 import { createLogger } from "./log.js";
@@ -1739,7 +1739,10 @@ function managerState() {
         const hidden = !!(w?.open && w.hidden);
         return {
           ...cam, key, open: !!cw || hidden, hidden, listHidden: !!w?.listHidden,
-          channel: cw?.stream?.channel ?? w?.channel ?? null, onTop: !!w?.onTop, status: cw?.stream?.status ?? null,
+          // A closed camera shows the channel its window would open at, not the saved wish: with Medium
+          // turned off in Protect the list said "High" for a window that would open at Low.
+          channel: cw?.stream?.channel ?? (cam.channels?.length ? pickChannel(cam.channels.map((ch) => ch.id), w?.channel) : w?.channel ?? null),
+          onTop: !!w?.onTop, status: cw?.stream?.status ?? null,
           // Grids it's on screen in: the row said "closed" while the camera played in a grid.
           inGrids: [...gridWins.values()].filter((gw) => gw.isOpen && !gw.grid.hidden && gw.grid.tiles.some((t) => t?.key === key)).map((gw) => gw.grid.name),
         };
