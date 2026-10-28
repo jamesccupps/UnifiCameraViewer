@@ -101,6 +101,17 @@
         <p id="update-status" class="muted small"></p>
       </div>
 
+      <div class="panel transfer">
+        <h2>Move to another PC</h2>
+        <p class="small muted">Export saves your consoles, layouts, grid windows, window places and settings to a file. Import it on the other PC.
+          Passwords aren't in the file (they're locked to this Windows account), so enter each console's password once there.</p>
+        <div class="row-actions">
+          <button id="btn-export" class="small" data-tip="Save everything but the passwords to a .json file you can copy to another PC.">Export settings…</button>
+          <button id="btn-import" class="small" data-tip="Replace this PC's consoles, layouts and settings with an exported file's. The app restarts with them; consoles already here keep their password.">Import settings…</button>
+        </div>
+        <p id="transfer-status" class="muted small" role="status"></p>
+      </div>
+
       <div class="panel about">
         <h2>About</h2>
         <p class="small"><b>Protect Panes</b> <span id="about-version" class="muted"></span>. UniFi Protect live view, one window per camera. MIT licensed.</p>

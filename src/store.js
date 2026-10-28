@@ -104,10 +104,21 @@ export class Store {
         return defaults();
       }
     }
+    return this.#normalize(raw);
+  }
+
+  /** Replace everything (an imported settings file), checked as a loaded config.json is, and write it now. */
+  replace(raw) {
+    this.#data = this.#normalize(raw);
+    this.flush();
+  }
+
+  #normalize(input) {
     const d = defaults();
     const isObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+    const raw = isObject(input) ? input : {}; // a file holding just "null" used to throw below
     return {
-      ...(isObject(raw) ? raw : {}), // keys a newer version wrote survive a downgrade and upgrade
+      ...raw, // keys a newer version wrote survive a downgrade and upgrade
       version: 1,
       consoles: Array.isArray(raw.consoles) ? raw.consoles.filter((c) => c && c.id && c.host) : [],
       // A hand-edited or future-version entry that isn't an object used to crash startup, every launch.

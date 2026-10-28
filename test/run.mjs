@@ -571,6 +571,95 @@ async function streamsSuite() {
 // cut off between its two renames, falls back to config.json.bak. (The fsync that makes the saved
 // data survive a power cut can't be tested here; this covers the paths around it.)
 
+// Settings → Move to another PC: export on one "PC", import on another (mock consoles, two launches).
+// The self-test names the file (PANES_TEST_FILE) instead of the file dialogs.
+
+async function transferSuite() {
+  console.log("\nSettings export/import suite (mock consoles, two launches)");
+  const A = "aaaaaaaa-0000-4000-8000-000000000001";
+  const B = "bbbbbbbb-0000-4000-8000-000000000002";
+  const pw = (s) => ({ enc: "plain", data: Buffer.from(s).toString("base64") });
+  const lobby = `${A}/aaaaaaaa-cam0`;
+  const exportFile = path.join(tmpDir("transfer-file"), "Protect Panes settings.json");
+  const invoke = (channel) => `panes.invoke(${JSON.stringify(channel)}).then((r) => r, (e) => ({ error: String(e?.message ?? e) }))`;
+
+  // The source PC: two consoles with passwords and a pin, a layout, a grid, settings.
+  const source = tmpDir("transfer-source");
+  fs.writeFileSync(path.join(source, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [
+      { id: A, name: "Building", host: "mock-a", username: "m", password: pw("source-secret"), certSha256: "AA:11", mockCameras: ["Lobby"] },
+      { id: B, name: "Garage", host: "mock-b", username: "m", password: pw("garage-secret"), mockCameras: ["Ramp"] },
+    ],
+    windows: { [lobby]: { open: true, bounds: { x: 10, y: 20, width: 480, height: 270 }, channel: 2 } },
+    layouts: [{ id: "lay-1", name: "Day", windows: { [lobby]: { bounds: { x: 0, y: 0, width: 640, height: 360 }, channel: 1 } } }],
+    grids: [{ id: "grid-1", name: "Wall", templateId: "2x2", bounds: { x: 0, y: 0, width: 640, height: 400 }, open: false, tiles: [{ key: lobby }, null, null, null] }],
+    settings: { startHidden: false, lockLayout: true, showNames: false, launchAtLogin: true, updateSource: "" },
+  }, null, 2));
+  const run1 = await runApp({
+    userData: source, results: path.join(source, "results"), seconds: 5, extraArgs: ["--mock"],
+    env: { PANES_TEST_FILE: exportFile, PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 2000, do: "manager-js", js: invoke("mgr:export-settings") }]) },
+  });
+  const exported = run1.result.actions[0]?.value;
+  const text = fs.existsSync(exportFile) ? fs.readFileSync(exportFile, "utf8") : "";
+  let file = null;
+  try { file = JSON.parse(text); } catch { /* checked below */ }
+  check("Export writes the file: consoles (with their trusted certificate), windows, layouts, grids, settings",
+    exported?.path === exportFile && file?.format === "protect-panes-settings" && file.consoles.length === 2 && file.consoles[0].certSha256 === "AA:11"
+      && file.layouts?.[0]?.name === "Day" && file.grids?.[0]?.name === "Wall" && file.windows?.[lobby]?.bounds?.x === 10 && file.settings?.lockLayout === true,
+    JSON.stringify(exported ?? run1.result.actions[0]));
+  const secrets = ["source-secret", "garage-secret", pw("source-secret").data, pw("garage-secret").data];
+  check("the export has no passwords in it, in any form", !!text && !/"password"/.test(text) && secrets.every((s) => !text.includes(s)), text.slice(0, 200));
+  check("the export leaves out this PC's own setting (Start with Windows)", file && !("launchAtLogin" in file.settings), JSON.stringify(file?.settings));
+
+  // The target PC: the same Building console under another id (same address and username), a
+  // console that shares Garage's id but not its address, and one the file doesn't have.
+  const target = tmpDir("transfer-target");
+  const targetFile = path.join(tmpDir("transfer-in"), "import.json");
+  fs.writeFileSync(targetFile, JSON.stringify({ hello: "not an export" }));
+  fs.writeFileSync(path.join(target, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [
+      { id: "cccccccc-0000-4000-8000-000000000003", name: "Old name", host: "mock-a", username: "m", password: pw("target-secret"), certSha256: "BB:22", mockCameras: ["Lobby"] },
+      { id: B, name: "Garage", host: "mock-elsewhere", username: "m", password: pw("elsewhere-secret"), mockCameras: ["Ramp"] },
+      { id: "dddddddd-0000-4000-8000-000000000004", name: "Old console", host: "mock-z", username: "m", password: null, mockCameras: ["Z"] },
+    ],
+    windows: {},
+    settings: { startHidden: false, launchAtLogin: false, lockLayout: false, updateSource: "" },
+  }, null, 2));
+  // The first import gets a file that isn't an export; then the real one is put in its place.
+  const swap = setTimeout(() => fs.copyFileSync(exportFile, targetFile), 3000);
+  const run2 = await runApp({
+    userData: target, results: path.join(target, "results"), seconds: 6, extraArgs: ["--mock"],
+    env: {
+      PANES_TEST_FILE: targetFile,
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 2000, do: "manager-js", js: `/*bad*/ ${invoke("mgr:import-settings")}` },
+        { at: 4000, do: "manager-js", js: invoke("mgr:import-settings") },
+      ]),
+    },
+  });
+  clearTimeout(swap);
+  const bad = run2.result.actions.find((a) => a.act.js.startsWith("/*bad*/"))?.value;
+  const good = run2.result.actions.find((a) => !a.act.js.startsWith("/*bad*/"))?.value;
+  check("Import refuses a file that isn't a settings export", /isn't a Protect Panes settings export/.test(bad?.error ?? ""), JSON.stringify(bad));
+  const cfg = run2.config;
+  const byHost = (h) => cfg?.consoles.find((c) => c.host === h);
+  check("Import replaces the consoles, layouts, grids, windows and settings with the file's",
+    good?.restarting === false && cfg?.consoles.length === 2 && byHost("mock-a")?.name === "Building" && byHost("mock-b")?.name === "Garage"
+      && !byHost("mock-z") && !byHost("mock-elsewhere") && cfg.layouts?.[0]?.name === "Day" && cfg.grids?.[0]?.name === "Wall"
+      && cfg.windows?.[lobby]?.bounds?.x === 10 && cfg.settings.lockLayout === true && cfg.settings.showNames === false,
+    JSON.stringify({ good, consoles: cfg?.consoles.map((c) => `${c.name}@${c.host}`), layouts: cfg?.layouts?.length, grids: cfg?.grids?.length }));
+  check("a console already on this PC (same address and username) keeps its password, and this PC's trusted certificate",
+    byHost("mock-a")?.password?.data === pw("target-secret").data && byHost("mock-a")?.certSha256 === "BB:22", JSON.stringify(byHost("mock-a")));
+  check("a console that only shares an id with one here gets no password (it would go to another host)",
+    byHost("mock-b") && !byHost("mock-b").password, JSON.stringify(byHost("mock-b")));
+  check("Import keeps this PC's own setting (Start with Windows)", cfg?.settings.launchAtLogin === false, JSON.stringify(cfg?.settings));
+  const backup = path.join(target, "config.json.before-import");
+  check("Import keeps the settings it replaced as config.json.before-import",
+    fs.existsSync(backup) && fs.readFileSync(backup, "utf8").includes("Old console"), backup);
+}
+
 async function configSuite() {
   console.log("\nConfig file suite (mock consoles, three launches)");
   const userData = tmpDir("config");
@@ -774,6 +863,9 @@ async function connectionSuite() {
   const near = (v, want) => v >= want * 0.8 && v < want * 1.8;
   check("a stream that never starts backs off, and video in between starts the back-off over",
     g.length >= 5 && near(g[0], 40) && near(g[1], 120) && near(g[2], 360) && near(g[3], 40) && near(g[4], 120), JSON.stringify(g));
+  const np = out.noPassword;
+  check("a console with no saved password (imported) asks for it, and doesn't log in with none",
+    np?.state === "authfailed" && /No password saved/.test(np.message) && np.calls === 0, JSON.stringify(np));
   // UniFi Access readers (bare-livestream.js), fed ffmpeg's real fMP4 through a fake socket.
   const br = out.bareReader;
   check("Access reader: bare samples become fragments a decoder plays, every frame, video track only",
@@ -2558,6 +2650,7 @@ try {
   if (suite === "connection" || suite === "all") await runSuite(connectionSuite);
   if (suite === "streams" || suite === "all") await runSuite(streamsSuite);
   if (suite === "config" || suite === "all") await runSuite(configSuite);
+  if (suite === "transfer" || suite === "all") await runSuite(transferSuite);
   if (suite === "security" || suite === "all") await runSuite(securitySuite);
   if (suite === "range" || suite === "all") await runSuite(rangeSuite);
   if (suite === "layouts" || suite === "all") await runSuite(layoutsSuite);

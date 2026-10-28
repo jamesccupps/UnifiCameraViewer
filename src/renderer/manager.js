@@ -1060,6 +1060,28 @@ installBtn.addEventListener("click", async () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// Settings tab: export and import. Main picks the file and asks before importing; the page only
+// says what happened.
+
+const transferStatus = document.getElementById("transfer-status");
+const showTransfer = (text, bad = false) => {
+  transferStatus.textContent = text;
+  transferStatus.classList.toggle("bad", bad);
+};
+document.getElementById("btn-export").addEventListener("click", async () => {
+  try {
+    const r = await panes.invoke("mgr:export-settings");
+    if (r) showTransfer(`Saved to ${r.path}. It has no passwords in it.`);
+  } catch (err) { showTransfer(rpcError(err), true); }
+});
+document.getElementById("btn-import").addEventListener("click", async () => {
+  try {
+    const r = await panes.invoke("mgr:import-settings");
+    if (r) showTransfer(r.restarting ? "Imported. Restarting with the new settings…" : "Imported.");
+  } catch (err) { showTransfer(rpcError(err), true); }
+});
+
+// ---------------------------------------------------------------------------------------------
 // Add / edit console dialog
 
 function openDialog(c) {

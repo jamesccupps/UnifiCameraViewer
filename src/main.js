@@ -1848,6 +1848,104 @@ function updateTrayMenu() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Settings export and import (Settings → Move to another PC). The file holds everything but the
+// passwords, which are encrypted for this Windows account (DPAPI) and unreadable anywhere else.
+
+const EXPORT_FORMAT = "protect-panes-settings";
+const THIS_PC_SETTINGS = ["launchAtLogin"]; // stays as this PC has it, both ways
+const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
+const FILE_FILTERS = [{ name: "Protect Panes settings", extensions: ["json"] }];
+// The self-test can't click a file dialog: it names the file, and an import goes ahead unasked.
+const testFile = () => (process.env.PANES_SELFTEST_DIR && process.env.PANES_TEST_FILE) || null;
+
+async function exportSettings() {
+  let file = testFile();
+  if (!file) {
+    const r = await dialog.showSaveDialog(managerWin, {
+      title: "Export Protect Panes settings",
+      defaultPath: path.join(app.getPath("documents"), "Protect Panes settings.json"),
+      filters: FILE_FILTERS,
+    });
+    if (r.canceled || !r.filePath) return null;
+    file = r.filePath;
+  }
+  const d = store.data;
+  const settings = { ...d.settings };
+  for (const k of THIS_PC_SETTINGS) delete settings[k];
+  const out = {
+    format: EXPORT_FORMAT,
+    formatVersion: 1,
+    appVersion: app.getVersion(),
+    exportedAt: new Date().toISOString(),
+    consoles: d.consoles.map(({ password: _password, ...c }) => c),
+    windows: d.windows,
+    layouts: d.layouts,
+    grids: d.grids,
+    settings,
+  };
+  fs.writeFileSync(file, JSON.stringify(out, null, 2));
+  log.info(`settings exported to ${file}`);
+  return { path: file };
+}
+
+async function importSettings() {
+  let file = testFile();
+  if (!file) {
+    const r = await dialog.showOpenDialog(managerWin, { title: "Import Protect Panes settings", properties: ["openFile"], filters: FILE_FILTERS });
+    if (r.canceled || !r.filePaths?.[0]) return null;
+    file = r.filePaths[0];
+  }
+  if (fs.statSync(file).size > MAX_IMPORT_BYTES) throw new Error("That file is too big to be a Protect Panes settings export.");
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    throw new Error("That file isn't a Protect Panes settings export: it isn't valid JSON.");
+  }
+  if (data?.format !== EXPORT_FORMAT || !Array.isArray(data.consoles)) throw new Error("That file isn't a Protect Panes settings export.");
+  if (!testFile()) {
+    const { response } = await dialog.showMessageBox(managerWin, {
+      type: "question",
+      buttons: ["Import and restart", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      message: `Replace this PC's settings with the ones in ${path.basename(file)}?`,
+      detail: "Consoles, layouts, grid windows, window places and settings are all replaced, and the app restarts with them. "
+        + "Consoles already on this PC (same address and username) keep their saved password. For the others, enter it once with ⋯ → Edit console…. "
+        + "A copy of the current settings is kept as config.json.before-import.",
+    });
+    if (response !== 0) return null;
+  }
+  const now = store.data;
+  const consoles = data.consoles
+    .filter((c) => c && typeof c.id === "string" && typeof c.host === "string" && c.host.trim())
+    .map(({ password: _ignored, ...c }) => {
+      // A saved password goes only to the console it was saved for: the same address and username.
+      // Matching on id alone would let an edited file send it to another host.
+      const here = now.consoles.find((h) => consoleKey(h.host) === consoleKey(c.host) && h.username === c.username);
+      // So does a pin: the certificate this PC already trusts for that address wins over the file's.
+      return { ...c, password: here?.password ?? null, ...(here?.certSha256 ? { certSha256: here.certSha256 } : {}) };
+    });
+  const settings = { ...(data.settings && typeof data.settings === "object" ? data.settings : {}) };
+  for (const k of THIS_PC_SETTINGS) {
+    if (now.settings[k] === undefined) delete settings[k];
+    else settings[k] = now.settings[k];
+  }
+  if (fs.existsSync(store.file)) fs.copyFileSync(store.file, `${store.file}.before-import`);
+  store.replace({ version: 1, consoles, windows: data.windows, layouts: data.layouts, grids: data.grids, settings });
+  log.info(`settings imported from ${file}: ${consoles.length} consoles, ${consoles.filter((c) => !c.password).length} needing a password`);
+  // Everything (windows, grids, connections, tray) comes up from the new settings as at any start.
+  // A self-test run carries on so it can report; its harness reads config.json.
+  if (testFile()) return { restarting: false };
+  setTimeout(() => {
+    tray?.destroy();
+    app.relaunch();
+    app.exit(0);
+  }, 500);
+  return { restarting: true };
+}
+
+// ---------------------------------------------------------------------------------------------
 // IPC
 
 function registerIpc() {
@@ -1925,6 +2023,8 @@ function registerIpc() {
   handle("mgr:hide-cameras", (consoleId) => hideCameras(consoleId ? String(consoleId) : null));
   handle("mgr:close-all", (consoleId) => closeAllCameras(String(consoleId)));
   handle("mgr:open-log-folder", () => shell.openPath(app.getPath("userData")));
+  handle("mgr:export-settings", () => exportSettings());
+  handle("mgr:import-settings", () => importSettings());
   handle("mgr:open-project", () => shell.openExternal(PROJECT_URL)); // fixed URL; the renderer can't pass one
   handle("mgr:arrange", ({ templateId } = {}) => arrangeWindows(String(templateId ?? "auto"), arrangeDisplay(true)));
   handle("mgr:show-cameras", (consoleId) => showHiddenCameras(consoleId ? String(consoleId) : null));

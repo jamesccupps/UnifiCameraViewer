@@ -71,6 +71,19 @@ const out = {};
   await conn.stop();
 }
 
+// No password saved (a console imported from another PC): say so instead of logging in with none.
+{
+  let calls = 0;
+  const conn = new ConsoleConnection({ id: "c4", host: "h" }, async () => "", quiet, {
+    connect: async () => { calls++; return fakeClient(); },
+  });
+  conn.start();
+  await until(() => conn.state === "authfailed", 1_000);
+  await new Promise((r) => setTimeout(r, 200));
+  out.noPassword = { state: conn.state, message: conn.message, calls };
+  await conn.stop();
+}
+
 // A "state" listener that throws must not be taken for a failed connect (a leaked client and a
 // second login) or kill the connect loop.
 {

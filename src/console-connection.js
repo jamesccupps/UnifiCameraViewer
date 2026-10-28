@@ -172,6 +172,12 @@ export class ConsoleConnection extends EventEmitter {
         this.#set("authfailed", "The saved password can't be read on this PC any more. Enter it again (⋯ → Edit console…).");
         return;
       }
+      // None saved (imported from another PC, where passwords stay): an empty login only gets
+      // refused, and was retried for good.
+      if (!password) {
+        this.#set("authfailed", "No password saved for this console on this PC. Enter it with ⋯ → Edit console….");
+        return;
+      }
       try {
         const client = await this.#connect({
           host: this.#cfg.host,

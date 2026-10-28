@@ -7,7 +7,7 @@ const ALLOWED = new Set([
   "mgr:hide-cameras", "mgr:show-cameras", "mgr:apply-all",
   "mgr:save-layout", "mgr:apply-layout", "mgr:delete-layout", "mgr:liveview-draft",
   "mgr:set-update-source", "mgr:check-update", "mgr:install-update",
-  "mgr:close-all", "mgr:arrange", "mgr:open-log-folder", "mgr:open-project", "mgr:save-editor-layout",
+  "mgr:close-all", "mgr:arrange", "mgr:open-log-folder", "mgr:export-settings", "mgr:import-settings", "mgr:open-project", "mgr:save-editor-layout",
   "mgr:set-list-hidden", "mgr:preview", "mgr:open-grid", "mgr:close-grid", "mgr:delete-grid", "mgr:raise",
 ]);
 
