@@ -1852,7 +1852,10 @@ function updateTrayMenu() {
 // passwords, which are encrypted for this Windows account (DPAPI) and unreadable anywhere else.
 
 const EXPORT_FORMAT = "protect-panes-settings";
-const THIS_PC_SETTINGS = ["launchAtLogin"]; // stays as this PC has it, both ways
+// These stay as each PC has them, both ways. The update location too: from a file, \\some-host\share
+// would be opened at every start, and Windows sends that host the user's network credentials, signed
+// updates or not.
+const THIS_PC_SETTINGS = ["launchAtLogin", "updateSource"];
 const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 const FILE_FILTERS = [{ name: "Protect Panes settings", extensions: ["json"] }];
 // The self-test can't click a file dialog: it names the file, and an import goes ahead unasked.
@@ -1912,6 +1915,7 @@ async function importSettings() {
       message: `Replace this PC's settings with the ones in ${path.basename(file)}?`,
       detail: "Consoles, layouts, grid windows, window places and settings are all replaced, and the app restarts with them. "
         + "Consoles already on this PC (same address and username) keep their saved password. For the others, enter it once with ⋯ → Edit console…. "
+        + "Start with Windows and the update location stay as this PC has them. "
         + "A copy of the current settings is kept as config.json.before-import.",
     });
     if (response !== 0) return null;
@@ -1926,10 +1930,13 @@ async function importSettings() {
       // So does a pin: the certificate this PC already trusts for that address wins over the file's.
       return { ...c, password: here?.password ?? null, ...(here?.certSha256 ? { certSha256: here.certSha256 } : {}) };
     });
-  const settings = { ...(data.settings && typeof data.settings === "object" ? data.settings : {}) };
-  for (const k of THIS_PC_SETTINGS) {
-    if (now.settings[k] === undefined) delete settings[k];
-    else settings[k] = now.settings[k];
+  // Only settings this version knows, each of the kind it expects ("false" as text read as on);
+  // anything else takes its default.
+  const fromFile = data.settings && typeof data.settings === "object" ? data.settings : {};
+  const settings = {};
+  for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
+    if (THIS_PC_SETTINGS.includes(k)) { if (now.settings[k] !== undefined) settings[k] = now.settings[k]; }
+    else if (typeof fromFile[k] === typeof v) settings[k] = fromFile[k];
   }
   if (fs.existsSync(store.file)) fs.copyFileSync(store.file, `${store.file}.before-import`);
   store.replace({ version: 1, consoles, windows: data.windows, layouts: data.layouts, grids: data.grids, settings });

@@ -244,7 +244,9 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
   - Only a UA G3 Pro has been seen. Other Access devices with cameras (intercoms, G3 Reader Pro) are untested.
 - **Settings export / import (main.js `exportSettings` / `importSettings`).**
   - The file is `{format: "protect-panes-settings", formatVersion: 1, appVersion, exportedAt, consoles, windows, layouts, grids, settings}`.
-  - Consoles go without `password`, which is DPAPI-encrypted for this Windows account and unreadable anywhere else. `launchAtLogin` stays as each PC has it, both ways.
+  - Consoles go without `password`, which is DPAPI-encrypted for this Windows account and unreadable anywhere else. `launchAtLogin` and `updateSource` stay as each PC has them, both ways (`THIS_PC_SETTINGS`).
+  - `updateSource` is per PC because a file could otherwise aim update checks at `\\some-host\share`. The app opens that at every start, and Windows sends the host the user's network credentials; the signature check doesn't help there.
+  - The other settings are imported only if this version knows them and the value has the default's type. Anything else takes its default, so `lockLayout: "false"` (text) doesn't read as on.
   - Import replaces everything through `store.replace()`, the same checks as loading config.json. It keeps the old file as `config.json.before-import`, then `app.relaunch()` + `app.exit(0)`, so windows, grids, connections and the tray come up as at any start. `exit`, not `quit`: quit handlers would write the old windows' state over the new settings.
   - A saved password stays only with a console of the **same address and username** (`consoleKey` + username). Matching on id alone would let an edited file send it to another host.
   - This PC's pin for an address wins over the file's.

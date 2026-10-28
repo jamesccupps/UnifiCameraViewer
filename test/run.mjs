@@ -613,12 +613,22 @@ async function transferSuite() {
     JSON.stringify(exported ?? run1.result.actions[0]));
   const secrets = ["source-secret", "garage-secret", pw("source-secret").data, pw("garage-secret").data];
   check("the export has no passwords in it, in any form", !!text && !/"password"/.test(text) && secrets.every((s) => !text.includes(s)), text.slice(0, 200));
-  check("the export leaves out this PC's own setting (Start with Windows)", file && !("launchAtLogin" in file.settings), JSON.stringify(file?.settings));
+  check("the export leaves out this PC's own settings (Start with Windows, the update location)",
+    file && !("launchAtLogin" in file.settings) && !("updateSource" in file.settings), JSON.stringify(file?.settings));
+  // What's imported is that export edited the way a crafted file could be: update checks aimed at a
+  // network share (Windows would send it the user's credentials at every start), a setting of the
+  // wrong kind, and one this version doesn't know.
+  const craftedFile = path.join(tmpDir("transfer-crafted"), "crafted.json");
+  fs.writeFileSync(craftedFile, JSON.stringify({
+    ...file, settings: { ...file?.settings, updateSource: "\\\\attacker.example\\share", showPreviews: "no", futureThing: 1 },
+  }, null, 2));
 
   // The target PC: the same Building console under another id (same address and username), a
   // console that shares Garage's id but not its address, and one the file doesn't have.
   const target = tmpDir("transfer-target");
   const targetFile = path.join(tmpDir("transfer-in"), "import.json");
+  // A local folder that isn't there: this PC's own update location, and its startup check stays off the network.
+  const targetUpdates = path.join(target, "no-updates-here");
   fs.writeFileSync(targetFile, JSON.stringify({ hello: "not an export" }));
   fs.writeFileSync(path.join(target, "config.json"), JSON.stringify({
     version: 1,
@@ -628,10 +638,10 @@ async function transferSuite() {
       { id: "dddddddd-0000-4000-8000-000000000004", name: "Old console", host: "mock-z", username: "m", password: null, mockCameras: ["Z"] },
     ],
     windows: {},
-    settings: { startHidden: false, launchAtLogin: false, lockLayout: false, updateSource: "" },
+    settings: { startHidden: false, launchAtLogin: false, lockLayout: false, updateSource: targetUpdates },
   }, null, 2));
-  // The first import gets a file that isn't an export; then the real one is put in its place.
-  const swap = setTimeout(() => fs.copyFileSync(exportFile, targetFile), 3000);
+  // The first import gets a file that isn't an export; then the (crafted) export is put in its place.
+  const swap = setTimeout(() => fs.copyFileSync(craftedFile, targetFile), 3000);
   const run2 = await runApp({
     userData: target, results: path.join(target, "results"), seconds: 6, extraArgs: ["--mock"],
     env: {
@@ -657,7 +667,10 @@ async function transferSuite() {
     byHost("mock-a")?.password?.data === pw("target-secret").data && byHost("mock-a")?.certSha256 === "BB:22", JSON.stringify(byHost("mock-a")));
   check("a console that only shares an id with one here gets no password (it would go to another host)",
     byHost("mock-b") && !byHost("mock-b").password, JSON.stringify(byHost("mock-b")));
-  check("Import keeps this PC's own setting (Start with Windows)", cfg?.settings.launchAtLogin === false, JSON.stringify(cfg?.settings));
+  check("Import keeps this PC's own settings (Start with Windows, the update location), not the file's network share",
+    cfg?.settings.launchAtLogin === false && cfg?.settings.updateSource === targetUpdates, JSON.stringify(cfg?.settings));
+  check("Import takes only known settings of the right kind: a text \"no\" leaves Show camera previews at its default, an unknown key is dropped",
+    cfg?.settings.showPreviews === true && !("futureThing" in (cfg?.settings ?? {})), JSON.stringify(cfg?.settings));
   const backup = path.join(target, "config.json.before-import");
   check("Import keeps the settings it replaced as config.json.before-import",
     fs.existsSync(backup) && fs.readFileSync(backup, "utf8").includes("Old console"), backup);

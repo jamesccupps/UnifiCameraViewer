@@ -53,7 +53,7 @@ Then, in Protect Panes, click **Add console**. Enter a name ("Building"), the co
 - **Find** flashes a camera's window. **Reset window positions** pulls every window back onto the main screen if a monitor was unplugged.
 - **Settings → Move to another PC**: **Export settings…** saves your consoles, layouts, grid windows, window places and settings to a .json file. It holds no passwords, since those are locked to your Windows account. On the other PC, **Import settings…** replaces its settings with the file's and restarts the app.
   - A console that's already there with the same address and username keeps its saved password. For the others, enter it once with **⋯ → Edit console…**.
-  - Start with Windows stays as each PC has it.
+  - Start with Windows and the update location stay as each PC has them.
   - The settings it replaced are kept next to `config.json` as `config.json.before-import`.
 
 ## 360° cameras (AI 360 and other fisheyes)
