@@ -24,7 +24,7 @@ let refreshing = false;
 let openMenuFor = null; // console id whose "⋯" menu is open, kept open across re-renders
 const expandedHidden = new Set(); // console ids whose "Hidden from list" section is expanded
 
-const STATE_DOT = { connected: "live", connecting: "warn", reconnecting: "warn", idle: "warn", error: "bad", authfailed: "bad" };
+const STATE_DOT = { connected: "live", connecting: "warn", reconnecting: "warn", idle: "warn", error: "bad", authfailed: "bad", certchanged: "bad" };
 const STATE_LABEL = {
   connected: "Connected",
   connecting: "Connecting",
@@ -32,6 +32,7 @@ const STATE_LABEL = {
   idle: "Idle",
   error: "Can't reach console",
   authfailed: "Login failed",
+  certchanged: "Certificate changed",
 };
 
 const rpcError = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
@@ -408,7 +409,21 @@ function renderConsole(c, q) {
   );
 
   const msg = c.message || (connected ? "" : STATE_LABEL[c.state]);
-  const bad = c.state === "error" || c.state === "authfailed";
+  const bad = c.state === "error" || c.state === "authfailed" || c.state === "certchanged";
+  const trust = c.cert?.seen ? el("p", { class: "console-msg" }, el("button", {
+    class: "small",
+    "data-focus-key": `trust-${c.id}`,
+    tip: "Accept the certificate the console presents now. Only do this if you know why it changed.",
+    onclick: () => {
+      const short = (fp) => (fp ? `${fp.slice(0, 47)}…` : "none");
+      const ok = confirm(`${c.name} (${c.host}) now presents a different security certificate.\n\n`
+        + `Trusted:  ${short(c.cert.trusted)}\nNow:      ${short(c.cert.seen)}\n\n`
+        + "Resetting or updating a console can make a new certificate, and then this is expected. "
+        + "If neither happened, something else may be answering at this address: don't trust it, and check the network.\n\n"
+        + "Trust the new certificate and connect?");
+      if (ok) panes.invoke("mgr:trust-cert", c.id).then(refresh);
+    },
+  }, "Trust the new certificate…")) : null;
   const cams = q ? c.cameras.filter((cam) => matches(cam, q)) : c.cameras;
   const shown = cams.filter((cam) => !cam.listHidden);
   const tucked = cams.filter((cam) => cam.listHidden);
@@ -419,7 +434,7 @@ function renderConsole(c, q) {
   const list = empty || shown.length
     ? el("ul", { class: `cams${state.settings.showPreviews ? " with-previews" : ""}` }, empty ? el("li", { class: "empty" }, empty) : shown.map((cam) => renderCamera(cam)))
     : null;
-  return el("article", { class: "panel" }, head, msg ? el("p", { class: `console-msg${bad ? " bad" : ""}` }, msg) : null, list, renderTucked(c, tucked));
+  return el("article", { class: "panel" }, head, msg ? el("p", { class: `console-msg${bad ? " bad" : ""}` }, msg) : null, trust, list, renderTucked(c, tucked));
 }
 
 /** The collapsed "Hidden from list" section at the bottom of a console's card. */

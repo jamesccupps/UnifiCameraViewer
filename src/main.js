@@ -7,6 +7,7 @@ import { ConsoleConnection, channelList, fisheyeInfo, resolveChannel } from "./c
 import { autoGrid, cellRects, channelForTile, fitAspect, readingOrder, templateById, TEMPLATES } from "./grid.js";
 import { GridWindow } from "./grid-window.js";
 import { createLogger } from "./log.js";
+import { consoleKey, installCertPinning } from "./cert-pins.js";
 import { Previews } from "./previews.js";
 import { decryptPassword, DEFAULT_SETTINGS, encryptPassword, newId, Store } from "./store.js";
 import { UPDATE_PUBLIC_KEY } from "./update-key.js";
@@ -129,6 +130,7 @@ async function init() {
   // At startup only say whether there's an update; downloading waits for a click.
   if (sourceKind(store.settings.updateSource)) updater.check({ download: false });
 
+  if (!MOCK) pinConsoleCertificates();
   const MockConnection = MOCK ? (await import("./mock.js")).MockConnection : null;
   for (const cfg of store.data.consoles) startConnection(cfg, MockConnection);
 
@@ -161,10 +163,56 @@ async function init() {
 // ---------------------------------------------------------------------------------------------
 // Consoles
 
+// TLS certificate pinning (cert-pins.js): each console's certificate is trusted the first time it's
+// seen; a different one later stops that console until the owner trusts it in the camera list.
+const certSeen = new Map(); // pin key -> fingerprint of the different certificate a console presented
+const consolesAt = (key) => store.data.consoles.filter((c) => consoleKey(c.host) === key);
+
+function pinConsoleCertificates() {
+  installCertPinning({
+    lookup: (key) => {
+      const c = consolesAt(key)[0];
+      return c ? { pin: c.certSha256 ?? null } : null;
+    },
+    pinned: (key, fingerprint) => {
+      for (const c of consolesAt(key)) {
+        if (c.certSha256) continue;
+        c.certSha256 = fingerprint;
+        log.info(`[${c.name || c.host}] trusting its TLS certificate (SHA-256 ${fingerprint.slice(0, 23)}…) from now on`);
+      }
+      store.save();
+    },
+    mismatch: (key, fingerprint) => {
+      if (certSeen.get(key) === fingerprint) return;
+      certSeen.set(key, fingerprint);
+      for (const c of consolesAt(key)) {
+        log.warn(`[${c.name || c.host}] presented a different TLS certificate (SHA-256 ${String(fingerprint).slice(0, 23)}…) than the one trusted (${c.certSha256?.slice(0, 23)}…); not connecting`);
+      }
+      notifyManager();
+    },
+  });
+}
+
+/** The owner checked the new certificate: trust it and connect. */
+async function trustNewCertificate(id) {
+  const cfg = store.data.consoles.find((c) => c.id === id);
+  const key = cfg && consoleKey(cfg.host);
+  const fingerprint = key && certSeen.get(key);
+  if (!fingerprint) return;
+  for (const c of consolesAt(key)) c.certSha256 = fingerprint;
+  certSeen.delete(key);
+  store.flush();
+  log.info(`[${cfg.name || cfg.host}] new TLS certificate trusted by the user (SHA-256 ${fingerprint.slice(0, 23)}…)`);
+  for (const c of consolesAt(key)) await connections.get(c.id)?.restart(c);
+  notifyManager();
+}
+
 function startConnection(cfg, MockConnection = null) {
   const conn = MockConnection
     ? new MockConnection(cfg)
-    : new ConsoleConnection(cfg, () => decryptPassword(cfg.password, (plain) => reEncryptPassword(cfg, plain)), log.child(cfg.name || cfg.host));
+    : new ConsoleConnection(cfg, () => decryptPassword(cfg.password, (plain) => reEncryptPassword(cfg, plain)), log.child(cfg.name || cfg.host), {
+      certChanged: () => certSeen.has(consoleKey(cfg.host)),
+    });
   conn.on("state", () => {
     notifyManager();
     for (const cw of players()) {
@@ -204,6 +252,11 @@ async function saveConsole(input) {
     store.flush();
     startConnection(cfg);
   } else {
+    if (consoleKey(host) !== consoleKey(cfg.host)) {
+      // Another address is another device: its certificate is trusted afresh.
+      certSeen.delete(consoleKey(cfg.host));
+      delete cfg.certSha256;
+    }
     Object.assign(cfg, { name: name || host, host, username });
     if (password) cfg.password = await encryptPassword(password);
     store.flush();
@@ -1693,6 +1746,8 @@ function managerState() {
         state: conn?.state ?? "idle",
         message: conn?.message ?? "",
         controllerName: conn?.controllerName ?? null,
+        // For "Trust the new certificate": what was trusted, and what the console presents now.
+        cert: certSeen.has(consoleKey(c.host)) ? { trusted: c.certSha256 ?? null, seen: certSeen.get(consoleKey(c.host)) } : null,
         hiddenCount: hiddenKeys(c.id).length,
         shownCount: shown(c.id),
         openCount: Object.entries(store.data.windows).filter(([key, w]) => w.open && key.startsWith(`${c.id}/`)).length,
@@ -1830,6 +1885,7 @@ function registerIpc() {
   handle("mgr:save-console", (input) => saveConsole(input));
   handle("mgr:remove-console", (id) => removeConsole(String(id)));
   handle("mgr:reconnect", async (id) => { await connections.get(String(id))?.restart(); });
+  handle("mgr:trust-cert", (id) => trustNewCertificate(String(id)));
   handle("mgr:open-camera", (key) => openCameraWindow(String(key)));
   handle("mgr:close-camera", (key) => closeCamera(String(key)));
   handle("mgr:hide-cameras", (consoleId) => hideCameras(consoleId ? String(consoleId) : null));

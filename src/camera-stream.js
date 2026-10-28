@@ -98,6 +98,7 @@ export class CameraStream {
       }
       if (conn.state !== "connected" && conn.state !== "reconnecting") {
         if (conn.state === "authfailed") this.#setStatus("error", `${conn.name}: login failed - fix it in the camera list`);
+        else if (conn.state === "certchanged") this.#setStatus("error", `${conn.name}: its security certificate changed - check it in the camera list`);
         else this.#setStatus("waiting", `Connecting to ${conn.name}…`);
         await this.#sleep(15_000, signal);
         continue;

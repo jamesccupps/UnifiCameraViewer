@@ -9,6 +9,9 @@ import { errorText, sleep } from "./util.js";
 const AUTH_RETRY_MS = [15_000, 30_000, 60_000, 120_000, 300_000, 600_000];
 const authRetryMs = (failures) => AUTH_RETRY_MS[Math.min(failures, AUTH_RETRY_MS.length - 1)];
 
+const CERT_CHANGED = "This console presented a different security certificate than before, so nothing was sent to it. "
+  + "If it was reset or updated, that's expected: trust the new certificate. If not, something else may be answering at its address.";
+
 /*
  * One logged-in session to one UniFi OS console (UDM / UNVR / Cloud Key).
  *
@@ -17,7 +20,7 @@ const authRetryMs = (failures) => AUTH_RETRY_MS[Math.min(failures, AUTH_RETRY_MS
  * before the token expires, reconnects the realtime channel after a console reboot, and recovers
  * livestreams. This class only adds the initial connect-with-backoff and a simple state for the UI.
  *
- * state: "idle" | "connecting" | "connected" | "reconnecting" | "error" | "authfailed"
+ * state: "idle" | "connecting" | "connected" | "reconnecting" | "error" | "authfailed" | "certchanged"
  * events: "state" (any change)
  */
 export class ConsoleConnection extends EventEmitter {
@@ -26,6 +29,7 @@ export class ConsoleConnection extends EventEmitter {
   #log;
   #connect;
   #authRetryMs;
+  #certChanged;
   #abort = null;
   #client = null;
   #disposables = [];
@@ -34,14 +38,19 @@ export class ConsoleConnection extends EventEmitter {
   state = "idle";
   message = "";
 
-  /** opts.connect and opts.authRetryMs replace ProtectClient.connect and the retry delays (unit tests). */
-  constructor(cfg, getPassword, log, { connect = (o) => ProtectClient.connect(o), authRetryMs: retry = authRetryMs } = {}) {
+  /**
+   * opts.certChanged() says the console presented a different TLS certificate than the trusted one
+   * (cert-pins.js). opts.connect and opts.authRetryMs replace ProtectClient.connect and the retry
+   * delays (unit tests).
+   */
+  constructor(cfg, getPassword, log, { connect = (o) => ProtectClient.connect(o), authRetryMs: retry = authRetryMs, certChanged = () => false } = {}) {
     super();
     this.#cfg = cfg;
     this.#getPassword = getPassword;
     this.#log = log;
     this.#connect = connect;
     this.#authRetryMs = retry;
+    this.#certChanged = certChanged;
   }
 
   get id() { return this.#cfg.id; }
@@ -149,6 +158,10 @@ export class ConsoleConnection extends EventEmitter {
         return;
       } catch (err) {
         if (signal.aborted) return;
+        if (this.#certChanged()) { // nothing was sent: stop until the owner trusts the new certificate
+          this.#set("certchanged", CERT_CHANGED);
+          return;
+        }
         if (err instanceof ProtectAuthError || err instanceof ProtectAuthorizationError) {
           const wait = this.#authRetryMs(authFailures++);
           const again = `Trying again in ${wait < 60_000 ? `${Math.round(wait / 1000)} s` : `${Math.round(wait / 60_000)} min`}.`;
@@ -176,7 +189,8 @@ export class ConsoleConnection extends EventEmitter {
       reconnecting: ["reconnecting", "Reconnecting to console…"],
     };
     this.#disposables.push(client.connection.on("stateChanged", ({ to, reason }) => {
-      const [state, message] = map[to] ?? ["connected", ""];
+      // A certificate that changes mid-session: the library keeps trying, and each try is refused.
+      const [state, message] = to !== "healthy" && this.#certChanged() ? ["certchanged", CERT_CHANGED] : map[to] ?? ["connected", ""];
       this.#log.info(`connection ${to}${reason ? ` (${reason})` : ""}`);
       this.#set(state, message);
     }));

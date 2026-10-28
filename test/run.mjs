@@ -1995,6 +1995,45 @@ async function e2eSuite() {
       thumbs["Building Cam 3"]?.text === "offline" && !thumbs["Building Cam 3"]?.jpeg && !asked.some((l) => l.includes(cam(P.building, 2))),
       JSON.stringify({ cam3: thumbs["Building Cam 3"], asked }));
     console.log(`  results: ${results}`);
+
+    // TLS certificate pinning. The first connection trusted each console's certificate...
+    const { X509Certificate } = await import("node:crypto");
+    const fakeCert = new X509Certificate(fs.readFileSync(path.join(ROOT, "test", "fake-console", "cert.pem"))).fingerprint256;
+    check("each console's TLS certificate is trusted on first use and saved",
+      [ids.B, ids.G].every((id) => config.consoles.find((c) => c.id === id)?.certSha256 === fakeCert), JSON.stringify(config.consoles.map((c) => [c.name, c.certSha256?.slice(0, 11)])));
+
+    // ...so a different one is refused before anything is sent, until it's trusted in the camera list.
+    const cfg2 = JSON.parse(fs.readFileSync(path.join(userData, "config.json"), "utf8"));
+    for (const w of Object.values(cfg2.windows)) w.open = false;
+    for (const g of cfg2.grids ?? []) g.open = false;
+    cfg2.consoles.find((c) => c.id === ids.G).certSha256 = fakeCert.replace(/^../, fakeCert.startsWith("00") ? "11" : "00");
+    fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify(cfg2, null, 2));
+    const logins = () => servers[1].output.filter((l) => l.includes("login ok")).length;
+    const loginsBefore = logins();
+    let loginsWhileRefused = null;
+    const snap2 = setTimeout(() => { loginsWhileRefused = logins(); }, 5_000);
+    const readTrust = `(() => {
+      const card = [...document.querySelectorAll("article.panel")].find((a) => a.querySelector(".console-head b")?.textContent === "Garage");
+      return { button: [...card.querySelectorAll("button")].some((b) => b.textContent.startsWith("Trust the new certificate")), msg: card.querySelector(".console-msg")?.textContent ?? "" };
+    })()`;
+    const run2 = await runApp({
+      userData, results: path.join(userData, "results-2"), seconds: 11,
+      env: {
+        PANES_SELFTEST_ACTIONS: JSON.stringify([
+          { at: 5000, do: "manager-js", js: readTrust },
+          { at: 6500, do: "manager-js", js: `panes.invoke("mgr:trust-cert", ${JSON.stringify(ids.G)}).then(() => true)` },
+        ]),
+      },
+    });
+    clearTimeout(snap2);
+    const shown = run2.result.actions.find((a) => a.act.js === readTrust)?.value;
+    check("a console presenting a different certificate is refused before the login is sent",
+      loginsWhileRefused === loginsBefore && shown?.button && /different security certificate/.test(shown.msg),
+      JSON.stringify({ loginsBefore, loginsWhileRefused, shown }));
+    check("trusting the new certificate in the camera list connects and saves it",
+      run2.result.connections[ids.G]?.state === "connected" && run2.config.consoles.find((c) => c.id === ids.G)?.certSha256 === fakeCert && logins() > loginsBefore
+        && run2.result.connections[ids.B]?.state === "connected",
+      JSON.stringify({ G: run2.result.connections[ids.G], B: run2.result.connections[ids.B]?.state, logins: logins() }));
   } finally {
     for (const s of servers) s.kill();
   }
