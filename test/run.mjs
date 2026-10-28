@@ -327,7 +327,7 @@ async function hideSuite() {
         { at: 3000, do: "manager-js", js: clickInCard("Garage", "Hide all") },
         { at: 4500, do: "manager-js", js: readButtons },
         { at: 5000, do: "tray-click", label: "Show cameras" },
-        { at: 6000, do: "manager-js", js: setQualityForAll("Garage", 1) },
+        { at: 10000, do: "manager-js", js: setQualityForAll("Garage", 1) }, // after the Show check: it restarts the stream
         { at: 8500, do: "tray-click", label: "Hide cameras" },
         { at: 9500, do: "tray-click", label: "Bring cameras to front" },
       ]),
@@ -889,13 +889,13 @@ async function layoutsSuite() {
     return !!btn;
   })()`;
   const { result, config } = await runApp({
-    userData, results, seconds: 11, extraArgs: ["--mock"],
+    userData, results, seconds: 13, extraArgs: ["--mock"],
     env: {
       PANES_SELFTEST_ACTIONS: JSON.stringify([
         { at: 2500, do: "manager-js", js: saveJs },
         { at: 3500, do: "manager-js", js: importJs },
         { at: 5000, do: "manager-js", js: applyJs("Building · Entrances") },
-        { at: 8000, do: "tray-click", label: "Everything" },
+        { at: 9500, do: "tray-click", label: "Everything" }, // a newly opened window can take ~3 s to go live
       ]),
     },
   });
