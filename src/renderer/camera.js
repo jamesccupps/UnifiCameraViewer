@@ -452,8 +452,6 @@ function showStatus(state, text) {
   }
   statusEl.classList.remove("hidden");
   statusEl.classList.toggle("error", state === "error" || state === "offline" || state === "paused");
-  // Keep the last frame visible underneath while reconnecting.
-  statusEl.classList.toggle("dim", state === "reconnecting");
   statusText.textContent = text || "";
 }
 

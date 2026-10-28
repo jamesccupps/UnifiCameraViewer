@@ -215,11 +215,16 @@ body.no-names .label { display: none; }
   gap: 10px;
   padding: 16px;
   text-align: center;
-  color: var(--muted);
+  color: #e3e7eb;
   pointer-events: none;
+  /* Every status sits over the last frame, dimmed so it can't pass for live video, with its text on a
+     dark pill. Only "Reconnecting…" used to dim, and "Camera offline" or an error was 12 px grey on
+     whatever the picture was: about 1.5:1 on a bright scene. */
+  background: rgba(0, 0, 0, 0.5);
 }
 .status.hidden { display: none; }
-.status.dim { background: rgba(0, 0, 0, 0.45); }
+#status-text { max-width: 90%; padding: 4px 10px; border-radius: 6px; background: rgba(0, 0, 0, 0.65); font-size: 13px; line-height: 1.35; }
+#status-text:empty { display: none; }
 .status.error .spinner { display: none; }
 .spinner {
   width: 22px;
