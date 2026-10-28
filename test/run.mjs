@@ -415,7 +415,7 @@ async function hideSuite() {
 // Stream recovery (mock consoles): what a window does when its camera or its stream misbehaves.
 
 async function streamsSuite() {
-  console.log("\nStreams suite (mock consoles)");
+  console.log("\nStreams suite (mock consoles, two launches)");
   // Lose the 360° canvas's WebGL context, then restore it `times` times, or (0) leave it lost.
   const loseContext = (times) => `(async () => {
     const ext = document.getElementById("dewarp").getContext("webgl").getExtension("WEBGL_lose_context");
@@ -424,60 +424,34 @@ async function streamsSuite() {
     for (let i = 0; i < ${times}; i++) { ext.loseContext(); await wait(300); ext.restoreContext(); await wait(500); }
     return window.__panesStats().dewarp;
   })()`;
-  const userData = tmpDir("streams");
   const A = "aaaaaaaa-0000-4000-8000-000000000001";
-  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, broken: `${A}/aaaaaaaa-cam2`, rewind: `${A}/aaaaaaaa-cam3`, stair: `${A}/aaaaaaaa-cam4`, fish: `${A}/aaaaaaaa-cam360`, bogus: `${A}/aaaaaaaa-cam5` };
-  // Dock goes offline 6 s after the console connects and comes back at 12 s. The library would keep
-  // its stream "recovering" (renegotiating every few seconds) the whole time. Broken's fragments
-  // fail to decode every time. Rewind's encoder restarts 12 s in without flagging the discontinuity:
-  // its picture would freeze until the new timestamps caught up with the playhead, another 12 s.
-  // Stair's window and a grid tile of Lobby have their renderers crashed 8 s in. The 360° window's
-  // WebGL context is lost and restored three times at 6 s, then lost for good at 12 s. Bogus sends a
-  // codec nothing can play.
+  const win = (x, y, extra = {}) => ({ open: true, bounds: { x, y, width: 480, height: 270 }, channel: 2, ...extra });
+  const states = (result, k) => result.samples.map((s) => s.cams[k]?.status).filter(Boolean);
+  const runs = (list) => list.filter((s, i) => s !== list[i - 1]);
+  // Two launches of four or five streams each: every mock stream is its own encoder, and nine at once
+  // starved each other on a busy PC.
+
+  // 1. Stream recovery. Dock goes offline 10 s after the console connects and comes back at 16 s; the
+  // library would keep its stream "recovering" (renegotiating every few seconds) the whole time.
+  // Broken's fragments fail to decode every time. Rewind's encoder restarts 12 s in without flagging
+  // the discontinuity: its picture would freeze until the new timestamps caught up, another 12 s.
+  const userData = tmpDir("streams");
+  const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1`, broken: `${A}/aaaaaaaa-cam2`, rewind: `${A}/aaaaaaaa-cam3` };
   fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
     version: 1,
-    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Broken", "Rewind", "Stair", "Bogus"], mockDropout: { camera: "Dock", offMs: 6000, onMs: 12000 } }],
-    windows: {
-      [keys.lobby]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 },
-      [keys.dock]: { open: true, bounds: { x: 500, y: 0, width: 480, height: 270 }, channel: 2 },
-      [keys.broken]: { open: true, bounds: { x: 0, y: 300, width: 480, height: 270 }, channel: 2 },
-      [keys.rewind]: { open: true, bounds: { x: 500, y: 300, width: 480, height: 270 }, channel: 2, clock: true },
-      [keys.stair]: { open: true, bounds: { x: 1000, y: 0, width: 480, height: 270 }, channel: 2 },
-      [keys.fish]: { open: true, bounds: { x: 0, y: 600, width: 480, height: 270 }, channel: 2 },
-      [keys.bogus]: { open: true, bounds: { x: 500, y: 600, width: 480, height: 270 }, channel: 2 },
-    },
-    grids: [{ id: "grid-1", name: "G", templateId: "2x2", bounds: { x: 1000, y: 300, width: 640, height: 400 }, open: true, tiles: [{ key: keys.lobby, channel: 2 }, null, null, null] }],
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Broken", "Rewind"], mockDropout: { camera: "Dock", offMs: 10000, onMs: 16000 } }],
+    windows: { [keys.lobby]: win(0, 0), [keys.dock]: win(500, 0), [keys.broken]: win(0, 300), [keys.rewind]: win(500, 300, { clock: true }) },
     settings: { startHidden: true },
   }, null, 2));
-  const { result } = await runApp({
-    userData, results: path.join(userData, "results"), seconds: 30, extraArgs: ["--mock"],
-    env: {
-      PANES_MOCK_FISHEYE: path.join(FIXTURES, "fisheye-ceiling.png"),
-      PANES_SELFTEST_ACTIONS: JSON.stringify([
-        { at: 8000, do: "crash", win: 4 },
-        { at: 8000, do: "crash", tile: "G#0" },
-        { at: 6000, do: "camera-js", win: 5, js: loseContext(3) },
-        { at: 12000, do: "camera-js", win: 5, js: loseContext(0) },
-        // Lobby's spinner: limited to 22 turns, and a new status starts it over.
-        { at: 9000, do: "camera-js", win: 0, js: `/*spinner*/ (() => {
-          const s = document.querySelector(".spinner");
-          const count = getComputedStyle(s).animationIterationCount;
-          showStatus("reconnecting", "test " + Date.now());
-          const runningAfterRestart = s.getAnimations().some((a) => a.playState === "running");
-          hideStatus();
-          return { count, runningAfterRestart };
-        })()` },
-      ]),
-    },
-  });
-  const states = (k) => result.samples.map((s) => s.cams[k]?.status).filter(Boolean);
-  const runs = (list) => list.filter((s, i) => s !== list[i - 1]);
-  const dock = runs(states(keys.dock));
-  const reconnectingSamples = states(keys.dock).filter((s) => s === "reconnecting").length;
+  const { result } = await runApp({ userData, results: path.join(userData, "results"), seconds: 34, extraArgs: ["--mock"] });
+  const dock = runs(states(result, keys.dock));
+  const reconnectingSamples = states(result, keys.dock).filter((s) => s === "reconnecting").length;
   check("a camera that goes offline while viewed reads \"offline\", not \"reconnecting\" for the whole outage",
     dock.includes("offline") && reconnectingSamples <= 1, `${dock.join(" > ")} (reconnecting in ${reconnectingSamples} samples)`);
   check("it comes back live when the camera is back", dock.at(-1) === "live" && dock.indexOf("live") < dock.indexOf("offline"), dock.join(" > "));
-  check("the other camera on the console stays live", runs(states(keys.lobby).slice(2)).join() === "live", runs(states(keys.lobby)).join(" > "));
+  const lobbyStates = states(result, keys.lobby);
+  check("the other camera on the console stays live, once it's up",
+    lobbyStates.includes("live") && runs(lobbyStates.slice(lobbyStates.indexOf("live"))).join() === "live", runs(lobbyStates).join(" > "));
   const subs = result.connections[A]?.subscriptions?.["aaaaaaaa-cam1"];
   check("the offline camera is subscribed again only once it's back", subs === 2, `subscriptions=${subs}`);
 
@@ -490,7 +464,9 @@ async function streamsSuite() {
     end?.resetRequests >= 3 && end.resetRequests <= 5, `resetRequests=${end?.resetRequests} errors=${JSON.stringify(end?.errors?.slice(-3))}`);
   check("its window always says something once it has failed (never black under a hidden status)",
     afterFirst.length > 3 && afterFirst.every((c) => c.statusText), JSON.stringify(afterFirst.map((c) => [c.status, c.statusText])));
-  check("after 3 failed restarts it says this PC couldn't decode it", /couldn't decode/.test(end?.statusText ?? ""), end?.statusText);
+  // Any sample: each back-off retry shows "Connecting…" for a moment, and the last sample can land there.
+  check("after 3 failed restarts it says this PC couldn't decode it", broken.some((c) => /couldn't decode/.test(c.statusText ?? "")),
+    JSON.stringify(broken.map((c) => c.statusText)));
 
   // Fragments still arriving but no new frame: restart, and meanwhile no clock over the frozen picture.
   const rw = result.samples.map((s) => s.cams[keys.rewind]).filter((c) => c && !c.error);
@@ -501,36 +477,83 @@ async function streamsSuite() {
   const frozen = rw.filter((c, i) => i > 0 && c.status === "live" && c.decodedFrames === rw[i - 1].decodedFrames && c.decodedFrames > 0);
   check("no clock over the frozen picture", frozen.length >= 1 && frozen.every((c) => !c.clock.shown) && rwEnd?.clock?.shown,
     JSON.stringify(rw.map((c) => [c.decodedFrames, c.clock.shown])));
+  console.log(`  results: ${userData}`);
+
+  // 2. Pages and the GPU. Stair's window and a grid tile of Lobby have their renderers crashed 8 s in.
+  // The 360° window's WebGL context is lost and restored three times at 6 s; 360° is turned off and on
+  // at 14 s, once it has surely drawn; then the context is lost for good at 18 s. Bogus sends a codec
+  // nothing can play.
+  const userData2 = tmpDir("streams-pages");
+  const keys2 = { lobby: `${A}/aaaaaaaa-cam0`, stair: `${A}/aaaaaaaa-cam1`, bogus: `${A}/aaaaaaaa-cam2`, fish: `${A}/aaaaaaaa-cam360` };
+  fs.writeFileSync(path.join(userData2, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Stair", "Bogus"] }],
+    windows: { [keys2.lobby]: win(0, 0), [keys2.stair]: win(500, 0), [keys2.bogus]: win(0, 300), [keys2.fish]: win(500, 300) },
+    grids: [{ id: "grid-1", name: "G", templateId: "2x2", bounds: { x: 1000, y: 0, width: 640, height: 400 }, open: true, tiles: [{ key: keys2.lobby, channel: 2 }, null, null, null] }],
+    settings: { startHidden: true },
+  }, null, 2));
+  const fishStats = (tag) => `${tag} (() => { const s = window.__panesStats(); return { active: s.dewarp.active, hasFrame: s.dewarp.hasFrame, frames: s.decodedFrames }; })()`;
+  const { result: r2 } = await runApp({
+    userData: userData2, results: path.join(userData2, "results"), seconds: 26, extraArgs: ["--mock"],
+    env: {
+      PANES_MOCK_FISHEYE: path.join(FIXTURES, "fisheye-ceiling.png"),
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 6000, do: "camera-js", win: 3, js: loseContext(3) },
+        { at: 8000, do: "crash", win: 1 },
+        { at: 8000, do: "crash", tile: "G#0" },
+        // Lobby's spinner: limited to 22 turns, and a new status starts it over.
+        { at: 8500, do: "camera-js", win: 0, js: `/*spinner*/ (() => {
+          const s = document.querySelector(".spinner");
+          const count = getComputedStyle(s).animationIterationCount;
+          showStatus("reconnecting", "test " + Date.now());
+          const runningAfterRestart = s.getAnimations().some((a) => a.playState === "running");
+          hideStatus();
+          return { count, runningAfterRestart };
+        })()` },
+        // 360° off and on again once it has drawn: the texture goes back to 1x1 while off, and frames
+        // come back after.
+        { at: 13800, do: "camera-js", win: 3, js: fishStats("/*before*/") },
+        { at: 14000, do: "dewarp", win: 3, changes: { mode: "off" } },
+        { at: 14600, do: "camera-js", win: 3, js: fishStats("/*off*/") },
+        { at: 14700, do: "dewarp", win: 3, changes: { mode: "quad" } },
+        { at: 17000, do: "camera-js", win: 3, js: fishStats("/*on*/") },
+        { at: 18000, do: "camera-js", win: 3, js: loseContext(0) },
+      ]),
+    },
+  });
 
   // A crashed camera page (window or grid tile) is reloaded and plays again.
-  const crashAt = result.actions.find((a) => a.act.do === "crash")?.t ?? Infinity;
-  const appLog = fs.readFileSync(path.join(userData, "protect-panes.log"), "utf8");
-  for (const [name, id] of [["window", keys.stair], ["grid tile", "grid:G#0"]]) {
-    const after = result.samples.filter((s) => s.t > crashAt).map((s) => s.cams[id]);
+  const crashAt = r2.actions.find((a) => a.act.do === "crash")?.t ?? Infinity;
+  const appLog = fs.readFileSync(path.join(userData2, "protect-panes.log"), "utf8");
+  for (const [name, id] of [["window", keys2.stair], ["grid tile", "grid:G#0"]]) {
+    const after = r2.samples.filter((s) => s.t > crashAt).map((s) => s.cams[id]);
     const live = after.filter((c) => c && !c.error && c.status === "live");
-    const before = result.samples.filter((s) => s.t < crashAt).at(-1)?.cams[id]?.decodedFrames ?? 0;
+    const before = r2.samples.filter((s) => s.t < crashAt).at(-1)?.cams[id]?.decodedFrames ?? 0;
     check(`a crashed camera page (${name}) is reloaded and plays again`,
-      result.actions.filter((a) => a.act.do === "crash").every((a) => a.ok) && after.some((c) => !c || c.error || c.decodedFrames < before)
+      r2.actions.filter((a) => a.act.do === "crash").every((a) => a.ok) && after.some((c) => !c || c.error || c.decodedFrames < before)
         && live.length >= 2 && live.at(-1).decodedFrames > live.at(-2).decodedFrames,
-      JSON.stringify(result.samples.map((s) => [s.t > crashAt, s.cams[id]?.error ? "error" : s.cams[id]?.decodedFrames])));
+      JSON.stringify(r2.samples.map((s) => [s.t > crashAt, s.cams[id]?.error ? "error" : s.cams[id]?.decodedFrames])));
   }
-  const restored = result.actions.find((a) => a.act.do === "camera-js" && a.act.js.includes("i < 3"))?.value;
-  check("a 360° view whose WebGL context is lost and restored 3 times draws again, set up once per restore",
-    restored?.active && !restored.glLost && restored.glSetups === 4, JSON.stringify(restored));
-  const fishEnd = result.samples.at(-1)?.cams[keys.fish]?.dewarp;
-  check("a context that never comes back falls back to the raw fisheye picture", fishEnd?.glBroken && fishEnd.active === false, JSON.stringify(fishEnd));
-  // Nothing here can play it: the window says so and the console isn't asked for its video any more.
-  const bogusEnd = result.samples.at(-1)?.cams[keys.bogus];
-  const conn = result.connections[A];
-  check("a stream with a codec this PC can't play is stopped, and the window says why",
-    /codec isn't supported/.test(bogusEnd?.statusText ?? "") && conn?.subscriptions?.["aaaaaaaa-cam5"] === 1 && conn?.active?.["aaaaaaaa-cam5"] === 0,
-    JSON.stringify({ status: bogusEnd?.statusText, subscriptions: conn?.subscriptions?.["aaaaaaaa-cam5"], active: conn?.active?.["aaaaaaaa-cam5"] }));
-  const spin = result.actions.find((a) => a.act.js?.startsWith("/*spinner*/"))?.value;
-  check("the status spinner stops after about 20 s instead of spinning through a whole outage",
-    spin?.count === "22" && spin.runningAfterRestart === true, JSON.stringify(spin));
   check("the crashes are logged", (appLog.match(/camera page for \S+ gone \(crashed/g) ?? []).length === 2,
     appLog.split(/\r?\n/).filter((l) => l.includes("gone")).join(" | "));
-  console.log(`  results: ${userData}`);
+  const restored = r2.actions.find((a) => a.act.do === "camera-js" && a.act.js.includes("i < 3"))?.value;
+  check("a 360° view whose WebGL context is lost and restored 3 times draws again, set up once per restore",
+    restored?.active && !restored.glLost && restored.glSetups === 4, JSON.stringify(restored));
+  const [drawn, off, on] = ["/*before*/", "/*off*/", "/*on*/"].map((tag) => r2.actions.find((a) => a.act.js?.startsWith(tag))?.value);
+  check("turning 360° off lets its frame texture go, and turning it on draws again",
+    drawn?.hasFrame === true && off?.active === false && off.hasFrame === false && on?.active === true && on.hasFrame === true, JSON.stringify({ drawn, off, on }));
+  const fishEnd = r2.samples.at(-1)?.cams[keys2.fish]?.dewarp;
+  check("a context that never comes back falls back to the raw fisheye picture", fishEnd?.glBroken && fishEnd.active === false, JSON.stringify(fishEnd));
+  // Nothing here can play it: the window says so and the console isn't asked for its video any more.
+  const bogusEnd = r2.samples.at(-1)?.cams[keys2.bogus];
+  const conn = r2.connections[A];
+  check("a stream with a codec this PC can't play is stopped, and the window says why",
+    /codec isn't supported/.test(bogusEnd?.statusText ?? "") && conn?.subscriptions?.["aaaaaaaa-cam2"] === 1 && conn?.active?.["aaaaaaaa-cam2"] === 0,
+    JSON.stringify({ status: bogusEnd?.statusText, subscriptions: conn?.subscriptions?.["aaaaaaaa-cam2"], active: conn?.active?.["aaaaaaaa-cam2"] }));
+  const spin = r2.actions.find((a) => a.act.js?.startsWith("/*spinner*/"))?.value;
+  check("the status spinner stops after about 20 s instead of spinning through a whole outage",
+    spin?.count === "22" && spin.runningAfterRestart === true, JSON.stringify(spin));
+  console.log(`  results: ${userData2}`);
 }
 
 // ---------------------------------------------------------------------------------------------

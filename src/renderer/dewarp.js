@@ -204,10 +204,18 @@ window.Dewarper = (() => {
           this.onError("No graphics acceleration available - the 360° view is drawn on the CPU at reduced resolution.");
         }
       }
-      if (on && !this.gl) {
+      if (on && !this.gl && !this.noGlNoticeShown) {
+        this.noGlNoticeShown = true; // once: setConfig runs on every settings refresh
         this.onError("Dewarping needs WebGL, which isn't available on this PC. Showing the raw fisheye image.");
       }
+      const wasActive = this.active;
       this.active = on && !!this.gl && !this.glBroken;
+      // Leaving a 360° view: the hidden canvas shrinks to 1x1 by itself, but the video-sized texture
+      // (15-20 MB at High) would stay. Give it back; the next frame uploads a full one again.
+      if (wasActive && !this.active && this.gl && !this.glLost) {
+        this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGB, 1, 1, 0, this.gl.RGB, this.gl.UNSIGNED_BYTE, null);
+        this.hasFrame = false;
+      }
       this.canvas.classList.toggle("hidden", !this.active || this.calibrating);
       if (this.active) this.#startFrames();
       else this.#stopFrames();
@@ -240,7 +248,7 @@ window.Dewarper = (() => {
     }
 
     stats() {
-      return { active: this.active, gl: !!this.gl, glSetups: this.glSetups, glLost: this.glLost, glBroken: this.glBroken, renderer: this.renderer, software: this.software, circle: this.cfg?.circle ?? this.detectedCircle, mode: this.cfg?.mode, focus: this.cfg?.focus, aspect: this.cfg?.aspect ?? "16:9" };
+      return { active: this.active, hasFrame: this.hasFrame, gl: !!this.gl, glSetups: this.glSetups, glLost: this.glLost, glBroken: this.glBroken, renderer: this.renderer, software: this.software, circle: this.cfg?.circle ?? this.detectedCircle, mode: this.cfg?.mode, focus: this.cfg?.focus, aspect: this.cfg?.aspect ?? "16:9" };
     }
 
     // ------------------------------------------------------------------ frames
