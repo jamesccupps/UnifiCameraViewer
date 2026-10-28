@@ -440,7 +440,16 @@ panes.on("cam:highlight", () => {
 // ---------------------------------------------------------------------------------------------
 // UI
 
+const spinner = statusEl.querySelector(".spinner");
+let shownStatus = "";
 function showStatus(state, text) {
+  // A new status gets a fresh ~20 s of spinning (the CSS stops it after that).
+  if (`${state}|${text}` !== shownStatus || statusEl.classList.contains("hidden")) {
+    shownStatus = `${state}|${text}`;
+    spinner.style.animationName = "none";
+    void spinner.offsetWidth; // a style flush, so clearing the override starts the animation over
+    spinner.style.animationName = "";
+  }
   statusEl.classList.remove("hidden");
   statusEl.classList.toggle("error", state === "error" || state === "offline" || state === "paused");
   // Keep the last frame visible underneath while reconnecting.

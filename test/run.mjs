@@ -458,6 +458,15 @@ async function streamsSuite() {
         { at: 8000, do: "crash", tile: "G#0" },
         { at: 6000, do: "camera-js", win: 5, js: loseContext(3) },
         { at: 12000, do: "camera-js", win: 5, js: loseContext(0) },
+        // Lobby's spinner: limited to 22 turns, and a new status starts it over.
+        { at: 9000, do: "camera-js", win: 0, js: `/*spinner*/ (() => {
+          const s = document.querySelector(".spinner");
+          const count = getComputedStyle(s).animationIterationCount;
+          showStatus("reconnecting", "test " + Date.now());
+          const runningAfterRestart = s.getAnimations().some((a) => a.playState === "running");
+          hideStatus();
+          return { count, runningAfterRestart };
+        })()` },
       ]),
     },
   });
@@ -516,6 +525,9 @@ async function streamsSuite() {
   check("a stream with a codec this PC can't play is stopped, and the window says why",
     /codec isn't supported/.test(bogusEnd?.statusText ?? "") && conn?.subscriptions?.["aaaaaaaa-cam5"] === 1 && conn?.active?.["aaaaaaaa-cam5"] === 0,
     JSON.stringify({ status: bogusEnd?.statusText, subscriptions: conn?.subscriptions?.["aaaaaaaa-cam5"], active: conn?.active?.["aaaaaaaa-cam5"] }));
+  const spin = result.actions.find((a) => a.act.js?.startsWith("/*spinner*/"))?.value;
+  check("the status spinner stops after about 20 s instead of spinning through a whole outage",
+    spin?.count === "22" && spin.runningAfterRestart === true, JSON.stringify(spin));
   check("the crashes are logged", (appLog.match(/camera page for \S+ gone \(crashed/g) ?? []).length === 2,
     appLog.split(/\r?\n/).filter((l) => l.includes("gone")).join(" | "));
   console.log(`  results: ${userData}`);

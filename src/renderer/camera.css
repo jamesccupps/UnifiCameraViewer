@@ -227,7 +227,9 @@ body.no-names .label { display: none; }
   border: 2px solid rgba(255, 255, 255, 0.15);
   border-top-color: var(--text);
   border-radius: 50%;
-  animation: spin 900ms linear infinite;
+  /* About 20 s from each status change, not for the whole of a long outage: ten windows waiting on a
+     console overnight kept the compositor busy for nothing. camera.js restarts it on a new status. */
+  animation: spin 900ms linear 22;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
