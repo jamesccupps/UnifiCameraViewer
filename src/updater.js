@@ -253,7 +253,7 @@ export class Updater extends EventEmitter {
     try {
       fs.rmSync(fs.mkdtempSync(path.join(parent, ".pp-write-test-")), { recursive: true, force: true });
     } catch {
-      throw new Error(`Can't write to ${parent}. Move Protect Panes to a folder you can write to (for example C:\\Tools\\Protect Panes), or replace the folder by hand.`);
+      throw new Error(`Can't write to ${parent}. Move Protect Panes to a folder you can write to (for example %LOCALAPPDATA%\\Programs\\Protect Panes), or replace the folder by hand.`);
     }
     const script = path.join(this.#opts.stageDir, "apply-update.ps1");
     const log = path.join(this.#opts.stageDir, "apply-update.log");

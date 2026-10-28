@@ -14,7 +14,7 @@ UniFi Protect live view, one camera per window. Place each window anywhere on th
 - It adds Start menu and desktop shortcuts, and appears in **Settings → Apps** for uninstalling.
 - The app isn't code-signed, so Windows shows *Windows protected your PC*: click **More info**, then **Run anyway**.
 
-**Portable:** download `ProtectPanes-win32-x64.zip` instead and unzip it somewhere permanent that you can write to, e.g. `C:\Tools\Protect Panes`. Avoid `C:\Program Files`: in-place updates need to write there. Then run `ProtectPanes.exe`.
+**Portable:** download `ProtectPanes-win32-x64.zip` instead and unzip it somewhere permanent in your own profile, e.g. `%LOCALAPPDATA%\Programs\Protect Panes` (next to where Setup.exe installs). Avoid `C:\Program Files`, which in-place updates can't write to, and folders made at the root of `C:\` such as `C:\Tools`: Windows lets every account on the PC change those, so another user could swap the app for something that runs as you. Then run `ProtectPanes.exe`.
 
 Either way, you can turn on **Start with Windows** in the app.
 
@@ -87,7 +87,7 @@ Installed copies (from `ProtectPanes-Setup.exe`, 1.3.0 on) and portable copies f
 
 From 1.4.0 on, most updates are small. When a release uses the same Electron as the copy you're running, only the app's own file changes, so the download is a couple of MB instead of 120-160 MB. Releases that move to a new Electron still come as the full installer or zip. One side effect on installed copies: Settings → Apps keeps showing the version the installer last wrote until the next full update. The app's own About section always shows the real version.
 
-The folder the app lives in has to be one you can write to, e.g. `C:\Tools\Protect Panes`, not `C:\Program Files`. When an update location is set, the app also checks once at startup (one small request for `latest.json`) and says so in the list and the tray menu. It never downloads without a click.
+The folder the app lives in has to be one you can write to and other accounts can't, e.g. `%LOCALAPPDATA%\Programs\Protect Panes`, not `C:\Program Files` or a folder at the root of `C:\`. When an update location is set, the app also checks once at startup (one small request for `latest.json`) and says so in the list and the tray menu. It never downloads without a click.
 
 Portable copies older than 1.3.1 can't update themselves. 1.2.0 and 1.3.0 download the update, then fail with *a file in it is still in use* and reopen the old version. Install once by hand: quit the app (tray → **Quit**) and run `ProtectPanes-Setup.exe` (your settings carry over), or replace the folder with the latest zip.
 
