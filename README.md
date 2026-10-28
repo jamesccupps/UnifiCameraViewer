@@ -77,6 +77,8 @@ Dewarping is done by the graphics chip on the one stream that's already being de
 | "Login rejected" | Use a local-only account, not a UI.com login. Re-enter the password with **Edit**. |
 | "Can't reach console" | Check the IP. The app retries on its own every 5-60 s. |
 | "Camera offline" | The camera is disconnected in Protect. The window recovers when it's back. |
+| "Presented a different security certificate" | The app remembers each console's certificate from the first time it connects, and stops if a different one shows up. After a UniFi OS reset, update or a replaced console that's expected: click **Trust the new certificate…** on the console's card. If nothing like that happened, check what's answering at that address first. |
+| "No password saved for this console on this PC" | The console came from **Import settings…**, which carries no passwords. Enter it with **⋯ → Edit console…**. |
 | H.265 message | This PC can't decode HEVC. In Protect, set that camera to Standard (H.264) encoding. |
 | Picture behind / choppy | Right-click → pick **Medium** or **Low**. High (4K) streams cost the most GPU. |
 | Shadows look crushed / washed out | Many UniFi cameras send full-range video without saying so; the app corrects this automatically. If one camera still looks wrong, try **Right-click → Color range → Full** or **Limited**. |
