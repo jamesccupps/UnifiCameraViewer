@@ -7,6 +7,7 @@
  *
  * No Electron imports, so test/run.mjs can drive it under plain Node.
  */
+const MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 export class Previews {
   #getCamera;
   #log;
@@ -39,7 +40,13 @@ export class Previews {
     const cam = this.#getCamera(key);
     if (typeof cam?.snapshot !== "function" || cam.isOnline === false) return Promise.resolve(null);
     const value = this.#limit(() => cam.snapshot({ width: this.#width, signal: AbortSignal.timeout(this.#timeoutMs) }))
-      .then((buf) => ({ url: `data:image/jpeg;base64,${Buffer.from(buf).toString("base64")}`, at: Date.now() }))
+      .then((buf) => {
+        // A 480 px JPEG is tens of KB. Anything big, or not a JPEG, isn't base64'd into a data: URL and
+        // sent to the list: a console answering with hundreds of MB would fill both processes' memory.
+        const bytes = Buffer.from(buf);
+        if (bytes.length > MAX_SNAPSHOT_BYTES || bytes[0] !== 0xff || bytes[1] !== 0xd8) throw new Error(`not a usable JPEG (${bytes.length} bytes)`);
+        return { url: `data:image/jpeg;base64,${bytes.toString("base64")}`, at: Date.now() };
+      })
       .catch((err) => {
         this.#log?.debug(`preview of ${String(key).split("/")[1]} failed: ${err.message}`);
         return null;

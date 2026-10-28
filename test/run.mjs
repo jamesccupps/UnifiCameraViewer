@@ -584,6 +584,15 @@ async function configSuite() {
 
 async function securitySuite() {
   console.log("\nSecurity suite (mock consoles)");
+
+  // A console's snapshot answer only becomes a preview if it's a JPEG of a sensible size.
+  {
+    const { Previews } = await import(new URL("../src/previews.js", import.meta.url).href);
+    const answers = { ok: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]), huge: Buffer.alloc(3 * 1024 * 1024, 0xff), png: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0]) };
+    const previews = new Previews({ getCamera: (key) => ({ isOnline: true, snapshot: async () => answers[key] }) });
+    const got = Object.fromEntries(await Promise.all(Object.keys(answers).map(async (k) => [k, (await previews.get(k))?.url?.slice(0, 23) ?? null])));
+    check("camera previews take only a JPEG of a sensible size", got.ok === "data:image/jpeg;base64," && got.huge === null && got.png === null, JSON.stringify(got));
+  }
   const userData = tmpDir("security");
   const A = "aaaaaaaa-0000-4000-8000-000000000001";
   const lobby = `${A}/aaaaaaaa-cam0`;
