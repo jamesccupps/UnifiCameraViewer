@@ -2253,7 +2253,8 @@ async function e2eSuite() {
     })()`;
     const thumbsJs = `(() => Object.fromEntries([...document.querySelectorAll(".cams li")].map((li) => [
       li.querySelector(".cam-name b")?.textContent,
-      { jpeg: !!li.querySelector(".thumb img")?.src?.startsWith("data:image/jpeg"), text: li.querySelector(".thumb")?.textContent ?? null },
+      { jpeg: !!li.querySelector(".thumb img")?.src?.startsWith("data:image/jpeg"), text: li.querySelector(".thumb")?.textContent ?? null,
+        fit: li.querySelector(".thumb img") && getComputedStyle(li.querySelector(".thumb img")).objectFit },
     ])))()`;
     // Negotiations the Garage console has seen for that camera, just before Reconnect stream (12 s).
     const garageNegotiates = () => servers[1].output.filter((l) => l.includes(`livestream negotiate ${cam(P.garage, 0)}`)).length;
@@ -2319,6 +2320,10 @@ async function e2eSuite() {
     check("camera list previews: a JPEG from Protect's snapshot endpoint, through the library",
       thumbs["Building Cam 1"]?.jpeg && asked.some((l) => l.includes(`snapshot ${cam(P.building, 0)} w=480`)),
       JSON.stringify({ thumbs, asked }));
+    // A 360° camera's snapshot is square: "cover" in the 16:9 thumbnail cut the top and bottom off.
+    check("row thumbnails show the whole snapshot (contain, not cropped)",
+      Object.values(thumbs).some((t) => t.jpeg) && Object.values(thumbs).filter((t) => t.jpeg).every((t) => t.fit === "contain"),
+      JSON.stringify(Object.fromEntries(Object.entries(thumbs).map(([n, t]) => [n, t.fit]))));
     check("an offline camera's preview says offline and the console isn't asked for it",
       thumbs["Building Cam 3"]?.text === "offline" && !thumbs["Building Cam 3"]?.jpeg && !asked.some((l) => l.includes(cam(P.building, 2))),
       JSON.stringify({ cam3: thumbs["Building Cam 3"], asked }));

@@ -201,7 +201,8 @@ main { flex: 1; overflow: auto; padding: 14px 18px 18px; }
   border-radius: 4px; background: #0b0d0f; outline: 1px solid var(--line);
   cursor: zoom-in;
 }
-.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* contain, not cover: a 360° camera's snapshot is square, and cover cut the top and bottom off its circle. */
+.thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .thumb span { font-size: 10px; color: var(--muted); }
 .preview-pop {
   position: fixed; inset: auto; margin: 0;
