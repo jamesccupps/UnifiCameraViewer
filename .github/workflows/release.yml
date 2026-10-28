@@ -64,7 +64,9 @@ jobs:
         run: Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $env:RUNNER_TEMP 'update-signing-key.pem')
 
       - name: Verify latest.json against the key built into the app
-        run: node scripts/verify-release.mjs dist ${{ github.ref_name }}
+        shell: pwsh
+        # The tag through the environment, not pasted into the script: nothing a ref name holds runs.
+        run: node scripts/verify-release.mjs dist $env:GITHUB_REF_NAME
 
       - name: Install this installer, check its version, uninstall
         shell: pwsh
