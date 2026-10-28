@@ -1405,6 +1405,30 @@ async function editorSuite() {
     const out = { cells: cells().filter(Boolean), view: document.querySelector('[data-cell="0"] select')?.value };
     document.getElementById("editor-cancel").click();
     return out; })()`;
+  // Camera pictures in the editor: a thumbnail per camera in the list, and each filled tile's
+  // whole picture (contain) behind its name.
+  const pictures = `(async () => {
+    const li = [...document.querySelectorAll("#layout-list li")].find((l) => l.querySelector("b")?.textContent === "Wall");
+    [...li.querySelectorAll("button")].find((b) => b.textContent === "Edit").click();
+    const pics = () => [...document.querySelectorAll("#editor-preview .cell .cell-pic")];
+    const ready = () => pics().length && pics().every((p) => p.querySelector("img")?.naturalWidth) && document.querySelectorAll("#editor-cameras li.cam .thumb img").length >= 3;
+    for (let i = 0; i < 25 && !ready(); i++) await new Promise((r) => setTimeout(r, 100));
+    const size = (r) => Math.round(r.width) + "x" + Math.round(r.height);
+    const out = {
+      listCams: document.querySelectorAll("#editor-cameras li.cam").length,
+      listThumbs: document.querySelectorAll("#editor-cameras li.cam .thumb").length,
+      listImgs: document.querySelectorAll("#editor-cameras li.cam .thumb img").length,
+      tiles: pics().map((p) => {
+        const img = p.querySelector("img");
+        const cell = p.parentElement.getBoundingClientRect();
+        const pic = p.getBoundingClientRect();
+        return img ? { name: p.parentElement.querySelector("b")?.textContent, natural: img.naturalWidth + "x" + img.naturalHeight, img: size(img.getBoundingClientRect()), pic: size(pic),
+          fillsTile: Math.abs(pic.width - cell.width) <= 2 && Math.abs(pic.height - cell.height) <= 2, fit: getComputedStyle(img).objectFit } : null;
+      }),
+      emptyPics: document.querySelectorAll("#editor-preview .cell:not(.filled) .cell-pic").length,
+    };
+    document.getElementById("editor-cancel").click();
+    return out; })()`;
   const { result, config } = await runApp({
     userData, results, seconds: 13, extraArgs: ["--mock"],
     env: {
@@ -1414,10 +1438,18 @@ async function editorSuite() {
         { at: 3600, do: "manager-js", js: apply },
         { at: 9000, do: "manager-js", js: reopen },
         { at: 9600, do: "manager-js", js: fill },
+        { at: 10200, do: "manager-js", js: pictures },
       ]),
     },
   });
-  const [built, applied, reopened, filled] = result.actions.map((a) => a.value ?? { error: a.error });
+  const [built, applied, reopened, filled] = result.actions.filter((a) => a.act.js !== pictures).map((a) => a.value ?? { error: a.error });
+  const pics = result.actions.find((a) => a.act.js === pictures);
+  const pv = pics?.value;
+  check("the layout editor shows a preview for every camera in its list",
+    pv && pv.listCams > 0 && pv.listThumbs === pv.listCams && pv.listImgs >= 3, JSON.stringify(pv ?? pics?.error));
+  check("each filled tile shows its camera's whole picture (the 360° one uncut), empty tiles none",
+    pv?.tiles?.length === 2 && pv.tiles.every((t) => t && t.fillsTile && t.img === t.pic && t.fit === "contain") && pv.tiles.some((t) => t.natural.split("x")[0] === t.natural.split("x")[1]) && pv.emptyPics === 0,
+    JSON.stringify(pv?.tiles ?? pics?.error));
   const layout = config.layouts?.find((l) => l.name === "Wall");
   check("dragging cameras into tiles places them (and re-dropping moves one)",
     JSON.stringify(built) === JSON.stringify(["Building 360", null, null, null, null, "Garage Ramp"]), JSON.stringify(built));

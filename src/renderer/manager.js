@@ -296,7 +296,8 @@ function hidePop() {
 
 // A popover, not a positioned div: it has to sit above the layout editor's modal dialog.
 document.addEventListener("pointerover", (e) => {
-  const t = e.target.closest?.("[data-preview-key]");
+  // Not over a layout editor tile: it shows the picture already.
+  const t = e.target.closest?.("[data-preview-key]:not(.cell-pic)");
   if (t === popFor) return;
   hidePop();
   if (!t || !state?.settings.showPreviews) return;
@@ -906,6 +907,7 @@ function renderEditor() {
       },
     },
     el("span", { class: "n" }, String(i + 1)),
+    filled && cam && state.settings.showPreviews ? cellPicture(cam) : null,
     filled
       ? [
         el("b", { title: cam?.name ?? filled.key }, cam?.name ?? "Camera not available"),
@@ -949,13 +951,21 @@ function renderEditor() {
             if (free >= 0) place(free, cam.key);
             else editorError.textContent = "Every tile is taken. Pick a bigger layout or remove a camera first.";
           },
-        }, el("span", { class: `dot ${cam.online ? "live" : "bad"}` }), cam.name, cam.fisheye ? el("small", {}, "360°") : null);
+        }, state.settings.showPreviews ? thumb(cam) : null, el("span", { class: `dot ${cam.online ? "live" : "bad"}` }), cam.name, cam.fisheye ? el("small", {}, "360°") : null);
         li.addEventListener("dragstart", (e) => { e.dataTransfer.setData(CAMERA_TYPE, cam.key); e.dataTransfer.effectAllowed = "copyMove"; });
         return li;
       }),
     ];
   }));
   document.getElementById("editor-count").textContent = `${placedKeys.size} of ${plural(tpl.cells.length, "tile")} filled`;
+  observePreviews(); // the editor's thumbnails and tile pictures load as they come into view
+}
+
+/** A filled tile's picture: the camera's preview, whole, behind its name. */
+function cellPicture(cam) {
+  const node = thumb(cam);
+  node.classList.add("cell-pic");
+  return node;
 }
 
 function showEditorAs() {

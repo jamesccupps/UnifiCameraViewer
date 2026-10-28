@@ -339,6 +339,17 @@ dialog.editor { width: min(1040px, 96vw); max-height: 94vh; padding: 16px 18px; 
 .cell .x { position: absolute; right: 3px; top: 2px; border: 0; background: transparent; padding: 0 5px; font-size: 13px; color: var(--muted); }
 .cell .x:hover:not(:disabled) { color: var(--bad); background: transparent; }
 
+/* Camera pictures in the layout editor: a small one per camera in the list, and the whole picture
+   behind a filled tile's name. It ignores the pointer, so a drag starts on the tile, not the image. */
+.palette .thumb { width: 44px; height: 25px; }
+.cell .cell-pic { position: absolute; inset: 0; width: auto; height: auto; border-radius: 0; outline: 0; background: #0b0d0f; pointer-events: none; }
+.cell .cell-pic span { display: none; }
+.cell > b, .cell > small, .cell > select { position: relative; z-index: 1; }
+.cell .n, .cell .x { z-index: 1; }
+.cell:has(.cell-pic img) > b, .cell:has(.cell-pic img) > small { background: rgba(0, 0, 0, 0.62); color: #fff; padding: 1px 6px; border-radius: 3px; }
+.cell:has(.cell-pic img) > small.cycle { color: var(--accent); }
+.cell:has(.cell-pic img) .n { color: #fff; text-shadow: 0 0 3px #000; }
+
 /* Hover tips: one floating box, positioned by manager.js next to whatever has data-tip */
 .tip {
   position: fixed;
