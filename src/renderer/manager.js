@@ -593,7 +593,7 @@ function renderCamera(cam) {
     "data-focus-key": `hide-${cam.key}`,
     tip: `Hide from this list, for a camera nobody uses right now. It moves to "Hidden from list" at the bottom, and Show all skips it.${cam.open ? " Its window closes." : ""}`,
     onclick: () => panes.invoke("mgr:set-list-hidden", { key: cam.key, hidden: true }).then(refresh),
-  }, "Hide");
+  }, "Hide from list"); // not just "Hide": Hide all and Hide cameras take windows off screen instead
 
   return el("li", { "data-key": cam.key }, toggle, state.settings.showPreviews ? thumb(cam) : null, name, channelSelect, find, hide);
 }

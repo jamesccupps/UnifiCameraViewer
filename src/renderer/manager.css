@@ -187,6 +187,12 @@ main { flex: 1; overflow: auto; padding: 14px 18px 18px; }
 .cam-name small { grid-column: 2; color: var(--muted); font-size: 11.5px; line-height: 1.25; }
 .cams .empty { display: block; color: var(--muted); padding: 10px 2px; }
 .cams.with-previews li { grid-template-columns: auto auto 1fr auto auto auto; }
+/* A narrow list gives the camera name the room: smaller thumbnails (hover still shows the big one) and gaps. */
+.cams { container-type: inline-size; }
+@container (max-width: 600px) {
+  .cams li { gap: 7px; }
+  .cams .thumb { width: 44px; height: 25px; }
+}
 
 /* Camera previews: the row thumbnail, and the bigger one on hover */
 .thumb {

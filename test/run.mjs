@@ -1738,7 +1738,7 @@ async function listSuite() {
         { at: 17200, do: "manager-js", js: narrowNames },
         { at: 13300, do: "manager-js", js: markForPatch },
         { at: 17800, do: "manager-js", js: afterPatch },
-        { at: 2500, do: "manager-js", js: clickRow("Building Dock", "Hide") },
+        { at: 2500, do: "manager-js", js: clickRow("Building Dock", "Hide from list") },
         { at: 3500, do: "manager-js", js: readList },
         { at: 4000, do: "manager-js", js: showAll },
         { at: 6000, do: "manager-js", js: readPalette },

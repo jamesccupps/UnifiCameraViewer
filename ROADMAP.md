@@ -171,7 +171,7 @@ Open:
 Requested 2026-10-27: "a few cameras that are offline because they aren't being used right now".
 
 **Status:** built for 1.4.0.
-- **Hide** on a camera's row (`windows[key].listHidden`) moves it into a collapsed **Hidden from list (N)** section at the bottom of its console, with **Show in list** to put it back.
+- **Hide from list** on a camera's row (`windows[key].listHidden`) moves it into a collapsed **Hidden from list (N)** section at the bottom of its console, with **Show in list** to put it back.
 - Show all and the layout editor skip it, its window closes, and the camera count leaves it out.
 - `npm run test:list` covers it.
 
