@@ -1,5 +1,7 @@
 // Small shared helpers.
 
+import { pathToFileURL } from "node:url";
+
 /** Resolve after `ms`, or immediately when `signal` aborts. Never rejects. */
 export function sleep(ms, signal) {
   return new Promise((resolve) => {
@@ -57,4 +59,23 @@ export function syncLoginItem(wanted, read, write) {
 export function errorText(err) {
   if (!err) return "Unknown error";
   return err.message || String(err);
+}
+
+/**
+ * Is `url` (a frame's URL, as Chromium reports it) the file URL of `file`? Chromium and Node spell
+ * the same path differently: Chromium leaves a "%" in a folder name raw ("100%%20O'Brien", which no
+ * URL decoder accepts) and a "~" as is, Node writes %25 and %7E. So both are brought to one form by
+ * decoding only printable-ASCII escapes, then compared without query or hash (camera.html?tile=1)
+ * and without case (Windows paths). A folder literally named like "a%41b" won't match: IPC from it
+ * is refused rather than trusted.
+ */
+export function isFileUrlOf(url, file) {
+  const canonical = (u) => String(u ?? "")
+    .replace(/[?#].*$/, "")
+    .replace(/%([0-9a-f]{2})/gi, (m, hex) => {
+      const c = Number.parseInt(hex, 16);
+      return c >= 0x20 && c < 0x7f ? String.fromCharCode(c) : m.toUpperCase();
+    })
+    .toLowerCase();
+  return !!url && canonical(url) === canonical(pathToFileURL(file).href);
 }

@@ -620,6 +620,24 @@ async function securitySuite() {
       JSON.stringify({ big: big.message, slow: slow.message, ms: Date.now() - t0 }));
   }
 
+  // IPC's own-page check, against the URL Chromium really wrote for a packaged app in an awkward
+  // folder (a raw "%"; decoding it threw, and the camera list got no answers there).
+  {
+    const { isFileUrlOf } = await import(new URL("../src/util.js", import.meta.url).href);
+    // Both as measured in the packaged build: Chromium's page URL, and Electron's Node 24 pathToFileURL.
+    const file = String.raw`C:\Users\JAMESC~1\AppData\Local\Temp\pp\Jo & 100% O'Brien\Protect Panes\resources\app.asar\src\renderer\camera.html`;
+    const chromium = "file:///C:/Users/JAMESC~1/AppData/Local/Temp/pp/Jo%20&%20100%%20O'Brien/Protect%20Panes/resources/app.asar/src/renderer/camera.html?tile=1";
+    const node24 = "file:///C:/Users/JAMESC%7E1/AppData/Local/Temp/pp/Jo%20&%20100%25%20O'Brien/Protect%20Panes/resources/app.asar/src/renderer/camera.html";
+    const results = [
+      isFileUrlOf(chromium, file),
+      isFileUrlOf(node24, file),
+      isFileUrlOf("file:///E:/renderer/camera.html", file),
+      isFileUrlOf(chromium.replace("camera.html", "manager.html"), file),
+      isFileUrlOf("", file),
+    ];
+    check("IPC's own-page check matches Chromium's and Node's spelling of the page, nothing else", JSON.stringify(results) === "[true,true,false,false,false]", JSON.stringify(results));
+  }
+
   // Text from a console (a controller name, a reason) can't forge log lines.
   {
     const { createLogger } = await import(new URL("../src/log.js", import.meta.url).href);

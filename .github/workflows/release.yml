@@ -68,6 +68,11 @@ jobs:
         # The tag through the environment, not pasted into the script: nothing a ref name holds runs.
         run: node scripts/verify-release.mjs dist $env:GITHUB_REF_NAME
 
+      # npm test runs the app from source; only the packaged app loads its pages from app.asar through
+      # the install's own path. Run it from a plain folder and an awkward one and check its IPC works.
+      - name: Run the packaged app from two install folders
+        run: node scripts/check-packaged.mjs "dist/Protect Panes-win32-x64"
+
       - name: Install this installer, check its version, uninstall
         shell: pwsh
         run: |

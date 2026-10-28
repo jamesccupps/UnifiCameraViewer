@@ -83,6 +83,7 @@ scripts/build-win.js        @electron/packager folder + zip, then electron-build
 scripts/sign-release.js     Writes latest.json {payload, signature} for a zip, installer and app.asar.gz (Ed25519, private key outside the repo)
 scripts/make-signing-key.js One-time: create the signing key pair (refuses to overwrite)
 scripts/verify-release.mjs  Check a release folder like installed copies will (signature, sizes, hashes); the release workflow gates on it
+scripts/check-packaged.mjs  Run the built app from a plain and an awkward install folder; checks its pages still get IPC answers (release workflow)
 .github/workflows/release.yml  Tag vX.Y.Z -> test, sign with the UPDATE_SIGNING_KEY secret, verify, smoke-test the installer, publish
 release-notes/vX.Y.Z.md     Release text the workflow publishes
 ```
@@ -104,7 +105,7 @@ release-notes/vX.Y.Z.md     Release text the workflow publishes
 
 ## IPC
 
-Adding a channel means editing **both** the preload allowlist and `registerIpc()` in main.js. Main identifies camera pages (windows and grid tiles) by `event.sender.id` → `senders` → player, never by anything the renderer sends. Every handler also checks that the sending frame's URL is the app's own page for that role (`ourPage()`: camera.html, grid-window.html, manager.html, compared as file paths).
+Adding a channel means editing **both** the preload allowlist and `registerIpc()` in main.js. Main identifies camera pages (windows and grid tiles) by `event.sender.id` → `senders` → player, never by anything the renderer sends. Every handler also checks that the sending frame's URL is the app's own page for that role (`ourPage()` → `isFileUrlOf()` in util.js: camera.html, grid-window.html, manager.html). The comparison isn't a plain decode, because Chromium and Node spell paths differently, as measured in a packaged build: Chromium leaves a `%` in a folder name raw (`100%%20O'Brien`, which no decoder accepts) and `~` as is, while Node 24 writes `%25` and `%7E`. Both sides are brought to one form by decoding printable-ASCII escapes only. The first version decoded the URL; it threw on the raw `%`, so a packaged app in such a folder answered no IPC at all. Tests from source couldn't see it. `scripts/check-packaged.mjs` runs the built app from a plain and an awkward folder, and the release workflow runs it.
 
 **No page can leave.** `web-contents-created` blocks `will-navigate`, `will-redirect` and webviews, and denies `window.open`; the default session refuses every permission request. Before 1.4.3 a file or link dropped onto any window navigated it, and the dropped page kept that window's IPC: on the camera list it could re-point a saved console at another host, which then got the password. `loadFile` and `reload` are programmatic and unaffected.
 
@@ -333,7 +334,7 @@ The workflow:
 4. Builds the zip, Setup.exe and the signed `latest.json`.
 5. Deletes the key.
 6. Runs `scripts/verify-release.mjs`: the signature against the public key built into the app, then each file's size and SHA-256. A wrong secret stops here.
-7. Smoke-tests that exact installer (install, version, uninstall).
+7. Runs the packaged app from two install folders (`scripts/check-packaged.mjs`), then smoke-tests that exact installer (install, version, uninstall).
 8. Runs `gh release create` with all four files (Setup.exe, the zip, `ProtectPanes-app.asar.gz`, `latest.json`).
 
 Installed copies find the release through `releases/latest/download/latest.json`.

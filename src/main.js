@@ -12,7 +12,7 @@ import { Previews } from "./previews.js";
 import { decryptPassword, DEFAULT_SETTINGS, encryptPassword, newId, Store } from "./store.js";
 import { UPDATE_PUBLIC_KEY } from "./update-key.js";
 import { sourceKind, Updater } from "./updater.js";
-import { debounce, normalizeHost, syncLoginItem, throttle } from "./util.js";
+import { debounce, isFileUrlOf, normalizeHost, syncLoginItem, throttle } from "./util.js";
 import { placeWindow, windowBounds } from "./window-bounds.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1816,14 +1816,7 @@ function updateTrayMenu() {
 function registerIpc() {
   // A sender is trusted for what its webContents is AND for the page in it being ours: a page that
   // got in some other way (navigation is blocked, but this is the last line) gets nothing.
-  const ourPage = (e, page) => {
-    try {
-      const file = fileURLToPath(new URL(e.senderFrame?.url ?? ""));
-      return file.toLowerCase() === path.join(__dirname, "renderer", page).toLowerCase();
-    } catch {
-      return false;
-    }
-  };
+  const ourPage = (e, page) => isFileUrlOf(e.senderFrame?.url, path.join(__dirname, "renderer", page));
   const fromCamera = (e) => (ourPage(e, "camera.html") ? senders.get(e.sender.id) ?? null : null);
 
   ipcMain.on("cam:ready", (e) => {
