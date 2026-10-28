@@ -16,7 +16,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -575,6 +575,49 @@ async function configSuite() {
   check("odd config shapes don't stop the app starting, and its grid opens",
     loaded(r4) && Object.keys(last(r4.result)).some((k) => k.startsWith("grid:Auto grid#")), JSON.stringify({ loaded: loaded(r4), cams: Object.keys(last(r4.result) ?? {}) }));
   check("keys this version doesn't know are kept when it saves", r4.config?.future?.kept === true, JSON.stringify(r4.config?.future));
+  console.log(`  results: ${userData}`);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Security (mock consoles): pages can't be navigated away, open windows or get permissions, and IPC
+// only answers the app's own pages.
+
+async function securitySuite() {
+  console.log("\nSecurity suite (mock consoles)");
+  const userData = tmpDir("security");
+  const A = "aaaaaaaa-0000-4000-8000-000000000001";
+  const lobby = `${A}/aaaaaaaa-cam0`;
+  fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby"] }],
+    windows: { [lobby]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 } },
+    settings: { startHidden: false },
+  }, null, 2));
+  // What a dropped file does: navigate the page. A harmless local file, so nothing leaves the PC.
+  const target = pathToFileURL(path.join(FIXTURES, "fisheye-ceiling.png")).href;
+  const navigate = `(() => { location.href = ${JSON.stringify(target)}; return true; })()`;
+  const where = "location.pathname.split('/').pop()";
+  const tryOpen = "(() => { const w = window.open('about:blank'); return w === null; })()";
+  const askPermission = "Notification.requestPermission()";
+  const { result } = await runApp({
+    userData, results: path.join(userData, "results"), seconds: 7, extraArgs: ["--mock"],
+    env: {
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 2500, do: "manager-js", js: navigate },
+        { at: 2500, do: "camera-js", win: 0, js: navigate },
+        { at: 3500, do: "manager-js", js: where },
+        { at: 3500, do: "camera-js", win: 0, js: where },
+        { at: 3600, do: "manager-js", js: tryOpen },
+        { at: 3700, do: "camera-js", win: 0, js: askPermission },
+      ]),
+    },
+  });
+  const val = (doing, js) => result.actions.find((a) => a.act.do === doing && a.act.js === js);
+  check("pages can't be navigated away (what a dropped file or link does)",
+    val("manager-js", where)?.value === "manager.html" && val("camera-js", where)?.value === "camera.html",
+    JSON.stringify([val("manager-js", where), val("camera-js", where)].map((a) => a?.value ?? a?.error)));
+  check("pages can't open windows", val("manager-js", tryOpen)?.value === true, JSON.stringify(val("manager-js", tryOpen)));
+  check("pages are refused permissions", val("camera-js", askPermission)?.value === "denied", JSON.stringify(val("camera-js", askPermission)));
   console.log(`  results: ${userData}`);
 }
 
@@ -1950,6 +1993,7 @@ try {
   if (suite === "connection" || suite === "all") await runSuite(connectionSuite);
   if (suite === "streams" || suite === "all") await runSuite(streamsSuite);
   if (suite === "config" || suite === "all") await runSuite(configSuite);
+  if (suite === "security" || suite === "all") await runSuite(securitySuite);
   if (suite === "range" || suite === "all") await runSuite(rangeSuite);
   if (suite === "layouts" || suite === "all") await runSuite(layoutsSuite);
   if (suite === "arrange" || suite === "all") await runSuite(arrangeSuite);

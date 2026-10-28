@@ -29,6 +29,7 @@ npm run test:hide         # Hide cameras / Show cameras / per-console Hide all, 
 npm run test:bounds       # window and grid sizes stay put across launches at a forced 150 % scale; a monitor dropping out and back
 npm run test:connection   # ConsoleConnection and CameraStream unit checks with fake library objects (runs under Electron's Node)
 npm run test:config       # config.json recovery (.bak fallback) and odd shapes that must not stop startup
+npm run test:security     # pages can't navigate, open windows or get permissions; IPC answers only the app's pages
 npm run test:streams      # stream recovery: a camera going offline while viewed, a stream that never decodes, a frozen picture, a crashed camera page, a lost WebGL context, an unplayable codec
 npm run test:range        # SPS color-range rewrite (unit, ffmpeg fixtures) + displayed pixel levels in Chromium, Adjust picture
 npm run test:layouts      # save / apply named layouts, import a Protect liveview, switch from the tray
@@ -102,7 +103,9 @@ release-notes/vX.Y.Z.md     Release text the workflow publishes
 
 ## IPC
 
-Adding a channel means editing **both** the preload allowlist and `registerIpc()` in main.js. Main identifies camera pages (windows and grid tiles) by `event.sender.id` → `senders` → player, never by anything the renderer sends.
+Adding a channel means editing **both** the preload allowlist and `registerIpc()` in main.js. Main identifies camera pages (windows and grid tiles) by `event.sender.id` → `senders` → player, never by anything the renderer sends. Every handler also checks that the sending frame's URL is the app's own page for that role (`ourPage()`: camera.html, grid-window.html, manager.html, compared as file paths).
+
+**No page can leave.** `web-contents-created` blocks `will-navigate`, `will-redirect` and webviews, and denies `window.open`; the default session refuses every permission request. Before 1.4.3 a file or link dropped onto any window navigated it, and the dropped page kept that window's IPC: on the camera list it could re-point a saved console at another host, which then got the password. `loadFile` and `reload` are programmatic and unaffected.
 
 - **Camera → main:** `cam:ready`, `cam:aspect {width,height}`, `cam:reset`, `cam:unsupported`, `cam:context-menu`, `cam:toggle-top`, `cam:close`, `cam:dewarp {views?, pano?, focus?, circle?, auto?}`, `cam:picture {brightness, contrast}`
 - **Main → camera:** `cam:init`, `cam:media`, `cam:status`, `cam:meta`, `cam:highlight`, `cam:command {cmd: "calibrate" | "autodetect" | "picture"}`

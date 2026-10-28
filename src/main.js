@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, screen, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, screen, session, shell, Tray } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,6 +56,17 @@ if (!app.requestSingleInstanceLock()) {
   app.on("second-instance", () => showManager());
   app.on("window-all-closed", () => { /* keep running in the tray */ });
   app.on("before-quit", () => { quitting = true; store?.flush(); });
+  // Every page here is the app's own and stays put. Without this, a file or link dropped onto any
+  // window navigated it (Chromium's default), and the dropped page inherited that window's IPC: on
+  // the camera list it could point a saved console at another host, which then got the password.
+  // No page opens windows or needs a permission either (Electron grants them all by default).
+  app.on("web-contents-created", (_e, wc) => {
+    wc.on("will-navigate", (e) => e.preventDefault());
+    wc.on("will-redirect", (e) => e.preventDefault());
+    wc.on("will-attach-webview", (e) => e.preventDefault());
+    wc.setWindowOpenHandler(() => ({ action: "deny" }));
+  });
+  app.whenReady().then(() => session.defaultSession.setPermissionRequestHandler((_wc, _permission, done) => done(false)));
   // After repeated GPU process crashes Chromium quietly falls back to software decoding; leave a trace.
   app.on("child-process-gone", (_e, d) => { if (d.type === "GPU") log?.warn(`GPU process gone (${d.reason}, exit ${d.exitCode})`); });
   // A failed start used to exit with nothing on screen and nothing in the log, every launch.
@@ -1745,7 +1756,17 @@ function updateTrayMenu() {
 // IPC
 
 function registerIpc() {
-  const fromCamera = (e) => senders.get(e.sender.id) ?? null;
+  // A sender is trusted for what its webContents is AND for the page in it being ours: a page that
+  // got in some other way (navigation is blocked, but this is the last line) gets nothing.
+  const ourPage = (e, page) => {
+    try {
+      const file = fileURLToPath(new URL(e.senderFrame?.url ?? ""));
+      return file.toLowerCase() === path.join(__dirname, "renderer", page).toLowerCase();
+    } catch {
+      return false;
+    }
+  };
+  const fromCamera = (e) => (ourPage(e, "camera.html") ? senders.get(e.sender.id) ?? null : null);
 
   ipcMain.on("cam:ready", (e) => {
     const cw = fromCamera(e);
@@ -1794,11 +1815,11 @@ function registerIpc() {
     else cw?.win.close();
   });
   ipcMain.on("grid:context-menu", (e, index) => {
-    const gw = [...gridWins.values()].find((g) => g.isOpen && g.win.webContents === e.sender);
+    const gw = ourPage(e, "grid-window.html") && [...gridWins.values()].find((g) => g.isOpen && g.win.webContents === e.sender);
     if (gw) Menu.buildFromTemplate(gridPageMenuTemplate(gw, Number.isInteger(index) ? index : null)).popup({ window: gw.win });
   });
 
-  const fromManager = (e) => managerWin && !managerWin.isDestroyed() && e.sender === managerWin.webContents;
+  const fromManager = (e) => managerWin && !managerWin.isDestroyed() && e.sender === managerWin.webContents && ourPage(e, "manager.html");
   const handle = (channel, fn) => ipcMain.handle(channel, async (e, arg) => {
     if (!fromManager(e)) return null; // only the camera list may call these
     return fn(arg);
