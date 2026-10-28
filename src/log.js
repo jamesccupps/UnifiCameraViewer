@@ -14,7 +14,9 @@ export function createLogger(file) {
 
   function write(level, prefix, msg, params) {
     if (level === "debug" && !debugOn) return;
-    const text = format(msg, ...params);
+    // One entry per line: names, reasons and errors from a console can carry line breaks, which would
+    // otherwise forge log lines (and stacks read fine as \n-separated text).
+    const text = format(msg, ...params).replace(/\r\n|\r|\n/g, "\\n");
     const line = `${new Date().toISOString()} ${level.toUpperCase().padEnd(5)} ${prefix}${text}\n`;
     try { process.stdout.write(line); } catch { /* no console attached */ }
     try {

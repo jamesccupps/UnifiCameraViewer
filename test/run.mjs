@@ -593,6 +593,17 @@ async function securitySuite() {
     const got = Object.fromEntries(await Promise.all(Object.keys(answers).map(async (k) => [k, (await previews.get(k))?.url?.slice(0, 23) ?? null])));
     check("camera previews take only a JPEG of a sensible size", got.ok === "data:image/jpeg;base64," && got.huge === null && got.png === null, JSON.stringify(got));
   }
+
+  // Text from a console (a controller name, a reason) can't forge log lines.
+  {
+    const { createLogger } = await import(new URL("../src/log.js", import.meta.url).href);
+    const file = path.join(tmpDir("log"), "test.log");
+    const saved = process.stdout.write;
+    process.stdout.write = () => true; // the logger echoes to stdout too
+    try { createLogger(file).warn("connection lost (%s)", "bad\r\n2026-01-01T00:00:00.000Z INFO  forged"); } finally { process.stdout.write = saved; }
+    const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
+    check("a line break in logged text can't forge a log line", lines.length === 1 && lines[0].includes("bad\\n2026"), JSON.stringify(lines));
+  }
   const userData = tmpDir("security");
   const A = "aaaaaaaa-0000-4000-8000-000000000001";
   const lobby = `${A}/aaaaaaaa-cam0`;
