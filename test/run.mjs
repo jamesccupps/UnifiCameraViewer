@@ -1750,11 +1750,26 @@ async function listSuite() {
     previewCache.delete("test/none");
     return out;
   })()`;
+  // The console dialog warns about a port in the address, and closing it any way clears the password.
+  const consoleDialog = `(async () => {
+    openDialog(null);
+    const f = document.getElementById("console-form");
+    const hint = () => document.getElementById("host-hint").textContent;
+    f.host.value = "192.168.1.1:7443"; f.host.dispatchEvent(new Event("input"));
+    const withPort = hint();
+    f.host.value = "192.168.1.1"; f.host.dispatchEvent(new Event("input"));
+    const bare = hint();
+    f.password.value = "typed";
+    document.getElementById("console-dialog").close(); // what Esc does
+    await new Promise((r) => setTimeout(r, 50)); // "close" fires a moment later
+    return { withPort: !!withPort, bare, password: f.password.value };
+  })()`;
   const { result, config } = await runApp({
-    userData, results, seconds: 19, extraArgs: ["--mock"],
+    userData, results, seconds: 21, extraArgs: ["--mock"],
     env: {
       PANES_SELFTEST_ACTIONS: JSON.stringify([
-        { at: 17500, do: "manager-js", js: thumbStates },
+        { at: 19500, do: "manager-js", js: consoleDialog }, // after the selection check: the dialog takes the focus
+        { at: 20000, do: "manager-js", js: thumbStates },
         { at: 18000, do: "manager-js", js: editorTip },
         { at: 17200, do: "manager-js", js: narrowNames },
         { at: 13300, do: "manager-js", js: markForPatch },
@@ -1776,6 +1791,9 @@ async function listSuite() {
     act(focusQuality)?.value === true && act(rerendered)?.value?.rerendered === true, JSON.stringify([act(focusQuality), act(rerendered)].map((a) => a?.value ?? a?.error)));
   check("an open console menu closes when the list loses focus", act(menuThenBlur)?.value?.opened === true && act(menuThenBlur).value.closed === true,
     JSON.stringify(act(menuThenBlur)?.value ?? act(menuThenBlur)?.error));
+  const cd = act(consoleDialog)?.value;
+  check("the console dialog warns about a port in the address, and Esc clears a typed password",
+    cd?.withPort === true && cd.bare === "" && cd.password === "", JSON.stringify(cd ?? act(consoleDialog)?.error));
   const ts = act(thumbStates)?.value;
   check("a loading thumbnail and one with no picture look different", ts?.loading === "…" && ts?.none === "no picture", JSON.stringify(ts ?? act(thumbStates)?.error));
   const nn = act(narrowNames)?.value;

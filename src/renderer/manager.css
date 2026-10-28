@@ -354,6 +354,9 @@ dialog.editor { width: min(1040px, 96vw); max-height: 94vh; padding: 16px 18px; 
 }
 
 /* Dialogs */
+.field-hint { margin: -4px 0 0; color: var(--warn); font-size: 12px; }
+.field-hint:empty { display: none; }
+
 dialog {
   border: 1px solid var(--line);
   border-radius: 12px;

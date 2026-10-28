@@ -1024,6 +1024,7 @@ function openDialog(c) {
   form.password.placeholder = c ? "Leave blank to keep the saved password (not if the address changes)" : "";
   form.password.required = !c;
   dialogError.textContent = "";
+  checkHost();
   hideTip();
   dialog.showModal();
   (c ? form.password : form.name).focus();
@@ -1051,7 +1052,19 @@ form.addEventListener("submit", async (e) => {
     save.disabled = false;
   }
 });
-document.getElementById("dialog-cancel").addEventListener("click", () => { form.password.value = ""; dialog.close(); });
+document.getElementById("dialog-cancel").addEventListener("click", () => dialog.close());
+// However the dialog closes (Cancel, Save, Esc), a typed password doesn't stay in the field.
+dialog.addEventListener("close", () => { form.password.value = ""; });
+
+// The library rewrites the livestream address to the configured host, and a "host:port" isn't
+// rewritten: the login works, then every camera stays at "Reconnecting…". Say so while typing.
+const hostHint = document.getElementById("host-hint");
+function checkHost() {
+  const h = form.host.value.trim().replace(/^[a-z]+:\/\//i, "").split("/")[0];
+  const port = /^\[[^\]]+\]:\d+$/.test(h) || /^[^:\[\]]+:\d+$/.test(h);
+  hostHint.textContent = port ? "Leave out the port: with one, the console logs in but live video doesn't play. Use the bare IP address or hostname." : "";
+}
+form.host.addEventListener("input", checkHost);
 
 // ---------------------------------------------------------------------------------------------
 // Global controls
