@@ -74,7 +74,8 @@ Original notes: quality (`channel`), always-on-top and dewarp settings were per 
   - Tiles have their own settings, so a camera can look different in a grid and in its window. Quality follows the tile's size unless the tile picks one.
   - Grids are managed from the tile menu (Layout, Edit grid…, Full screen, Close grid, Remove from grid; "Put a camera here" on an empty tile), the Layouts tab and the tray.
   - They reopen at launch and hide with Hide cameras. `npm run test:grid` covers it.
-  - Not built: slot cycling, importing a Protect liveview as a grid, and "enlarge this tile".
+  - "Enlarge this tile": built for 1.4.3 (double-click or the tile menu; the other tiles hide and pause until it goes back).
+  - Not built: slot cycling, and importing a Protect liveview as a grid.
 
 Original notes:
 

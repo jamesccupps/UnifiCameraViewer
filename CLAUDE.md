@@ -263,6 +263,7 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
   - `page-title-updated` is prevented, or the page's `<title>` renames the window.
   - Hide / Show cameras (global only) hide grids too; per-console Hide all doesn't, since a grid mixes consoles.
   - The base page (`grid-window.*`) draws empty tiles and sends `grid:context-menu` with the tile index. An empty tile's menu offers "Put a camera here".
+  - **Enlarge a tile:** double-click (the page sends `cam:enlarge` in tile mode, unless a 360° Quad view took the double-click for its own focus and called `preventDefault`) or the tile menu's Enlarge this tile / Show all tiles. `GridWindow.enlarge(index)` gives that tile the whole content area and hides the other views (`setVisible(false)`, zero rects) with their streams paused. `tileQuality` skips zero rects, so they keep their quality for coming back. Show, restore and `sync()` resume only the tiles shown. Not saved: a grid reopens as a grid. The grid suite's fourth run enlarges from the menu and by double-click.
 - **Hide from list** (`windows[key].listHidden`): the camera moves to the collapsed section at the bottom of its console, `openAllCameras()` and the editor palette skip it, and its window closes. A hidden window's status in the list reads "window hidden" so the two kinds of hiding don't read the same.
 - **Camera previews** (previews.js): `Camera.snapshot({ width: 480 })`, the library's GET `/proxy/protect/api/cameras/<id>/snapshot?w=`, the read-only endpoint the web UI uses.
   - Kept 30 s per camera, failures too, so an offline or refusing camera isn't asked again on every re-render. At most 3 requests at a time. Offline cameras are never asked. Only a JPEG (FF D8) up to 2 MB becomes a preview; a console answering with hundreds of MB used to be base64'd into both processes.
@@ -384,6 +385,6 @@ Owner-requested features, with findings and open questions, are in `ROADMAP.md`.
 - PTZ cameras can't be steered; only the 360° virtual PTZ exists.
 - One window per camera: the same camera can't have two floating windows (it can be in a window and in grid tiles).
 - Imported Protect liveviews become even grids of separate windows. Uneven layouts and slot cycling aren't reproduced, and they don't import as grid windows.
-- Grid windows have no per-tile cycling, and no "enlarge this tile" (switch the layout, or open the camera's own window).
+- Grid windows have no per-tile cycling.
 - Doorbell package-camera lens isn't exposed (the library supports `source: {type: "lens"}`).
 - Desk-mount panorama and lens FOV > 180° are implemented but have only light test coverage.

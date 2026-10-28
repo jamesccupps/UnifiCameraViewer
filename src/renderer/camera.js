@@ -526,6 +526,11 @@ window.addEventListener("contextmenu", (e) => {
   e.preventDefault();
   panes.send("cam:context-menu");
 });
+// In a grid, double-click fills the grid window with this tile (and back), unless a 360° Quad view
+// used it to enlarge one of its views.
+window.addEventListener("dblclick", (e) => {
+  if (document.body.classList.contains("tile") && !e.defaultPrevented) panes.send("cam:enlarge");
+});
 
 showStatus("connecting", "Connecting…");
 updateDot();

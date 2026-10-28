@@ -149,7 +149,7 @@ async function init() {
       hooks: {
         cameraContextMenuTemplate, trayMenuTemplate, updateDewarp, sendCommand,
         // Grid tiles are named "grid:<grid name>#<tile index>" in samples and actions.
-        gridTiles: () => openGridWins().flatMap((gw) => gw.players.map((cw) => ({ id: `grid:${gw.grid.name}#${cw.index}`, cw, bounds: gw.tileBounds(cw.index), visible: gw.win.isVisible() }))),
+        gridTiles: () => openGridWins().flatMap((gw) => gw.players.map((cw) => ({ id: `grid:${gw.grid.name}#${cw.index}`, cw, bounds: gw.tileBounds(cw.index), visible: gw.win.isVisible() && gw.tileShown(cw.index) }))),
         gridPageMenuTemplate: (name, index) => {
           const gw = openGridWins().find((g) => g.grid.name === name);
           if (!gw) throw new Error(`no open grid "${name}"`);
@@ -866,6 +866,7 @@ function tileQuality(gw, rects) {
   const scale = screen.getDisplayMatching(gw.win.getBounds()).scaleFactor;
   for (const cw of gw.players) {
     const r = rects[cw.index];
+    if (r && !r.width) continue; // hidden behind an enlarged tile: keep its quality for coming back
     const auto = store.settings.arrangeQuality && r ? channelForTile(r.width * scale) : null;
     if (cw.autoChannel === auto) continue;
     cw.autoChannel = auto;
@@ -1002,6 +1003,10 @@ function tileMenuTemplate(cw) {
   const meta = cameraMeta(cw);
   return [
     { label: meta.consoleName ? `${meta.title} - ${meta.consoleName}` : meta.title, enabled: false },
+    { type: "separator" },
+    cw.gw.enlarged === cw.index
+      ? { label: "Show all tiles", click: () => cw.gw.enlarge(null) }
+      : { label: "Enlarge this tile", click: () => cw.gw.enlarge(cw.index) },
     { type: "separator" },
     { label: "Match tile size", type: "radio", checked: tile.channel == null, click: () => setTileChannel(cw, null) },
     ...meta.channels.map((ch) => ({ label: ch.label, type: "radio", checked: tile.channel === ch.id, click: () => setTileChannel(cw, ch.id) })),
@@ -1867,6 +1872,8 @@ function registerIpc() {
   ipcMain.on("cam:dewarp", (e, patch) => { const cw = fromCamera(e); if (cw) saveDewarpFromRenderer(cw, patch); });
   ipcMain.on("cam:picture", (e, patch) => { const cw = fromCamera(e); if (cw) savePictureFromRenderer(cw, patch); });
   ipcMain.on("cam:toggle-top", (e) => { const cw = fromCamera(e); if (cw) toggleOnTop(cw); });
+  // Double-click on a grid tile: fill the grid window with it, or go back to the grid.
+  ipcMain.on("cam:enlarge", (e) => { const cw = fromCamera(e); if (cw?.gw) cw.gw.enlarge(cw.index); });
   ipcMain.on("cam:close", (e) => {
     const cw = fromCamera(e);
     if (cw?.gw) setGridTile(cw.gw.grid, cw.index, null);

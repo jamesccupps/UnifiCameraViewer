@@ -458,6 +458,7 @@ window.Dewarper = (() => {
         if (!this.active || !this.interactive || this.cfg.mode !== "quad") return;
         const vp = this.#hit(e.clientX, e.clientY);
         if (!vp) return;
+        e.preventDefault(); // used here: a grid tile doesn't also enlarge
         this.cfg.focus = this.cfg.focus >= 0 ? -1 : vp.index;
         this.#draw();
         this.onChange({ focus: this.cfg.focus });

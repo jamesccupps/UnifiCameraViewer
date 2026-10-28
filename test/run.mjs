@@ -1437,7 +1437,7 @@ async function gridSuite() {
   const rowText = `(() => Object.fromEntries([...document.querySelectorAll(".cams li")].map((li) => [li.querySelector(".cam-name b")?.textContent,
     { status: li.querySelector(".cam-name small")?.textContent, tip: li.querySelector(".switch")?.dataset.tip }])))()`;
   const run1 = await runApp({
-    userData, results: path.join(userData, "results-1"), seconds: 16, extraArgs: ["--mock"],
+    userData, results: path.join(userData, "results-1"), seconds: 19, extraArgs: ["--mock"],
     env: {
       ...env,
       PANES_SELFTEST_ACTIONS: JSON.stringify([
@@ -1464,8 +1464,8 @@ async function gridSuite() {
     applyLabel === "Save and open" && grid?.name === "Wall" && grid.templateId === "2x2" && grid.open === true
       && JSON.stringify(grid.tiles.map((t) => t?.key ?? null)) === JSON.stringify([keys.fish, keys.ramp, null, keys.dock]) && grid.tiles[0].dewarp?.mode === "panorama",
     JSON.stringify({ applyLabel, grid }));
-  // The tiles were hidden and shown again at 7.5 and 9 s and are back live around 12 s, so by the end
-  // they have 2-4 s of video: 15 frames (1 s) is enough to show they decode.
+  // The tiles were hidden and shown again at 9.5 and 11 s (test time) and can take ~3 s to be live
+  // again on a busy PC; the run ends at 19 s. 15 frames (1 s) is enough to show they decode.
   const end = last(run1.result);
   const tile = (cams, i) => cams[`grid:Wall#${i}`];
   check("every filled tile is live in the one grid window", [0, 1, 3].every((i) => tile(end, i)?.status === "live" && tile(end, i).decodedFrames >= 15) && !tile(end, 2),
@@ -1568,15 +1568,15 @@ async function gridSuite() {
   }, null, 2));
   const readCircle = "window.__panesStats().dewarp.circle";
   const run3 = await runApp({
-    userData: lensDir, results: path.join(lensDir, "results"), seconds: 11, extraArgs: ["--mock"],
+    userData: lensDir, results: path.join(lensDir, "results"), seconds: 14, extraArgs: ["--mock"],
     env: {
       ...env,
       PANES_SELFTEST_ACTIONS: JSON.stringify([
         { at: 1500, do: "camera-js", win: 0, js: `panes.send("cam:dewarp", { circle: ${JSON.stringify(CEILING_TRUTH)} }), true` },
         { at: 4000, do: "tray-click", label: "Day" },
-        { at: 8500, do: "camera-js", win: 0, js: readCircle },
-        { at: 8500, do: "camera-js", tile: "Lens#0", js: readCircle },
-        { at: 8500, do: "camera-js", win: 1, js: readCircle },
+        { at: 11500, do: "camera-js", win: 0, js: readCircle },
+        { at: 11500, do: "camera-js", tile: "Lens#0", js: readCircle },
+        { at: 11500, do: "camera-js", win: 1, js: readCircle },
       ]),
     },
   });
@@ -1588,6 +1588,46 @@ async function gridSuite() {
     isB(pages.window) && isB(pages.tile) && isB(saved.window) && isB(saved.tile), JSON.stringify({ pages, saved }));
   check("a window's first-view circle guess doesn't replace a circle fixed in a grid tile",
     isB(pages.garageWindow) && isB(saved.garageWindow) && isB(saved.garageTile), JSON.stringify({ pages, saved }));
+
+  // Enlarge one tile to fill the grid window and back: from the tile's menu, then by double-click.
+  // The other tiles are hidden and paused meanwhile.
+  const bigDir = tmpDir("grid-enlarge");
+  fs.writeFileSync(path.join(bigDir, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Stair"] }],
+    windows: {},
+    grids: [{ id: "grid-big", name: "Big", templateId: "2x2", bounds: { x: 0, y: 0, width: 640, height: 400 }, open: true,
+      tiles: [`${A}/aaaaaaaa-cam0`, `${A}/aaaaaaaa-cam1`, `${A}/aaaaaaaa-cam2`, null].map((key) => key && { key, channel: 2 }) }],
+    settings: { startHidden: true },
+  }, null, 2));
+  const run4 = await runApp({
+    userData: bigDir, results: path.join(bigDir, "results"), seconds: 13, extraArgs: ["--mock"],
+    env: {
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 3000, do: "menu-click", tile: "Big#1", label: "Enlarge this tile" },
+        { at: 5500, do: "menu-click", tile: "Big#1", label: "Show all tiles" },
+        { at: 8000, do: "dblclick", tile: "Big#0", pos: [80, 60] },
+        { at: 10500, do: "dblclick", tile: "Big#0", pos: [80, 60] },
+      ]),
+    },
+  });
+  const t4 = (s, i) => s?.cams[`grid:Big#${i}`];
+  const sampleAfter = (t) => run4.result.samples.find((s) => s.t > t); // samples are 2 s apart, the steps 2.5 s
+  const enlargedM = sampleAfter(run4.result.actions.find((a) => a.act.label === "Enlarge this tile")?.t ?? Infinity);
+  const backM = sampleAfter(run4.result.actions.find((a) => a.act.label === "Show all tiles")?.t ?? Infinity);
+  const dbl = run4.result.actions.filter((a) => a.act.do === "dblclick");
+  const enlargedD = sampleAfter(dbl[0]?.t ?? Infinity);
+  const endD = run4.result.samples.at(-1);
+  const view = (s) => [0, 1, 2].map((i) => t4(s, i) && `${t4(s, i).visible ? "shown" : "hidden"}/${t4(s, i).status}/${t4(s, i).bounds?.width}`);
+  check("\"Enlarge this tile\" fills the grid window with it, and hides and pauses the others",
+    t4(enlargedM, 1)?.visible && t4(enlargedM, 1).bounds.width > 500 && [0, 2].every((i) => !t4(enlargedM, i)?.visible && t4(enlargedM, i)?.status === "paused"),
+    JSON.stringify(view(enlargedM)));
+  check("\"Show all tiles\" goes back to the grid, all live", [0, 1, 2].every((i) => t4(backM, i)?.visible && t4(backM, i).bounds.width < 400),
+    JSON.stringify(view(backM)));
+  check("double-click enlarges a tile, and double-click again goes back",
+    t4(enlargedD, 0)?.visible && t4(enlargedD, 0).bounds.width > 500 && !t4(enlargedD, 1)?.visible
+      && [0, 1, 2].every((i) => t4(endD, i)?.visible && t4(endD, i).status === "live" && t4(endD, i).bounds.width < 400),
+    JSON.stringify({ enlarged: view(enlargedD), end: view(endD) }));
 }
 
 /**

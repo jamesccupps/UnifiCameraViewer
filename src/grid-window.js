@@ -19,6 +19,9 @@ export class GridWindow {
   win = null;
   #deps;
   #tiles = []; // index -> { view, player } | null
+  // A tile enlarged to fill the window (double-click, or "Enlarge this tile"); the others are hidden
+  // with their streams paused until it goes back. Not saved: a grid always reopens as a grid.
+  #enlarged = null;
 
   /**
    * @param {object} grid - the saved record (mutated in place by main.js)
@@ -80,7 +83,7 @@ export class GridWindow {
     win.on("minimize", () => { for (const p of this.players) p.stream.pause(); });
     win.on("restore", () => {
       this.#layout();
-      if (!this.grid.hidden) for (const p of this.players) p.stream.resume();
+      if (!this.grid.hidden) this.#resumeShown();
     });
     win.on("closed", () => {
       for (const t of this.#tiles) if (t) this.#drop(t, false);
@@ -110,8 +113,10 @@ export class GridWindow {
     });
     for (const t of keep.values()) this.#drop(t, true);
     this.#tiles = next;
+    if (this.#enlarged !== null && !this.#tiles[this.#enlarged]) this.#enlarged = null; // its tile went
     this.win.setTitle(this.grid.name);
     this.#layout();
+    if (!this.grid.hidden && !this.win.isMinimized()) this.#resumeShown();
   }
 
   hide() {
@@ -123,11 +128,36 @@ export class GridWindow {
     if (!this.isOpen) return;
     this.win.showInactive();
     this.win.moveTop();
-    if (!this.win.isMinimized()) for (const p of this.players) p.stream.resume();
+    if (!this.win.isMinimized()) this.#resumeShown();
+  }
+
+  get enlarged() { return this.#enlarged; }
+
+  /** Fill the window with one tile, or (null, or the same tile again) go back to the grid. */
+  enlarge(index) {
+    const next = index === null || index === this.#enlarged || !this.#tiles[index] ? null : index;
+    if (next === this.#enlarged) return;
+    this.#enlarged = next;
+    this.#layout();
+    if (this.grid.hidden || !this.isOpen || this.win.isMinimized()) return;
+    for (const [i, t] of this.#tiles.entries()) if (t && !this.#tileShown(i)) t.player.stream.pause();
+    this.#resumeShown();
   }
 
   tileBounds(index) {
     return this.#tiles[index]?.view.getBounds() ?? null;
+  }
+
+  tileShown(index) {
+    return !!this.#tiles[index] && this.#tileShown(index);
+  }
+
+  #tileShown(index) {
+    return this.#enlarged === null || this.#enlarged === index;
+  }
+
+  #resumeShown() {
+    for (const [i, t] of this.#tiles.entries()) if (t && this.#tileShown(i)) t.player.stream.resume();
   }
 
   #make(tile, index) {
@@ -139,7 +169,7 @@ export class GridWindow {
     this.win.contentView.addChildView(view);
     view.webContents.loadFile(d.cameraPage, { query: { tile: "1" } });
     const player = d.makePlayer({ gw: this, index, tile, wc: view.webContents });
-    if (this.grid.hidden || this.win.isMinimized()) player.stream.pause();
+    if (this.grid.hidden || this.win.isMinimized() || !this.#tileShown(index)) player.stream.pause();
     return { view, player };
   }
 
@@ -153,10 +183,19 @@ export class GridWindow {
   #layout() {
     if (!this.isOpen) return;
     const [width, height] = this.win.getContentSize();
-    const rects = cellRects(this.template, { x: 0, y: 0, width, height }, 2);
-    this.#tiles.forEach((t, i) => { if (t) t.view.setBounds(rects[i]); });
+    const full = { x: 0, y: 0, width, height };
+    // Enlarged: that tile gets the whole window and the rest are zero-size (and hidden), so the page
+    // draws no empty-tile placeholders and nothing else takes a right-click.
+    const rects = this.#enlarged === null
+      ? cellRects(this.template, full, 2)
+      : this.template.cells.map((_, i) => (i === this.#enlarged ? full : { x: 0, y: 0, width: 0, height: 0 }));
+    this.#tiles.forEach((t, i) => {
+      if (!t) return;
+      t.view.setBounds(rects[i]);
+      t.view.setVisible(this.#tileShown(i));
+    });
     const page = this.win.webContents;
-    if (!page.isDestroyed()) page.send("grid:layout", { rects, filled: rects.map((_, i) => !!this.#tiles[i]) });
+    if (!page.isDestroyed()) page.send("grid:layout", { rects, filled: rects.map((_, i) => !!this.#tiles[i] || this.#enlarged !== null) });
     this.#deps.tilesResized(this, rects);
   }
 }
