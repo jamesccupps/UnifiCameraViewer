@@ -119,11 +119,22 @@ export class ConsoleConnection extends EventEmitter {
     let authFailures = 0;
     while (!signal.aborted) {
       this.#set("connecting", `Connecting to ${this.#cfg.host}…`);
+      // A saved password that can't be decrypted (Windows profile moved, "Local State" reset) won't
+      // fix itself, and it isn't a network problem: it was shown as "Can't reach console" and retried
+      // every minute.
+      let password;
+      try {
+        password = await this.#getPassword();
+      } catch (err) {
+        this.#log.warn(`the saved password can't be decrypted: ${errorText(err)}`);
+        this.#set("authfailed", "The saved password can't be read on this PC any more. Enter it again (⋯ → Edit console…).");
+        return;
+      }
       try {
         const client = await this.#connect({
           host: this.#cfg.host,
           username: this.#cfg.username,
-          password: await this.#getPassword(),
+          password,
           signal,
           log: this.#libLog(),
         });

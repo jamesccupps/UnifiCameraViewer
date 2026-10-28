@@ -272,7 +272,7 @@ The owner's PC has the real config. To try a change live:
 2. Run `PANES_DEVTOOLS=1 npm start`.
 3. Check `%APPDATA%\Protect Panes\protect-panes.log` for connection errors.
 
-To experiment without disturbing the saved layout, copy `config.json` **and `Local State`** into a scratch folder and run with `PANES_USER_DATA` pointing at it. `safeStorage` encrypts with an AES key stored in `Local State` (`os_crypt.encrypted_key`, itself DPAPI-wrapped), so with `config.json` alone every console fails with "Error while decrypting the ciphertext provided to safeStorage.decryptString". With both files the passwords decrypt for the same Windows user. Adding `PANES_SELFTEST_DIR` to that run gives `result.json` plus screenshots of the real cameras, then the app exits.
+To experiment without disturbing the saved layout, copy `config.json` **and `Local State`** into a scratch folder and run with `PANES_USER_DATA` pointing at it. `safeStorage` encrypts with an AES key stored in `Local State` (`os_crypt.encrypted_key`, itself DPAPI-wrapped), so with `config.json` alone every console fails to decrypt its password (since 1.4.3 the console says "The saved password can't be read on this PC any more. Enter it again" and isn't retried; the log has safeStorage's own error). With both files the passwords decrypt for the same Windows user. Adding `PANES_SELFTEST_DIR` to that run gives `result.json` plus screenshots of the real cameras, then the app exits.
 
 When adding a test, extend `test/run.mjs`. `PANES_SELFTEST_ACTIONS` (JSON) drives windows with real input:
 

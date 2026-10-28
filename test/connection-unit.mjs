@@ -53,4 +53,17 @@ const out = {};
   await conn.stop();
 }
 
+// A saved password that can't be decrypted: say so, once, instead of retrying it as a network error.
+{
+  let calls = 0;
+  const conn = new ConsoleConnection({ id: "c3", host: "h" }, async () => { throw new Error("Error while decrypting the ciphertext"); }, quiet, {
+    connect: async () => { calls++; return fakeClient(); },
+  });
+  conn.start();
+  await until(() => conn.state === "authfailed", 1_000);
+  await new Promise((r) => setTimeout(r, 200));
+  out.undecryptable = { state: conn.state, message: conn.message, calls };
+  await conn.stop();
+}
+
 console.log(JSON.stringify(out));

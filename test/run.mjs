@@ -529,6 +529,9 @@ async function connectionSuite() {
     ra?.state === "connected" && ra.calls === 3 && ra.states.filter((s) => s === "authfailed").length === 2, JSON.stringify(ra));
   const or = out.overlappingRestarts;
   check("two overlapping restarts leave the console connected, not idle", or?.state === "connected", JSON.stringify(or));
+  const ud = out.undecryptable;
+  check("a saved password that can't be decrypted says to enter it again, and isn't retried",
+    ud?.state === "authfailed" && /Enter it again/.test(ud.message) && ud.calls === 0, JSON.stringify(ud));
 }
 
 // ---------------------------------------------------------------------------------------------
