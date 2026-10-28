@@ -324,6 +324,15 @@ function openCameraWindow(key, { focus = false, flash = true } = {}) {
   notifyManager();
 }
 
+// The library pools one session per camera and channel, so restarting one player's subscription
+// rejoined the same websocket whenever another window or tile on that camera kept it open, and
+// "Reconnect stream" reconnected nothing. Stop every player on that session first, then start them.
+function reconnectStream(cw) {
+  const shared = players().filter((p) => p.consoleId === cw.consoleId && p.cameraId === cw.cameraId && p.stream.channel === cw.stream.channel);
+  for (const p of shared) p.stream.stop();
+  for (const p of shared) p.stream.start();
+}
+
 // A camera page whose renderer died (out of memory, a crash) stayed black for good while its stream
 // kept pulling video into nothing. Stop the stream and reload the page; the new page's cam:ready
 // starts the stream again (or leaves it paused). A page that keeps dying is reloaded less often.
@@ -937,7 +946,7 @@ function tileMenuTemplate(cw) {
     { label: "Adjust picture…", click: () => sendCommand(cw, "picture") },
     { label: "Show name", type: "checkbox", checked: meta.showNames, enabled: !!store.settings.showNames, click: () => toggleName(cw) },
     { label: "Show time", type: "checkbox", checked: meta.clock, click: () => toggleClock(cw) },
-    { label: "Reconnect stream", click: () => cw.stream.restart() },
+    { label: "Reconnect stream", click: () => reconnectStream(cw) },
     { label: "Remove from grid", click: () => setGridTile(cw.gw.grid, cw.index, null) },
     { type: "separator" },
     ...gridMenuItems(cw.gw),
@@ -1473,7 +1482,7 @@ function cameraContextMenuTemplate(cw) {
     { label: "Show name", type: "checkbox", checked: meta.showNames, enabled: !!store.settings.showNames, click: () => toggleName(cw) },
     { label: "Show time", type: "checkbox", checked: meta.clock, click: () => toggleClock(cw) },
     { label: "Lock layout", type: "checkbox", checked: !!store.settings.lockLayout, click: () => setSetting("lockLayout", !store.settings.lockLayout) },
-    { label: "Reconnect stream", click: () => cw.stream.restart() },
+    { label: "Reconnect stream", click: () => reconnectStream(cw) },
     { type: "separator" },
     { label: "Camera list…", click: () => showManager() },
     { label: "Close this camera", click: () => cw.win.close() },

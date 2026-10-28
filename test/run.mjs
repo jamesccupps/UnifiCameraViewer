@@ -1834,6 +1834,8 @@ async function e2eSuite() {
         [keys.garage]: win(500, 560, 600, 338, 0),
         [keys.badLogin]: win(1120, 560, 480, 270, 1),
       },
+      // Garage in a grid tile too, on the same channel: the library pools the two onto one session.
+      grids: [{ id: "g-e2e", name: "E2E grid", templateId: "2x2", bounds: { x: 1120, y: 0, width: 640, height: 400 }, open: true, tiles: [{ key: keys.garage, channel: 0 }, null, null, null] }],
       settings: { startHidden: false },
     }, null, 2));
 
@@ -1866,6 +1868,10 @@ async function e2eSuite() {
       li.querySelector(".cam-name b")?.textContent,
       { jpeg: !!li.querySelector(".thumb img")?.src?.startsWith("data:image/jpeg"), text: li.querySelector(".thumb")?.textContent ?? null },
     ])))()`;
+    // Negotiations the Garage console has seen for that camera, just before Reconnect stream (12 s).
+    const garageNegotiates = () => servers[1].output.filter((l) => l.includes(`livestream negotiate ${cam(P.garage, 0)}`)).length;
+    let negotiatesBefore = null;
+    const snap = setTimeout(() => { negotiatesBefore = garageNegotiates(); }, 10_500);
     const { result, config } = await runApp({
       userData, results, seconds: 16,
       env: {
@@ -1873,9 +1879,11 @@ async function e2eSuite() {
           { at: 5000, do: "manager-js", js: importJs },
           { at: 10000, do: "manager-js", js: thumbsJs },
           { at: 6000, do: "manager-js", js: addJs },
+          { at: 12000, do: "menu-click", win: 4, label: "Reconnect stream" },
         ]),
       },
     });
+    clearTimeout(snap);
     const cams = last(result);
     const conn = result.connections;
     check("Building console connected", conn[ids.B]?.state === "connected", JSON.stringify(conn[ids.B]));
@@ -1892,6 +1900,10 @@ async function e2eSuite() {
     check("offline camera shows offline", cams[keys.offline]?.status === "offline", cams[keys.offline]?.status);
     check("camera on wrong-password console shows an error", cams[keys.badLogin]?.status === "error", cams[keys.badLogin]?.status);
     check("garage High channel is 1920x1080", cams[keys.garage]?.videoWidth === 1920 && cams[keys.garage]?.videoHeight === 1080);
+    const reconnect = result.actions.find((a) => a.act.label === "Reconnect stream");
+    check("Reconnect stream reconnects even while a grid tile shares the camera's stream",
+      reconnect?.ok && negotiatesBefore !== null && garageNegotiates() > negotiatesBefore && cams[keys.garage]?.status === "live" && cams["grid:E2E grid#0"]?.status === "live",
+      JSON.stringify({ act: reconnect?.error, before: negotiatesBefore, after: garageNegotiates(), window: cams[keys.garage]?.status, tile: cams["grid:E2E grid#0"]?.status }));
     const fd = config.windows[keys.fisheye]?.dewarp;
     check("fisheye detected from Protect flags -> quad view, ceiling mount", cams[keys.fisheye]?.dewarp?.active && fd?.mode === "quad" && fd?.mount === "ceiling", JSON.stringify({ mode: fd?.mode, mount: fd?.mount }));
     check("fisheye image circle auto-detected within 1%", near(fd?.circle, CEILING_TRUTH, 0.01), fmtCircle(fd?.circle));
