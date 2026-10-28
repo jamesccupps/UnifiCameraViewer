@@ -141,6 +141,7 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
 - Angles are degrees. `fov` is vertical FOV. Pan wraps to (-180, 180]; tilt clamps to ±90.
 - `circle` is normalized: `x` = center x / video width, `y` = center y / video height, `r` = radius / video height.
 - `undefined` means never decided. On first view, `ensureDewarp()` turns on quad for fisheye cameras. `null` means a normal camera.
+- A saved record with a field missing or invalid (a hand-edited or crafted file; the app always writes whole ones) gets it filled in from its mount's defaults by `completeDewarp()` when the camera is shown, before the page sees it. The page's drawing assumes every field: a panorama without `pano` threw on every frame and showed a blank view. Something that isn't a record at all is decided again, like `undefined`.
 - **The lens is per camera, the view is per copy.** `mount`, `lensFov` and `circle` describe the physical lens. The window entry, every layout and every grid tile keep their own `dewarp` copy. Before 1.4.3 a circle fixed in the window was undone by the next layout switch and never reached the camera's grid tiles.
   - `shareLens()` writes a lens edit into every copy, open or closed: a circle from Adjust image circle or Auto-detect, a mount or lens FOV from the menu. Another mount resets that copy's views.
   - `applyLayout()` keeps the lens the camera has, not the one the layout was saved with.

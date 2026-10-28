@@ -717,16 +717,28 @@ async function configSuite() {
 
   // 4. Odd shapes (hand edits, or a newer version) must not stop the app starting: a null window
   // entry, a grid on Arrange's "auto" template, a null layout entry, and a key this version doesn't know.
+  // And a 360° record with only some of its fields, which used to throw on every frame (a blank view).
   const odd = JSON.parse(good);
   odd.windows[`${A}/aaaaaaaa-cam9`] = null;
+  odd.windows[`${A}/aaaaaaaa-cam0`].dewarp = { mode: "panorama", mount: "ceiling" };
   odd.grids = [{ id: "g-auto", name: "Auto grid", templateId: "auto", bounds: { x: 500, y: 0, width: 640, height: 400 }, open: true, tiles: [{ key: `${A}/aaaaaaaa-cam0`, channel: 2 }] }];
   odd.layouts = [{ id: "l-1", name: "Odd", windows: { [`${A}/aaaaaaaa-cam0`]: null } }];
   odd.future = { kept: true };
   fs.writeFileSync(file, JSON.stringify(odd, null, 2));
-  const r4 = await runApp({ userData, results: path.join(userData, "results-4"), seconds: 5, extraArgs: ["--mock"] });
+  // Once video is playing, draw the 360° view once more and say whether that threw.
+  const redraw = `(() => { const s = window.__panesStats().dewarp; try { dewarper.redraw(); return { ...s, drew: "ok" }; } catch (e) { return { ...s, drew: String(e) }; } })()`;
+  const r4 = await runApp({
+    userData, results: path.join(userData, "results-4"), seconds: 5, extraArgs: ["--mock"],
+    env: { PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 4000, do: "camera-js", win: 0, js: redraw }]) },
+  });
   check("odd config shapes don't stop the app starting, and its grid opens",
     loaded(r4) && Object.keys(last(r4.result)).some((k) => k.startsWith("grid:Auto grid#")), JSON.stringify({ loaded: loaded(r4), cams: Object.keys(last(r4.result) ?? {}) }));
   check("keys this version doesn't know are kept when it saves", r4.config?.future?.kept === true, JSON.stringify(r4.config?.future));
+  const drawn = r4.result.actions.find((a) => a.act.do === "camera-js");
+  const fixed = r4.config?.windows?.[`${A}/aaaaaaaa-cam0`]?.dewarp;
+  check("a 360° record with only some of its fields gets the rest, and its panorama draws",
+    drawn?.value?.active && drawn.value.hasFrame && drawn.value.drew === "ok" && fixed?.views?.length === 4 && Number.isFinite(fixed?.pano?.tilt) && fixed.mode === "panorama",
+    JSON.stringify({ drawn: drawn?.value ?? drawn?.error, saved: fixed }));
 
   // 5. config.json deleted while the app runs (a sync tool, antivirus): the next save writes it again.
   // Before, moving the missing file to .bak threw first, so that save and every later one failed.

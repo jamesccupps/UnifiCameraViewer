@@ -1143,10 +1143,43 @@ function shareLens(key, lens, from = null) {
 /** A circle the camera already has in another copy (its window first), or null. */
 const knownCircle = (key, except) => structuredClone(lensCopies(key).find((d) => d !== except && d.circle)?.circle ?? null);
 
+const finite = (...v) => v.every(Number.isFinite);
+const DEWARP_FIELD_OK = {
+  mode: (v) => DEWARP_MODES.includes(v),
+  mount: (v) => MOUNTS.includes(v),
+  lensFov: (v) => finite(v),
+  circle: (v) => v === null || finite(v?.x, v?.y, v?.r),
+  views: (v) => Array.isArray(v) && v.length === 4 && v.every((x) => finite(x?.pan, x?.tilt, x?.fov)),
+  focus: (v) => Number.isInteger(v) && v >= -1 && v <= 3,
+  pano: (v) => finite(v?.pan, v?.tilt),
+};
+
+/**
+ * Fill in what a saved 360° record lacks, from the defaults for its mount; true if anything changed.
+ * The app always writes whole records, but a hand-edited or crafted file needn't: a panorama without
+ * `pano` threw on every frame in the page and showed a blank view.
+ */
+function completeDewarp(d) {
+  const base = defaultDewarp(d.mount, DEWARP_FIELD_OK.mode(d.mode) ? d.mode : "quad");
+  let changed = false;
+  for (const [field, ok] of Object.entries(DEWARP_FIELD_OK)) {
+    if (!ok(d[field])) { d[field] = base[field]; changed = true; }
+  }
+  return changed;
+}
+
 /** First time a 360° camera is shown, switch it to quad view with the mount Protect reports. */
 function ensureDewarp(cw, cam) {
   const entry = entryOf(cw);
-  if (!entry || entry.dewarp !== undefined || !cam) return;
+  if (!entry) return;
+  if (entry.dewarp !== undefined && entry.dewarp !== null && (typeof entry.dewarp !== "object" || Array.isArray(entry.dewarp))) {
+    delete entry.dewarp; // not a record at all: decide again, as for a camera seen for the first time
+  }
+  if (entry.dewarp) {
+    if (completeDewarp(entry.dewarp)) store.save();
+    return;
+  }
+  if (entry.dewarp !== undefined || !cam) return;
   const info = fisheyeInfo(cam);
   entry.dewarp = info.fisheye ? defaultDewarp(info.mount) : null;
   store.save();
