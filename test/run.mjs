@@ -327,17 +327,20 @@ async function hideSuite() {
     return sel ? { value: sel.value, shown: sel.selectedOptions[0]?.textContent } : null;
   })()`;
 
+  // Samples are taken on the even seconds, so the steps the checks look between sit on odd ones, a
+  // second from any sample. Hide all → Show cameras holds two samples: with one (3 s → 5 s), a slow CI
+  // runner once had none in between, and the list hadn't caught up 1.5 s after the click.
   const run1 = await runApp({
-    userData, results: path.join(userData, "results-1"), seconds: 14, extraArgs: ["--mock"],
+    userData, results: path.join(userData, "results-1"), seconds: 17, extraArgs: ["--mock"],
     env: {
       PANES_SELFTEST_ACTIONS: JSON.stringify([
         { at: 2600, do: "manager-js", js: gateQuality },
         { at: 3000, do: "manager-js", js: clickInCard("Garage", "Hide all") },
-        { at: 4500, do: "manager-js", js: readButtons },
-        { at: 5000, do: "tray-click", label: "Show cameras" },
-        { at: 12500, do: "manager-js", js: setQualityForAll("Garage", 1) }, // after the Show check: it restarts the stream
-        { at: 10500, do: "tray-click", label: "Hide cameras" },
-        { at: 11500, do: "tray-click", label: "Bring cameras to front" },
+        { at: 6500, do: "manager-js", js: readButtons },
+        { at: 7000, do: "tray-click", label: "Show cameras" },
+        { at: 15000, do: "manager-js", js: setQualityForAll("Garage", 1) }, // after the Show check: it restarts the stream
+        { at: 13000, do: "tray-click", label: "Hide cameras" },
+        { at: 14000, do: "tray-click", label: "Bring cameras to front" },
       ]),
     },
   });
