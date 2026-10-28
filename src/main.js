@@ -1922,7 +1922,11 @@ async function importSettings() {
   }
   const now = store.data;
   const consoles = data.consoles
-    .filter((c) => c && typeof c.id === "string" && typeof c.host === "string" && c.host.trim())
+    .filter((c) => c && typeof c.id === "string" && typeof c.host === "string")
+    // Addresses as Add console takes them ("https://10.0.0.5/" is 10.0.0.5), for the login and for
+    // matching passwords and pins below.
+    .map((c) => ({ ...c, host: normalizeHost(c.host) }))
+    .filter((c) => c.host)
     .map(({ password: _ignored, ...c }) => {
       // A saved password goes only to the console it was saved for: the same address and username.
       // Matching on id alone would let an edited file send it to another host.
@@ -1940,7 +1944,8 @@ async function importSettings() {
   }
   if (fs.existsSync(store.file)) fs.copyFileSync(store.file, `${store.file}.before-import`);
   store.replace({ version: 1, consoles, windows: data.windows, layouts: data.layouts, grids: data.grids, settings });
-  log.info(`settings imported from ${file}: ${consoles.length} consoles, ${consoles.filter((c) => !c.password).length} needing a password`);
+  const imported = store.data.consoles; // one per id, as the store keeps them
+  log.info(`settings imported from ${file}: ${imported.length} consoles, ${imported.filter((c) => !c.password).length} needing a password`);
   // Everything (windows, grids, connections, tray) comes up from the new settings as at any start.
   // A self-test run carries on so it can report; its harness reads config.json.
   if (testFile()) return { restarting: false };

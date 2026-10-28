@@ -250,6 +250,8 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
   - Import replaces everything through `store.replace()`, the same checks as loading config.json. It keeps the old file as `config.json.before-import`, then `app.relaunch()` + `app.exit(0)`, so windows, grids, connections and the tray come up as at any start. `exit`, not `quit`: quit handlers would write the old windows' state over the new settings.
   - A saved password stays only with a console of the **same address and username** (`consoleKey` + username). Matching on id alone would let an edited file send it to another host.
   - This PC's pin for an address wins over the file's.
+  - Imported addresses are cleaned up the way Add console does it (`normalizeHost`), so `https://10.0.0.5/` is `10.0.0.5`, both for the login and for matching passwords and pins.
+  - Only one console per id is kept (store.js `#oneConsolePerId`, which config.json loading uses too), and the one left out is logged. A second console with the same id started a connection of its own, and the first kept running unseen.
   - A console left with no password says "No password saved…" and doesn't log in (ConsoleConnection). It used to try an empty password and retry for good.
   - Tests can't click file dialogs: in a self-test run `PANES_TEST_FILE` is the file, and an import goes ahead without asking and doesn't relaunch. `npm run test:transfer` covers it.
 - **Cycling grid tiles (grid-window.js).**

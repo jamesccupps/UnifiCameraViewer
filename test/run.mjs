@@ -615,21 +615,25 @@ async function transferSuite() {
   check("the export has no passwords in it, in any form", !!text && !/"password"/.test(text) && secrets.every((s) => !text.includes(s)), text.slice(0, 200));
   check("the export leaves out this PC's own settings (Start with Windows, the update location)",
     file && !("launchAtLogin" in file.settings) && !("updateSource" in file.settings), JSON.stringify(file?.settings));
-  // What's imported is that export edited the way a crafted file could be: update checks aimed at a
-  // network share (Windows would send it the user's credentials at every start), a setting of the
-  // wrong kind, and one this version doesn't know.
+  // What's imported is that export edited the way a crafted or hand-edited file could be: update
+  // checks aimed at a network share (Windows would send it the user's credentials at every start), a
+  // setting of the wrong kind, one this version doesn't know, an address typed as a URL, and a second
+  // console with the first one's id.
   const craftedFile = path.join(tmpDir("transfer-crafted"), "crafted.json");
+  const [firstConsole, ...otherConsoles] = file?.consoles ?? [];
   fs.writeFileSync(craftedFile, JSON.stringify({
-    ...file, settings: { ...file?.settings, updateSource: "\\\\attacker.example\\share", showPreviews: "no", futureThing: 1 },
+    ...file,
+    consoles: [firstConsole, ...otherConsoles.map((c) => ({ ...c, host: `https://${c.host}/` })), { ...firstConsole, name: "Duplicate", host: "mock-dup" }],
+    settings: { ...file?.settings, updateSource: "\\\\attacker.example\\share", showPreviews: "no", futureThing: 1 },
   }, null, 2));
 
   // The target PC: the same Building console under another id (same address and username), a
   // console that shares Garage's id but not its address, and one the file doesn't have.
   const target = tmpDir("transfer-target");
-  const targetFile = path.join(tmpDir("transfer-in"), "import.json");
+  const notAnExport = path.join(tmpDir("transfer-in"), "not-an-export.json");
   // A local folder that isn't there: this PC's own update location, and its startup check stays off the network.
   const targetUpdates = path.join(target, "no-updates-here");
-  fs.writeFileSync(targetFile, JSON.stringify({ hello: "not an export" }));
+  fs.writeFileSync(notAnExport, JSON.stringify({ hello: "not an export" }));
   fs.writeFileSync(path.join(target, "config.json"), JSON.stringify({
     version: 1,
     consoles: [
@@ -640,21 +644,16 @@ async function transferSuite() {
     windows: {},
     settings: { startHidden: false, launchAtLogin: false, lockLayout: false, updateSource: targetUpdates },
   }, null, 2));
-  // The first import gets a file that isn't an export; then the (crafted) export is put in its place.
-  const swap = setTimeout(() => fs.copyFileSync(craftedFile, targetFile), 3000);
-  const run2 = await runApp({
-    userData: target, results: path.join(target, "results"), seconds: 6, extraArgs: ["--mock"],
-    env: {
-      PANES_TEST_FILE: targetFile,
-      PANES_SELFTEST_ACTIONS: JSON.stringify([
-        { at: 2000, do: "manager-js", js: `/*bad*/ ${invoke("mgr:import-settings")}` },
-        { at: 4000, do: "manager-js", js: invoke("mgr:import-settings") },
-      ]),
-    },
+  // A file that isn't an export first, then the (crafted) export, each in a launch of its own. Swapping
+  // the file on a timer here, during one launch, raced the app's own clock: after a slow start the
+  // first import already got the export.
+  const importOnce = (importFile, results) => runApp({
+    userData: target, results: path.join(target, results), seconds: 5, extraArgs: ["--mock"],
+    env: { PANES_TEST_FILE: importFile, PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 2000, do: "manager-js", js: invoke("mgr:import-settings") }]) },
   });
-  clearTimeout(swap);
-  const bad = run2.result.actions.find((a) => a.act.js.startsWith("/*bad*/"))?.value;
-  const good = run2.result.actions.find((a) => !a.act.js.startsWith("/*bad*/"))?.value;
+  const bad = (await importOnce(notAnExport, "results-bad")).result.actions[0]?.value;
+  const run2 = await importOnce(craftedFile, "results");
+  const good = run2.result.actions[0]?.value;
   check("Import refuses a file that isn't a settings export", /isn't a Protect Panes settings export/.test(bad?.error ?? ""), JSON.stringify(bad));
   const cfg = run2.config;
   const byHost = (h) => cfg?.consoles.find((c) => c.host === h);
@@ -663,6 +662,9 @@ async function transferSuite() {
       && !byHost("mock-z") && !byHost("mock-elsewhere") && cfg.layouts?.[0]?.name === "Day" && cfg.grids?.[0]?.name === "Wall"
       && cfg.windows?.[lobby]?.bounds?.x === 10 && cfg.settings.lockLayout === true && cfg.settings.showNames === false,
     JSON.stringify({ good, consoles: cfg?.consoles.map((c) => `${c.name}@${c.host}`), layouts: cfg?.layouts?.length, grids: cfg?.grids?.length }));
+  check("an address typed as a URL is cleaned up the way Add console does it, and a second console with the same id is left out",
+    byHost("mock-b")?.name === "Garage" && !cfg?.consoles.some((c) => c.host.includes("/") || c.name === "Duplicate") && new Set(cfg?.consoles.map((c) => c.id)).size === cfg?.consoles.length,
+    JSON.stringify(cfg?.consoles.map((c) => `${c.name}@${c.host} ${c.id.slice(0, 8)}`)));
   check("a console already on this PC (same address and username) keeps its password, and this PC's trusted certificate",
     byHost("mock-a")?.password?.data === pw("target-secret").data && byHost("mock-a")?.certSha256 === "BB:22", JSON.stringify(byHost("mock-a")));
   check("a console that only shares an id with one here gets no password (it would go to another host)",

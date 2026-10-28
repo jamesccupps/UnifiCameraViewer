@@ -120,7 +120,7 @@ export class Store {
     return {
       ...raw, // keys a newer version wrote survive a downgrade and upgrade
       version: 1,
-      consoles: Array.isArray(raw.consoles) ? raw.consoles.filter((c) => c && c.id && c.host) : [],
+      consoles: Array.isArray(raw.consoles) ? this.#oneConsolePerId(raw.consoles.filter((c) => c && c.id && c.host)) : [],
       // A hand-edited or future-version entry that isn't an object used to crash startup, every launch.
       windows: isObject(raw.windows) ? Object.fromEntries(Object.entries(raw.windows).filter(([, w]) => isObject(w))) : {},
       settings: { ...d.settings, ...(raw.settings ?? {}) },
@@ -133,6 +133,20 @@ export class Store {
           .map((g) => ({ ...g, tiles: g.tiles.map(loadTile) }))
         : [],
     };
+  }
+
+  // A second console with the same id (a hand edit, an edited export) started a connection of its own
+  // that replaced the first one in the app's map, and the first kept its session and retries unseen.
+  #oneConsolePerId(list) {
+    const seen = new Set();
+    return list.filter((c) => {
+      if (!seen.has(c.id)) {
+        seen.add(c.id);
+        return true;
+      }
+      this.#problem(`left out a second console with the id ${c.id} (${c.name || c.host})`);
+      return false;
+    });
   }
 
   /** Coalesce bursts of changes (window drags) into one write. */
