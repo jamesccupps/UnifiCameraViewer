@@ -328,16 +328,16 @@ async function hideSuite() {
   })()`;
 
   const run1 = await runApp({
-    userData, results: path.join(userData, "results-1"), seconds: 11, extraArgs: ["--mock"],
+    userData, results: path.join(userData, "results-1"), seconds: 14, extraArgs: ["--mock"],
     env: {
       PANES_SELFTEST_ACTIONS: JSON.stringify([
         { at: 2600, do: "manager-js", js: gateQuality },
         { at: 3000, do: "manager-js", js: clickInCard("Garage", "Hide all") },
         { at: 4500, do: "manager-js", js: readButtons },
         { at: 5000, do: "tray-click", label: "Show cameras" },
-        { at: 10000, do: "manager-js", js: setQualityForAll("Garage", 1) }, // after the Show check: it restarts the stream
-        { at: 8500, do: "tray-click", label: "Hide cameras" },
-        { at: 9500, do: "tray-click", label: "Bring cameras to front" },
+        { at: 12500, do: "manager-js", js: setQualityForAll("Garage", 1) }, // after the Show check: it restarts the stream
+        { at: 10500, do: "tray-click", label: "Hide cameras" },
+        { at: 11500, do: "tray-click", label: "Bring cameras to front" },
       ]),
     },
   });
@@ -1601,13 +1601,13 @@ async function gridSuite() {
     settings: { startHidden: true },
   }, null, 2));
   const run4 = await runApp({
-    userData: bigDir, results: path.join(bigDir, "results"), seconds: 13, extraArgs: ["--mock"],
+    userData: bigDir, results: path.join(bigDir, "results"), seconds: 17, extraArgs: ["--mock"],
     env: {
       PANES_SELFTEST_ACTIONS: JSON.stringify([
         { at: 3000, do: "menu-click", tile: "Big#1", label: "Enlarge this tile" },
-        { at: 5500, do: "menu-click", tile: "Big#1", label: "Show all tiles" },
-        { at: 8000, do: "dblclick", tile: "Big#0", pos: [80, 60] },
-        { at: 10500, do: "dblclick", tile: "Big#0", pos: [80, 60] },
+        { at: 6000, do: "menu-click", tile: "Big#1", label: "Show all tiles" },
+        { at: 9500, do: "dblclick", tile: "Big#0", pos: [80, 60] },
+        { at: 13000, do: "dblclick", tile: "Big#0", pos: [80, 60] },
       ]),
     },
   });
