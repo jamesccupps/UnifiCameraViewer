@@ -148,7 +148,9 @@ export async function encryptPassword(plain) {
   if (await safeStorage.isAsyncEncryptionAvailable()) {
     return { enc: "safe", data: (await safeStorage.encryptStringAsync(plain)).toString("base64") };
   }
-  // Only reachable on Linux desktops without a keyring; Windows always has DPAPI.
+  // Windows always has DPAPI; if it somehow says otherwise, refuse rather than quietly save the
+  // password as base64. Only Linux desktops without a keyring get the plain fallback.
+  if (process.platform === "win32") throw new Error("Windows couldn't encrypt the password, so it wasn't saved. Try again.");
   return { enc: "plain", data: Buffer.from(plain, "utf8").toString("base64") };
 }
 
