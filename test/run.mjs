@@ -642,6 +642,36 @@ async function boundsSuite() {
     .concat(Object.entries(r.result.windows).find(([n]) => n.includes("Odd"))?.[1]);
   check("on-screen bounds identical on every launch", runs.every((r) => JSON.stringify(onScreen(r)) === JSON.stringify(onScreen(runs[0]))) && onScreen(runs[0]).every(Boolean),
     JSON.stringify(runs.map(onScreen)));
+
+  // A monitor drops out: Windows moves its windows elsewhere (here the test does, after the event
+  // Electron would send). Those moves mustn't become the saved layout, and when a monitor is added
+  // again the windows go back. A third window saved with its top edge above the screen (so it
+  // couldn't be dragged back) opens somewhere reachable instead.
+  const cfg4 = JSON.parse(fs.readFileSync(path.join(userData, "config.json"), "utf8"));
+  const stair = `${A}/aaaaaaaa-cam2`;
+  cfg4.consoles[0].mockCameras = ["Lobby", "Dock", "Stair"];
+  cfg4.windows[stair] = { open: true, bounds: { x: 200, y: -300, width: 480, height: 400 }, channel: 2 };
+  fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify(cfg4, null, 2));
+  const r4 = await runApp({
+    userData, results: path.join(userData, "results-4"), seconds: 10, extraArgs: ["--mock", "--force-device-scale-factor=1.5"],
+    env: {
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 3000, do: "screen-event", event: "display-removed" },
+        { at: 3200, do: "move", win: 0, to: [0, 0] },
+        { at: 3200, do: "move", tile: "Odd#0", to: [20, 20] },
+        { at: 6500, do: "screen-event", event: "display-added" },
+      ]),
+    },
+  });
+  const added = r4.result.actions.find((a) => a.act.event === "display-added")?.t ?? 0;
+  const movedSample = r4.result.samples.filter((s) => s.t < added).at(-1)?.cams[keys.lobby]?.bounds;
+  const endLobby = last(r4.result)[keys.lobby]?.bounds;
+  check("windows moved off a monitor that went away aren't saved there, and go back when it returns",
+    movedSample?.x === 0 && movedSample.y === 0 && sameBounds(r4.config.windows[keys.lobby]?.bounds, start[keys.lobby]) && sameBounds(r4.config.grids[0]?.bounds, start.grid)
+      && samePlace(endLobby, start[keys.lobby]),
+    JSON.stringify({ moved: movedSample, end: endLobby, saved: r4.config.windows[keys.lobby]?.bounds, grid: r4.config.grids[0]?.bounds }));
+  const stairAt = last(r4.result)[stair]?.bounds;
+  check("a window saved with its top edge off screen opens where it can be dragged", stairAt && stairAt.y >= 0, JSON.stringify(stairAt));
   console.log(`  results: ${userData}`);
 }
 

@@ -85,7 +85,7 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
   // `tile: "<grid name>#<index>"` instead of `win` drives a grid tile. tray-click, manager-js and
   // grid-menu-click (a grid window's own menu, { grid, index, label }) don't need a camera.
   const results = [];
-  const APP_ACTIONS = new Set(["tray-click", "manager-js", "grid-menu-click"]);
+  const APP_ACTIONS = new Set(["tray-click", "manager-js", "grid-menu-click", "screen-event"]);
   for (const act of JSON.parse(process.env.PANES_SELFTEST_ACTIONS || "[]")) {
     setTimeout(async () => {
       let value;
@@ -95,6 +95,9 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
             const item = findItem(hooks.trayMenuTemplate(), act.label);
             if (!item?.click) throw new Error(`no tray item "${act.label}"`);
             item.click(item);
+          } else if (act.do === "screen-event") {
+            // A monitor can't be unplugged from a test: fire the event Electron would.
+            screen.emit(act.event, {}, screen.getPrimaryDisplay(), []);
           } else if (act.do === "grid-menu-click") {
             const item = findItem(hooks.gridPageMenuTemplate(act.grid, act.index ?? null), act.label);
             if (!item?.click) throw new Error(`no grid menu item "${act.label}"`);
@@ -161,6 +164,9 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
             break;
           case "crash":
             wc.forcefullyCrashRenderer();
+            break;
+          case "move":
+            cw.win.setPosition(act.to[0], act.to[1]);
             break;
           case "menu-click": {
             const item = findItem(hooks.cameraContextMenuTemplate(cw), act.label);

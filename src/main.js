@@ -112,6 +112,9 @@ async function init() {
   createTray();
   applyLoginItem();
   registerIpc();
+  screen.on("display-removed", () => displaysChanged(false));
+  screen.on("display-added", () => displaysChanged(true));
+  screen.on("display-metrics-changed", () => displaysChanged(true));
   // At startup only say whether there's an update; downloading waits for a click.
   if (sourceKind(store.settings.updateSource)) updater.check({ download: false });
 
@@ -296,7 +299,7 @@ function openCameraWindow(key, { focus = false, flash = true } = {}) {
   for (const ev of ["show", "hide", "minimize", "restore"]) win.on(ev, notifyManager);
 
   const saveBounds = debounce(() => {
-    if (win.isDestroyed() || win.isMinimized() || win.isMaximized()) return;
+    if (win.isDestroyed() || win.isMinimized() || win.isMaximized() || displaysChanging()) return;
     entry.bounds = windowBounds(win);
     store.save();
     notifyManager(); // it may be on another screen now
@@ -732,6 +735,7 @@ function gridWindow(grid) {
     settings: () => store.settings,
     save: () => store.save(),
     fitBounds,
+    boundsFrozen: displaysChanging,
     defaultBounds: () => {
       const a = screen.getPrimaryDisplay().workArea;
       return { x: a.x + 40, y: a.y + 40, width: Math.round(a.width * 0.7), height: Math.round(a.height * 0.7) };
@@ -1362,15 +1366,41 @@ function applyAspect(cw) {
 }
 
 function fitBounds(b) {
-  if (!b || ![b.x, b.y, b.width, b.height].every(Number.isFinite)) return null;
-  // Only reuse saved bounds if a usable part of the window lands on a connected display.
-  const visible = screen.getAllDisplays().some(({ workArea: a }) => {
+  return fitsOnScreen(b)
+    ? { x: Math.round(b.x), y: Math.round(b.y), width: Math.max(160, Math.round(b.width)), height: Math.max(90, Math.round(b.height)) }
+    : null;
+}
+
+// Saved bounds are reused only if the window's top edge lands on a connected display: that's where a
+// camera window's drag strip (its hover bar) and a grid's title bar are, so a window whose top is off
+// screen can't be moved back by hand.
+function fitsOnScreen(b) {
+  if (!b || ![b.x, b.y, b.width, b.height].every(Number.isFinite)) return false;
+  return screen.getAllDisplays().some(({ workArea: a }) => {
     const ix = Math.min(b.x + b.width, a.x + a.width) - Math.max(b.x, a.x);
-    const iy = Math.min(b.y + b.height, a.y + a.height) - Math.max(b.y, a.y);
-    return ix >= 100 && iy >= 60;
+    return ix >= 100 && b.y >= a.y - 8 && b.y + 30 <= a.y + a.height;
   });
-  if (!visible) return null;
-  return { x: Math.round(b.x), y: Math.round(b.y), width: Math.max(160, Math.round(b.width)), height: Math.max(90, Math.round(b.height)) };
+}
+
+// A monitor that goes away (unplugged, a KVM switch, DisplayPort sleep) has its windows moved onto
+// the other screens by Windows. Saving those moves made them the layout for good, and nothing put
+// the windows back when the monitor returned. While displays change, moves aren't saved; once one
+// is added (or changes), windows whose saved place fits on screen again go back there.
+let displaysSettleAt = 0;
+const displaysChanging = () => Date.now() < displaysSettleAt;
+function displaysChanged(restore) {
+  displaysSettleAt = Date.now() + 3_000;
+  if (restore) setTimeout(restoreSavedPlaces, 1_500);
+}
+
+function restoreSavedPlaces() {
+  const same = (a, b) => a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+  const put = (win, b) => {
+    if (!b || win.isDestroyed() || win.isMinimized() || win.isMaximized() || win.isFullScreen() || !fitsOnScreen(b)) return;
+    if (!same(windowBounds(win), b)) placeWindow(win, b);
+  };
+  for (const cw of camWins.values()) put(cw.win, store.data.windows[cw.key]?.bounds);
+  for (const gw of gridWins.values()) if (gw.isOpen) put(gw.win, gw.grid.bounds);
 }
 
 let cascade = 0;

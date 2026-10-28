@@ -26,7 +26,7 @@ npm run mock              # fake consoles with ffmpeg test patterns, no network
 npm test                  # all test suites below (~6 min; windows are invisible, PANES_TEST_SHOW=1 to watch)
 npm run test:mock         # mock cameras: playback, forced reconnect, 360° quad/panorama, real mouse PTZ input, name label, Apply to all
 npm run test:hide         # Hide cameras / Show cameras / per-console Hide all, across two launches
-npm run test:bounds       # window and grid sizes stay put across three launches at a forced 150 % scale
+npm run test:bounds       # window and grid sizes stay put across launches at a forced 150 % scale; a monitor dropping out and back
 npm run test:connection   # ConsoleConnection unit checks with a fake library client (runs under Electron's Node)
 npm run test:config       # config.json recovery (.bak fallback) and odd shapes that must not stop startup
 npm run test:streams      # stream recovery: a camera going offline while viewed, a stream that never decodes, a frozen picture, a crashed camera page, a lost WebGL context, an unplayable codec
@@ -152,6 +152,7 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
 - **Circle auto-detect.** It scans 120 rays for the point where the picture goes dark for good, then fits with RANSAC + a Kasa least-squares fit. The test fixture deliberately includes an OSD timestamp and black boxes inside the circle. Keep both passing if you touch it.
 - **Name label auto-collapse.** `fitLabel()` in camera.js measures the full label on every resize and title change. When the label is wider than `LABEL_MAX_SHARE` (50%) of the window, only the status dot is shown. Measuring is deliberate, because a fixed breakpoint fits short names or long ones, never both.
 - **Aspect lock.** The renderer reports the aspect it wants: the video size normally, 16:9 in dewarp modes. Main calls `setAspectRatio` and snaps the window height. Calibration deliberately doesn't change aspect.
+- **Monitors coming and going.** When a monitor drops out (unplugged, a KVM switch, DisplayPort sleep), Windows moves its windows onto the other screens. Saving those moves made them the layout for good. Now for 3 s after any `display-removed` / `-added` / `-metrics-changed`, moves aren't saved (camera windows and grids). 1.5 s after a monitor is added or changes, every window whose saved place fits on screen again goes back there (`restoreSavedPlaces()`). Saved bounds are reused only if the window's top edge, where its drag strip is, lands on a work area (`fitsOnScreen()`); before, a window with only its bottom on screen couldn't be dragged back. The bounds suite fires the events itself and moves the windows the way Windows would. Whether Windows' own move events always arrive inside that 3 s isn't verified with a real monitor.
 - **Window bounds round trip (window-bounds.js).** At fractional scaling Electron rounds a window's edges outward when it reads bounds back, so `getBounds()` can be 1 DIP bigger than what `setBounds()` just set, and constructor bounds come out 2-4 DIP bigger. Saving `getBounds()` made camera and grid windows grow on every launch (measured at 150 %: 480 → 482 → 485 → 489 wide with the aspect lock off; on, the lock hid it).
   - Set bounds with `placeWindow(win, b)`, which also runs right after each window is constructed.
   - Read the bounds to save or compute from with `windowBounds(win)`. It returns the placed bounds until the window really moves or resizes, so a restore is a fixed point.
@@ -290,6 +291,8 @@ When adding a test, extend `test/run.mjs`. `PANES_SELFTEST_ACTIONS` (JSON) drive
 - `menu-click` `{win, label}`: runs that context-menu item's click handler (searches submenus too)
 - `camera-js` `{win, js}`: runs JS in a camera page and stores the result as `value`
 - `crash` `{win}`: `forcefullyCrashRenderer()` on that camera page
+- `move` `{win, to: [x, y]}`: `setPosition` on the window (a tile's moves its grid window)
+- `screen-event` `{event}`: emits `display-removed` / `display-added` / `display-metrics-changed` on `screen` (no `win`)
 - `tray-click` `{label}`: same, for the tray menu (no `win`)
 - `manager-js` `{js}`: runs JS in the camera list window and stores the result as `value` (no `win`). The list must be open (`startHidden: false`).
 - `grid-menu-click` `{grid, index, label}`: a grid window's own menu (an empty tile's, with `index`)

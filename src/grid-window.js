@@ -22,7 +22,7 @@ export class GridWindow {
 
   /**
    * @param {object} grid - the saved record (mutated in place by main.js)
-   * @param {object} deps - { settings(), save(), fitBounds(b), defaultBounds(), icon, gridPage, gridPreload,
+   * @param {object} deps - { settings(), save(), fitBounds(b), boundsFrozen(), defaultBounds(), icon, gridPage, gridPreload,
    *   cameraPage, cameraPreload, makePlayer({ gw, index, tile, wc }), dropPlayer(player),
    *   tilesResized(gw, rects), closed(gw) }
    */
@@ -69,7 +69,7 @@ export class GridWindow {
     win.once("ready-to-show", () => { if (!this.grid.hidden) win.showInactive(); });
     win.webContents.on("did-finish-load", () => this.#layout());
     const saveBounds = debounce(() => {
-      if (!this.isOpen || win.isMinimized() || win.isMaximized() || win.isFullScreen()) return;
+      if (!this.isOpen || win.isMinimized() || win.isMaximized() || win.isFullScreen() || d.boundsFrozen?.()) return;
       this.grid.bounds = windowBounds(win);
       d.save();
     }, 250);
