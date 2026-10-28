@@ -38,7 +38,9 @@ export function compareVersions(a, b) {
 export function sourceKind(source) {
   const s = String(source ?? "").trim();
   if (/^https:\/\/[^\s/]+/i.test(s)) return "https";
-  if (/^(?:[a-zA-Z]:[\\/]|\\\\[^\\]+\\[^\\]+)/.test(s)) return "path";
+  // A drive path, or \\server\share. Not the device forms (\\?\, \\.\) and not WebDAV's host@SSL@port
+  // or host@port, which went over plain HTTP despite "http is refused".
+  if (/^(?:[a-zA-Z]:[\\/]|\\\\(?![?.]\\)[^\\@]+\\[^\\]+)/.test(s)) return "path";
   return null;
 }
 
@@ -73,18 +75,36 @@ function join(source, name) {
     : path.join(source, name);
 }
 
-async function readSmall(source, name, fetchImpl) {
+async function readSmall(source, name, fetchImpl, timeoutMs) {
   const where = join(source, name);
   if (sourceKind(source) === "path") {
     const st = await fs.promises.stat(where);
     if (st.size > MAX_MANIFEST_BYTES) throw new Error("The update manifest is too large.");
     return fs.promises.readFile(where, "utf8");
   }
-  const res = await fetchImpl(where, { redirect: "follow", cache: "no-store" });
-  if (!res.ok) throw new Error(`${where}: HTTP ${res.status}`);
-  const text = await res.text();
-  if (text.length > MAX_MANIFEST_BYTES) throw new Error("The update manifest is too large.");
-  return text;
+  // Bounded in time and in bytes as it's read: the whole body used to be read before the size check,
+  // with no timeout, so an endless answer filled memory (at every launch) and a trickle left checks
+  // stuck "busy" until a restart.
+  const signal = AbortSignal.timeout(timeoutMs);
+  const late = new Promise((_, reject) => {
+    signal.addEventListener("abort", () => reject(new Error(`${where} didn't answer in time.`)), { once: true });
+  });
+  late.catch(() => {}); // only a loss of the race below matters
+  const read = async () => {
+    const res = await fetchImpl(where, { redirect: "follow", cache: "no-store", signal });
+    if (!res.ok) throw new Error(`${where}: HTTP ${res.status}`);
+    if (Number(res.headers?.get?.("content-length")) > MAX_MANIFEST_BYTES) throw new Error("The update manifest is too large.");
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of res.body ? Readable.fromWeb(res.body) : []) {
+      size += chunk.length;
+      if (size > MAX_MANIFEST_BYTES) throw new Error("The update manifest is too large.");
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks).toString("utf8");
+  };
+  // Raced as well as passed down: a fetch whose body ignores the signal still can't hold this up.
+  return Promise.race([read(), late]);
 }
 
 /**
@@ -92,33 +112,46 @@ async function readSmall(source, name, fetchImpl) {
  * the file is closed before returning, so the caller can delete it (Windows keeps listing a file
  * deleted while still open).
  */
-async function fetchTo(source, name, dest, limit, fetchImpl) {
+async function fetchTo(source, name, dest, limit, fetchImpl, idleMs) {
   const where = join(source, name);
+  // A download that stops sending is given up after idleMs without a byte (it used to wait forever).
+  const stall = new AbortController();
+  let idle = null;
+  const poke = () => {
+    clearTimeout(idle);
+    idle = setTimeout(() => stall.abort(new Error("The update download stalled.")), idleMs);
+  };
   let input;
-  if (sourceKind(source) === "path") {
-    input = fs.createReadStream(where);
-  } else {
-    const res = await fetchImpl(where, { redirect: "follow", cache: "no-store" });
-    if (!res.ok || !res.body) throw new Error(`${where}: HTTP ${res.status}`);
-    input = Readable.fromWeb(res.body);
-  }
-  const hash = crypto.createHash("sha256");
-  let size = 0;
-  const out = fs.createWriteStream(dest);
   try {
-    await pipeline(input, async function* (chunks) {
-      for await (const chunk of chunks) {
-        size += chunk.length;
-        if (size > limit) throw new Error("The update download is larger than the signed size.");
-        hash.update(chunk);
-        yield chunk;
-      }
-    }, out);
-  } catch (err) {
-    if (!out.closed) await new Promise((resolve) => out.once("close", resolve));
-    throw err;
+    if (sourceKind(source) === "path") {
+      input = fs.createReadStream(where);
+    } else {
+      poke();
+      const res = await fetchImpl(where, { redirect: "follow", cache: "no-store", signal: stall.signal });
+      if (!res.ok || !res.body) throw new Error(`${where}: HTTP ${res.status}`);
+      input = Readable.fromWeb(res.body);
+    }
+    const hash = crypto.createHash("sha256");
+    let size = 0;
+    const out = fs.createWriteStream(dest);
+    try {
+      await pipeline(input, async function* (chunks) {
+        for await (const chunk of chunks) {
+          if (idle) poke();
+          size += chunk.length;
+          if (size > limit) throw new Error("The update download is larger than the signed size.");
+          hash.update(chunk);
+          yield chunk;
+        }
+      }, out);
+    } catch (err) {
+      if (!out.closed) await new Promise((resolve) => out.once("close", resolve));
+      throw stall.signal.aborted ? stall.signal.reason : err;
+    }
+    return { size, sha256: hash.digest("hex") };
+  } finally {
+    clearTimeout(idle);
   }
-  return { size, sha256: hash.digest("hex") };
 }
 
 /**
@@ -141,11 +174,13 @@ export class Updater extends EventEmitter {
    * @param {string} [opts.electronVersion] - the running Electron. A release built for the same one
    *   updates either kind by replacing resources\app.asar alone (a few MB instead of the zip).
    * @param {typeof fetch} [opts.fetch]
+   * @param {{ manifestMs?: number, idleMs?: number }} [opts.timeouts] - for latest.json, and for a
+   *   download that stops sending
    * @param {object} opts.log
    */
   constructor(opts) {
     super();
-    this.#opts = { fetch: globalThis.fetch, installKind: "folder", ...opts };
+    this.#opts = { fetch: globalThis.fetch, installKind: "folder", ...opts, timeouts: { manifestMs: 15_000, idleMs: 60_000, ...opts?.timeouts } };
   }
 
   #set(status, extra = {}) {
@@ -162,7 +197,7 @@ export class Updater extends EventEmitter {
     try {
       if (!sourceKind(source)) throw new Error("Set an update location first: an https:// address or a folder.");
       this.#set("checking");
-      const manifest = verifyManifest(await readSmall(source, MANIFEST, this.#opts.fetch), publicKey);
+      const manifest = verifyManifest(await readSmall(source, MANIFEST, this.#opts.fetch, this.#opts.timeouts.manifestMs), publicKey);
       if (compareVersions(manifest.version, currentVersion) <= 0) {
         this.#set("current", { version: manifest.version, message: `Up to date (${currentVersion}).` });
         return this.state;
@@ -185,7 +220,7 @@ export class Updater extends EventEmitter {
       fs.rmSync(part, { force: true });
       let got;
       try {
-        got = await fetchTo(source, want.file, part, want.size, this.#opts.fetch);
+        got = await fetchTo(source, want.file, part, want.size, this.#opts.fetch, this.#opts.timeouts.idleMs);
         if (got.size !== want.size || got.sha256 !== want.sha256) {
           throw new Error("The downloaded update doesn't match its signed checksum - not installing it.");
         }

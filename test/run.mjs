@@ -594,6 +594,32 @@ async function securitySuite() {
     check("camera previews take only a JPEG of a sensible size", got.ok === "data:image/jpeg;base64," && got.huge === null && got.png === null, JSON.stringify(got));
   }
 
+  // Update locations: no device paths or WebDAV-over-HTTP forms; a manifest read is bounded in bytes
+  // and time, and a download that stops sending gives up.
+  {
+    const { sourceKind, Updater } = await import(new URL("../src/updater.js", import.meta.url).href);
+    const kinds = ["\\\\server\\share\\Protect Panes", "D:\\Releases", "\\\\?\\C:\\x", "\\\\.\\pipe\\x", "\\\\10.0.0.5@SSL@8443\\dav", "\\\\host@80\\x"].map(sourceKind);
+    check("update locations: shares and drives, not device paths or WebDAV-over-HTTP", JSON.stringify(kinds) === JSON.stringify(["path", "path", null, null, null, null]), JSON.stringify(kinds));
+
+    const endless = () => new Response(new ReadableStream({ pull(c) { c.enqueue(new Uint8Array(1024 * 1024)); } }), { status: 200 });
+    const silent = (_url, { signal } = {}) => new Promise((resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(signal.reason));
+      resolve(new Response(new ReadableStream({ start() {} }), { status: 200 })); // headers, then nothing
+    });
+    const updater = (fetch) => new Updater({
+      currentVersion: "1.0.0", getSource: () => "https://updates.invalid/pp", publicKey: "", stageDir: tmpDir("upd"), fetch,
+      timeouts: { manifestMs: 500, idleMs: 500 },
+    });
+    const t0 = Date.now();
+    const alive = setInterval(() => {}, 1_000); // AbortSignal.timeout's timer doesn't keep Node running
+    const big = await updater(endless).check({ download: false });
+    const slow = await updater(silent).check({ download: false });
+    clearInterval(alive);
+    check("an endless or silent update manifest is given up quickly, not read into memory or waited on",
+      big.status === "error" && /too large/.test(big.message) && slow.status === "error" && Date.now() - t0 < 5_000,
+      JSON.stringify({ big: big.message, slow: slow.message, ms: Date.now() - t0 }));
+  }
+
   // Text from a console (a controller name, a reason) can't forge log lines.
   {
     const { createLogger } = await import(new URL("../src/log.js", import.meta.url).href);
