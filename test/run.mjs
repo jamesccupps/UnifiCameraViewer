@@ -1386,8 +1386,26 @@ async function listSuite() {
     document.querySelector('[data-tab="cameras"]').click();
     return out;
   })()`;
+  // A quality select that has just been used keeps the focus; the 3 s status re-render must go on.
+  const lobbyRow = `[...document.querySelectorAll(".cams li")].find((l) => l.querySelector(".cam-name b")?.textContent === "Building Lobby")`;
+  const focusQuality = `(() => {
+    const sel = document.querySelector('[data-focus-key="q-${keys.lobby}"]');
+    sel?.focus();
+    ${lobbyRow}.__marked = true;
+    return document.activeElement === sel;
+  })()`;
+  const rerendered = `(() => ({ rerendered: !${lobbyRow}?.__marked, selectFocused: document.activeElement?.tagName === "SELECT" }))()`;
+  // A "⋯" menu left open (which also holds the re-renders off) closes when the list loses focus.
+  const menuThenBlur = `(async () => {
+    const d = ${card("Building")}.querySelector("details.menu");
+    d.open = true;
+    await new Promise((r) => setTimeout(r, 100));
+    const opened = d.open;
+    window.dispatchEvent(new Event("blur"));
+    return { opened, closed: !document.querySelector("details.menu[open]") };
+  })()`;
   const { result, config } = await runApp({
-    userData, results, seconds: 10, extraArgs: ["--mock"],
+    userData, results, seconds: 14, extraArgs: ["--mock"],
     env: {
       PANES_SELFTEST_ACTIONS: JSON.stringify([
         { at: 2500, do: "manager-js", js: clickRow("Building Dock", "Hide") },
@@ -1396,9 +1414,17 @@ async function listSuite() {
         { at: 6000, do: "manager-js", js: readPalette },
         { at: 6500, do: "manager-js", js: clickRow("Building Dock", "Show in list") },
         { at: 7500, do: "manager-js", js: readList },
+        { at: 8000, do: "manager-js", js: focusQuality },
+        { at: 11700, do: "manager-js", js: rerendered },
+        { at: 12000, do: "manager-js", js: menuThenBlur },
       ]),
     },
   });
+  const act = (js) => result.actions.find((a) => a.act.js === js);
+  check("the camera list keeps refreshing while a quality select has the focus",
+    act(focusQuality)?.value === true && act(rerendered)?.value?.rerendered === true, JSON.stringify([act(focusQuality), act(rerendered)].map((a) => a?.value ?? a?.error)));
+  check("an open console menu closes when the list loses focus", act(menuThenBlur)?.value?.opened === true && act(menuThenBlur).value.closed === true,
+    JSON.stringify(act(menuThenBlur)?.value ?? act(menuThenBlur)?.error));
   const [hid, before, all, palette, back, after] = result.actions.map((a) => a.value ?? { error: a.error });
   check("Hide on a camera row hid it from the list", hid === true && JSON.stringify(before?.listed) === JSON.stringify(["Building Lobby", "Building Stair"]),
     JSON.stringify(before ?? hid));

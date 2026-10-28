@@ -505,10 +505,14 @@ filterInput.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && filterInput.value) { filterInput.value = ""; renderConsoles(); e.stopPropagation(); }
 });
 
-// Close an open "⋯" menu when clicking anywhere else.
-document.addEventListener("click", (e) => {
-  for (const d of document.querySelectorAll("details.menu[open]")) if (!d.contains(e.target)) { d.open = false; openMenuFor = null; }
-});
+// Close an open "⋯" menu when clicking anywhere else, on Esc, or when the list loses focus: an open
+// menu also holds off the status re-renders, and one left open used to freeze them.
+function closeMenus(except = null) {
+  for (const d of document.querySelectorAll("details.menu[open]")) if (!except || !d.contains(except)) { d.open = false; openMenuFor = null; }
+}
+document.addEventListener("click", (e) => closeMenus(e.target));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && openMenuFor) closeMenus(); });
+window.addEventListener("blur", () => closeMenus());
 
 // ---------------------------------------------------------------------------------------------
 // Layouts tab: Arrange thumbnails, saved layouts, Protect import
@@ -964,11 +968,13 @@ document.getElementById("btn-project").addEventListener("click", () => panes.inv
 document.getElementById("btn-logs").addEventListener("click", () => panes.invoke("mgr:open-log-folder"));
 document.getElementById("btn-quit").addEventListener("click", () => panes.invoke("mgr:quit"));
 
-panes.onChanged(() => refresh());
+// Don't re-render under an open dropdown, menu or dialog. An open dropdown, not a focused one: a
+// quality select keeps the focus after it's used, which once stopped the status updates for hours.
+const busy = () => dialog.open || layoutDialog.open || editorDialog.open || !!openMenuFor || !!document.querySelector("select:open");
+panes.onChanged(() => { if (!busy()) refresh(); }); // else the next poll picks it up
 // Camera online/offline status isn't pushed; poll lightly while the list is visible.
 setInterval(() => {
-  // Don't re-render under an open dropdown, menu or dialog.
-  if (document.hidden || dialog.open || layoutDialog.open || editorDialog.open || openMenuFor || document.activeElement?.tagName === "SELECT") return;
+  if (document.hidden || busy()) return;
   refresh();
 }, 3_000);
 refresh();
