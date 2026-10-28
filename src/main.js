@@ -70,6 +70,7 @@ async function init() {
   store = new Store();
   log = createLogger(path.join(app.getPath("userData"), "protect-panes.log"));
   log.info(`Protect Panes ${app.getVersion()} starting${MOCK ? " (mock mode)" : ""}`);
+  store.setLogger(log);
   Menu.setApplicationMenu(null);
 
   if (MOCK && !store.data.consoles.length) {

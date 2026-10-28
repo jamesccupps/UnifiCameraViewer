@@ -38,10 +38,21 @@ function defaults() {
   return { version: 1, consoles: [], windows: {}, settings: { ...DEFAULT_SETTINGS }, layouts: [], grids: [] };
 }
 
+/*
+ * Saving survives a power cut. NTFS journals a rename but not file data, so a config written and
+ * renamed into place without a flush could come back as a file of zeros, and the app started with
+ * no consoles. Now each save writes config.json.tmp and fsyncs it, moves the current config.json
+ * to config.json.bak, then moves the new one in. Loading falls back to the .bak when config.json is
+ * missing (a save cut off between its two moves) or unreadable, and keeps an unreadable file as
+ * config.json.corrupt-<time>.
+ */
 export class Store {
   #file;
   #data;
   #timer = null;
+  #fileIsGood = false; // config.json parsed (or was written here): fit to become the next .bak
+  #log = null;
+  #problems = [];      // found while loading, before there's a logger
 
   constructor() {
     this.#file = path.join(app.getPath("userData"), "config.json");
@@ -52,16 +63,35 @@ export class Store {
   get data() { return this.#data; }
   get settings() { return this.#data.settings; }
 
+  /** Where load and save problems go (the store is created before the logger). */
+  setLogger(log) {
+    this.#log = log;
+    for (const p of this.#problems.splice(0)) log.warn(p);
+  }
+
+  #problem(text) {
+    if (this.#log) this.#log.error(text);
+    else this.#problems.push(text);
+  }
+
   #load() {
+    const read = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
     let raw;
     try {
-      raw = JSON.parse(fs.readFileSync(this.#file, "utf8"));
+      raw = read(this.#file);
+      this.#fileIsGood = true;
     } catch (err) {
       if (err.code !== "ENOENT") {
-        // Keep a copy of a corrupt file rather than silently overwriting it.
-        try { fs.copyFileSync(this.#file, this.#file + ".corrupt"); } catch { /* ignore */ }
+        const kept = `${this.#file}.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+        try { fs.copyFileSync(this.#file, kept); } catch { /* ignore */ }
+        this.#problem(`config.json couldn't be read (${err.message}); kept it as ${path.basename(kept)}`);
       }
-      return defaults();
+      try {
+        raw = read(this.#file + ".bak");
+        this.#problem("loaded config.json.bak, the settings from before the last save");
+      } catch {
+        return defaults();
+      }
     }
     const d = defaults();
     return {
@@ -89,10 +119,18 @@ export class Store {
     try {
       fs.mkdirSync(path.dirname(this.#file), { recursive: true });
       const tmp = this.#file + ".tmp";
-      fs.writeFileSync(tmp, JSON.stringify(this.#data, null, 2));
+      const fd = fs.openSync(tmp, "w");
+      try {
+        fs.writeFileSync(fd, JSON.stringify(this.#data, null, 2));
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      if (this.#fileIsGood) fs.renameSync(this.#file, this.#file + ".bak");
       fs.renameSync(tmp, this.#file);
+      this.#fileIsGood = true;
     } catch (err) {
-      console.error("config save failed", err);
+      this.#problem(`config save failed: ${err.message}`);
     }
   }
 }

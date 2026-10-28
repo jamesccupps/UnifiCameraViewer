@@ -59,8 +59,9 @@ async function runApp({ userData, results, seconds, extraArgs = [], env = {} }) 
   fs.mkdirSync(results, { recursive: true });
   // The default update location is GitHub; tests stay off the network unless a suite sets one.
   const cfgFile = path.join(userData, "config.json");
-  const cfg = JSON.parse(fs.readFileSync(cfgFile, "utf8"));
-  if (cfg.settings?.updateSource === undefined) {
+  let cfg = null;
+  try { cfg = JSON.parse(fs.readFileSync(cfgFile, "utf8")); } catch { /* missing or damaged on purpose (config suite) */ }
+  if (cfg && cfg.settings?.updateSource === undefined) {
     cfg.settings = { ...cfg.settings, updateSource: "" };
     fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2));
   }
@@ -80,7 +81,7 @@ async function runApp({ userData, results, seconds, extraArgs = [], env = {} }) 
   if (!fs.existsSync(file)) throw new Error(`app produced no result.json - see ${path.join(results, "app-output.log")}`);
   return {
     result: JSON.parse(fs.readFileSync(file, "utf8")),
-    config: JSON.parse(fs.readFileSync(path.join(userData, "config.json"), "utf8")),
+    config: (() => { try { return JSON.parse(fs.readFileSync(path.join(userData, "config.json"), "utf8")); } catch { return null; } })(),
   };
 }
 
@@ -517,6 +518,50 @@ async function streamsSuite() {
     JSON.stringify({ status: bogusEnd?.statusText, subscriptions: conn?.subscriptions?.["aaaaaaaa-cam5"], active: conn?.active?.["aaaaaaaa-cam5"] }));
   check("the crashes are logged", (appLog.match(/camera page for \S+ gone \(crashed/g) ?? []).length === 2,
     appLog.split(/\r?\n/).filter((l) => l.includes("gone")).join(" | "));
+  console.log(`  results: ${userData}`);
+}
+
+// ---------------------------------------------------------------------------------------------
+// config.json recovery (mock consoles): a damaged config.json, or one missing after a save that was
+// cut off between its two renames, falls back to config.json.bak. (The fsync that makes the saved
+// data survive a power cut can't be tested here; this covers the paths around it.)
+
+async function configSuite() {
+  console.log("\nConfig file suite (mock consoles, three launches)");
+  const userData = tmpDir("config");
+  const A = "aaaaaaaa-0000-4000-8000-000000000001";
+  const file = path.join(userData, "config.json");
+  const good = JSON.stringify({
+    version: 1,
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby"] }],
+    windows: { [`${A}/aaaaaaaa-cam0`]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 } },
+    settings: { startHidden: true, updateSource: "" },
+  }, null, 2);
+  const logOf = () => fs.readFileSync(path.join(userData, "protect-panes.log"), "utf8");
+  const files = () => fs.readdirSync(userData).filter((f) => f.startsWith("config.json"));
+  const loaded = (r) => !!r.result.connections[A];
+
+  // 1. A damaged config.json (cut off mid-write) with a good backup.
+  fs.writeFileSync(file, "{\"version\": 1, \"consoles\": [");
+  fs.writeFileSync(file + ".bak", good);
+  const r1 = await runApp({ userData, results: path.join(userData, "results-1"), seconds: 4, extraArgs: ["--mock"] });
+  check("a damaged config.json falls back to config.json.bak, and is kept for a look",
+    loaded(r1) && files().some((f) => f.startsWith("config.json.corrupt-")) && /couldn't be read/.test(logOf()) && /loaded config\.json\.bak/.test(logOf()),
+    JSON.stringify({ loaded: loaded(r1), files: files() }));
+  const bak = (() => { try { return JSON.parse(fs.readFileSync(file + ".bak", "utf8")); } catch { return null; } })();
+  check("the damaged file doesn't become the next backup", bak?.consoles?.[0]?.id === A && r1.config?.consoles?.[0]?.id === A,
+    fs.readFileSync(file + ".bak", "utf8").slice(0, 80));
+
+  // 2. A normal launch: each save moves the previous config.json to .bak and leaves no .tmp behind.
+  const before = fs.readFileSync(file, "utf8");
+  const r2 = await runApp({ userData, results: path.join(userData, "results-2"), seconds: 4, extraArgs: ["--mock"] });
+  check("a save keeps the previous config.json as config.json.bak, with no .tmp left",
+    loaded(r2) && fs.readFileSync(file + ".bak", "utf8") === before && !files().includes("config.json.tmp"), JSON.stringify(files()));
+
+  // 3. config.json missing but a backup there: a save cut off between its two renames.
+  fs.rmSync(file);
+  const r3 = await runApp({ userData, results: path.join(userData, "results-3"), seconds: 4, extraArgs: ["--mock"] });
+  check("with config.json missing, the backup is loaded", loaded(r3) && r3.config?.consoles?.[0]?.id === A, JSON.stringify({ loaded: loaded(r3), files: files() }));
   console.log(`  results: ${userData}`);
 }
 
@@ -1841,6 +1886,7 @@ try {
   if (suite === "bounds" || suite === "all") await runSuite(boundsSuite);
   if (suite === "connection" || suite === "all") await runSuite(connectionSuite);
   if (suite === "streams" || suite === "all") await runSuite(streamsSuite);
+  if (suite === "config" || suite === "all") await runSuite(configSuite);
   if (suite === "range" || suite === "all") await runSuite(rangeSuite);
   if (suite === "layouts" || suite === "all") await runSuite(layoutsSuite);
   if (suite === "arrange" || suite === "all") await runSuite(arrangeSuite);

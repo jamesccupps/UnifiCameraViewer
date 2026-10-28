@@ -22,6 +22,7 @@
     "test:bounds": "node test/run.mjs bounds",
     "test:connection": "node test/run.mjs connection",
     "test:streams": "node test/run.mjs streams",
+    "test:config": "node test/run.mjs config",
     "test:range": "node test/run.mjs range",
     "test:layouts": "node test/run.mjs layouts",
     "test:update": "node test/run.mjs update",
