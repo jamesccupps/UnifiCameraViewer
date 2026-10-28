@@ -930,8 +930,9 @@ editorTemplate.addEventListener("change", () => setTemplate(editorTemplate.value
 editorFilter.addEventListener("input", () => renderEditor());
 document.getElementById("editor-clear").addEventListener("click", () => { ed.cells = ed.cells.map(() => null); editorError.textContent = ""; renderEditor(); });
 document.getElementById("editor-fill").addEventListener("click", () => {
-  const keys = (state.screens.find((s) => s.id === ed.displayId)?.onScreen ?? []);
-  ed.cells = ed.cells.map((_, i) => (keys[i] ? { key: keys[i], mode: "quad" } : null));
+  const scr = state.screens.find((s) => s.id === ed.displayId);
+  const keys = scr?.onScreen ?? [];
+  ed.cells = ed.cells.map((_, i) => (keys[i] ? { key: keys[i], mode: scr.views?.[keys[i]] ?? "quad" } : null));
   const extra = keys.length - Math.min(keys.length, ed.cells.length);
   editorError.textContent = !keys.length ? "There are no camera windows on that screen."
     : extra ? `${plural(extra, "window")} didn't fit. Pick a bigger layout to include ${extra === 1 ? "it" : "them"}.` : "";

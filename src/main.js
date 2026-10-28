@@ -699,6 +699,8 @@ function screensForEditor() {
       scaleFactor: d.scaleFactor,
       primary: d.id === primary,
       onScreen: readingOrder(all.filter((cw) => screen.getDisplayMatching(cw.win.getBounds()).id === d.id), (cw) => cw.win.getBounds()).map((cw) => cw.key),
+      // Each 360° window's current view, so "Use what's on screen" keeps it instead of making it Quad.
+      views: Object.fromEntries(all.filter((cw) => store.data.windows[cw.key]?.dewarp).map((cw) => [cw.key, viewOf(store.data.windows[cw.key].dewarp)])),
     }));
 }
 

@@ -1337,7 +1337,7 @@ async function editorSuite() {
   const fill = `(() => { ${helpers}
     document.getElementById("btn-new-layout").click();
     document.getElementById("editor-fill").click();
-    const out = cells().filter(Boolean);
+    const out = { cells: cells().filter(Boolean), view: document.querySelector('[data-cell="0"] select')?.value };
     document.getElementById("editor-cancel").click();
     return out; })()`;
   const { result, config } = await runApp({
@@ -1369,7 +1369,8 @@ async function editorSuite() {
   check("the 360 window shows Panorama after apply", end[keys.fish]?.dewarp?.mode === "panorama" && end[keys.fish]?.status === "live", JSON.stringify(end[keys.fish]?.dewarp));
   check("Edit reopens the editor with the saved grid, tiles and view",
     reopened?.template === "1+5" && reopened?.cells?.[0] === "Building 360" && reopened?.cells?.[5] === "Garage Ramp" && reopened?.view === "panorama", JSON.stringify(reopened));
-  check("Use what's on screen fills tiles with the open windows in reading order", JSON.stringify(filled) === JSON.stringify(["Building 360", "Garage Ramp"]), JSON.stringify(filled));
+  check("Use what's on screen fills tiles with the open windows in reading order", JSON.stringify(filled?.cells) === JSON.stringify(["Building 360", "Garage Ramp"]), JSON.stringify(filled));
+  check("Use what's on screen keeps a 360° window's current view (Panorama), not Quad", filled?.view === "panorama", JSON.stringify(filled));
   console.log(`  results: ${results}`);
 }
 
