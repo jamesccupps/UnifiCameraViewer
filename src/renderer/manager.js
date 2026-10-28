@@ -246,11 +246,12 @@ function thumb(cam) {
   return node;
 }
 
+// Loading, "the console gave no picture" and offline each look different (they were all an empty box).
 function paintThumb(node) {
   const p = previewCache.get(node.dataset.previewKey);
   if (node.hasAttribute("data-offline")) node.replaceChildren(el("span", {}, "offline"));
   else if (p?.url) { if (node.querySelector("img")?.getAttribute("src") !== p.url) node.replaceChildren(el("img", { src: p.url, alt: "" })); }
-  else node.replaceChildren();
+  else node.replaceChildren(el("span", {}, p ? "no picture" : "…"));
 }
 
 function observePreviews() {
@@ -598,9 +599,16 @@ function renderCamera(cam) {
   return el("li", { "data-key": cam.key }, toggle, state.settings.showPreviews ? thumb(cam) : null, name, channelSelect, find, hide);
 }
 
-filterInput.addEventListener("input", () => renderConsoles());
+// Rows the filter brings back are new nodes: they need watching for their previews (the poll used to
+// do that on its next render, and an unchanged poll no longer renders).
+function renderFiltered() {
+  renderConsoles();
+  observePreviews();
+  reattachTip();
+}
+filterInput.addEventListener("input", renderFiltered);
 filterInput.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && filterInput.value) { filterInput.value = ""; renderConsoles(); e.stopPropagation(); }
+  if (e.key === "Escape" && filterInput.value) { filterInput.value = ""; renderFiltered(); e.stopPropagation(); }
 });
 
 // Close an open "⋯" menu when clicking anywhere else, on Esc, or when the list loses focus: an open

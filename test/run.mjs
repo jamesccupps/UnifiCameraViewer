@@ -1742,10 +1742,19 @@ async function listSuite() {
     document.documentElement.style.width = "";
     return widths;
   })()`;
+  // A thumbnail still loading and one the console gave no picture for look different from each other.
+  const thumbStates = `(() => {
+    const node = (key) => { const n = document.createElement("div"); n.dataset.previewKey = key; paintThumb(n); return n.textContent; };
+    previewCache.set("test/none", { url: null, at: null, fetched: Date.now() });
+    const out = { loading: node("test/never-asked"), none: node("test/none") };
+    previewCache.delete("test/none");
+    return out;
+  })()`;
   const { result, config } = await runApp({
     userData, results, seconds: 19, extraArgs: ["--mock"],
     env: {
       PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 17500, do: "manager-js", js: thumbStates },
         { at: 18000, do: "manager-js", js: editorTip },
         { at: 17200, do: "manager-js", js: narrowNames },
         { at: 13300, do: "manager-js", js: markForPatch },
@@ -1767,6 +1776,8 @@ async function listSuite() {
     act(focusQuality)?.value === true && act(rerendered)?.value?.rerendered === true, JSON.stringify([act(focusQuality), act(rerendered)].map((a) => a?.value ?? a?.error)));
   check("an open console menu closes when the list loses focus", act(menuThenBlur)?.value?.opened === true && act(menuThenBlur).value.closed === true,
     JSON.stringify(act(menuThenBlur)?.value ?? act(menuThenBlur)?.error));
+  const ts = act(thumbStates)?.value;
+  check("a loading thumbnail and one with no picture look different", ts?.loading === "…" && ts?.none === "no picture", JSON.stringify(ts ?? act(thumbStates)?.error));
   const nn = act(narrowNames)?.value;
   check("at the list's narrowest, every camera name keeps at least 60 px", Array.isArray(nn) && nn.length >= 3 && nn.every((w) => w >= 60), JSON.stringify(nn));
   const et = act(editorTip)?.value;
