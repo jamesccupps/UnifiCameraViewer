@@ -62,7 +62,7 @@ function el(tag, attrs = {}, ...children) {
   for (const [k, v] of Object.entries(attrs)) {
     if (v == null || v === false) continue;
     if (k === "class") node.className = v;
-    else if (k === "tip") node.dataset.tip = v;
+    else if (k === "tip") { node.dataset.tip = v; node.setAttribute("aria-description", v); } // the floating tip is not linked to it
     // CSSOM, not a style="" attribute: the page's CSP (style-src 'self') blocks inline style attributes.
     else if (k === "style") Object.assign(node.style, v);
     else if (k.startsWith("on")) listen(node, k.slice(2), v);
@@ -136,6 +136,8 @@ function patch(a, b) {
 // above the element near the bottom edge, and re-attaches after the 3 s re-render.
 
 const tip = document.getElementById("tip");
+// Tips written in the HTML get the same accessible description el() gives the rest.
+for (const n of document.querySelectorAll("[data-tip]")) n.setAttribute("aria-description", n.dataset.tip);
 let tipFor = null;
 let tipTimer = null;
 let pointer = { x: -1, y: -1 };
@@ -330,8 +332,24 @@ function reattachPop() {
 for (const btn of document.querySelectorAll("[data-tab]")) {
   btn.addEventListener("click", () => showTab(btn.dataset.tab));
 }
+// The usual tab-strip keys: Left/Right (and Home/End) move between tabs; only the current tab is in
+// the Tab order.
+document.querySelector('[role="tablist"]').addEventListener("keydown", (e) => {
+  const tabs = [...document.querySelectorAll("[data-tab]")];
+  const at = tabs.indexOf(document.activeElement);
+  if (at < 0) return;
+  const to = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: tabs.length - 1 }[e.key];
+  if (to === undefined) return;
+  e.preventDefault();
+  const next = tabs[(to + tabs.length) % tabs.length];
+  showTab(next.dataset.tab);
+  next.focus();
+});
 function showTab(name) {
-  for (const btn of document.querySelectorAll("[data-tab]")) btn.setAttribute("aria-selected", String(btn.dataset.tab === name));
+  for (const btn of document.querySelectorAll("[data-tab]")) {
+    btn.setAttribute("aria-selected", String(btn.dataset.tab === name));
+    btn.tabIndex = btn.dataset.tab === name ? 0 : -1;
+  }
   for (const panel of document.querySelectorAll(".tab-panel")) panel.classList.toggle("hidden", panel.id !== `tab-${name}`);
   hideTip();
 }
@@ -347,6 +365,7 @@ function render() {
     ? "Put the hidden camera windows back exactly where they were."
     : "Take every camera window off the screen and pause its video. Show cameras puts them back where they were, even after a restart.";
   hideBtn.disabled = !state.hiddenCount && !state.shownCount;
+  hideBtn.setAttribute("aria-description", hideBtn.dataset.tip);
   for (const input of document.querySelectorAll("[data-setting]")) input.checked = !!state.settings[input.dataset.setting];
   document.getElementById("about-version").textContent = `version ${state.update?.current ?? ""}`;
 
@@ -430,16 +449,16 @@ function renderConsole(c, q) {
   const connected = c.state === "connected";
   const tuckedCount = c.cameras.filter((cam) => cam.listHidden).length;
   const head = el("div", { class: "console-head" },
-    el("span", { class: `dot ${dotClass}`, tip: STATE_LABEL[c.state] ?? c.state }),
+    el("span", { class: `dot ${dotClass}`, role: "img", "aria-label": STATE_LABEL[c.state] ?? c.state, tip: STATE_LABEL[c.state] ?? c.state }),
     el("div", { class: "title" }, el("b", {}, c.name), el("span", {}, subtitle)),
     el("div", { class: "buttons" },
       el("button", {
-        class: "small", disabled: !connected,
+        class: "small", disabled: !connected, "aria-label": `Show all on ${c.name}`,
         tip: `Open a window for every camera on ${c.name}${tuckedCount ? `, except the ${tuckedCount} hidden from the list` : ""}.`,
         onclick: () => panes.invoke("mgr:open-all", c.id).then(refresh),
       }, "Show all"),
       el("button", {
-        class: "small", disabled: !c.openCount,
+        class: "small", disabled: !c.openCount, "aria-label": `Close all on ${c.name}`,
         tip: `Close every ${c.name} window. Each camera remembers its place for next time.`,
         onclick: async () => {
           if (!confirm(`Close ${plural(c.openCount, "camera window")} from ${c.name}?`)) return;
@@ -449,12 +468,12 @@ function renderConsole(c, q) {
       }, "Close all"),
       c.hiddenCount
         ? el("button", {
-          class: "small",
+          class: "small", "aria-label": `Restore ${c.name}'s windows`,
           tip: `Put ${c.name}'s hidden windows back where they were.`,
           onclick: () => panes.invoke("mgr:show-cameras", c.id).then(refresh),
         }, "Restore")
         : el("button", {
-          class: "small", disabled: !c.shownCount,
+          class: "small", disabled: !c.shownCount, "aria-label": `Hide all on ${c.name}`,
           tip: `Take ${c.name}'s windows off the screen and pause their video. Restore puts them back.`,
           onclick: () => panes.invoke("mgr:hide-cameras", c.id).then(refresh),
         }, "Hide all"),
@@ -560,7 +579,7 @@ function renderCamera(cam) {
   else if (!cam.open && inGrid) statusText = inGrid;
 
   const name = el("div", { class: "cam-name" },
-    el("span", { class: `dot ${dot}` }),
+    el("span", { class: `dot ${dot}`, role: "img", "aria-label": dot === "live" ? "online" : dot === "warn" ? "connecting" : "offline" }),
     el("b", { title: cam.name }, cam.name),
     el("small", {}, [cam.model, cam.fisheye ? "360°" : null, statusText].filter(Boolean).join(" · ")),
   );
@@ -585,6 +604,7 @@ function renderCamera(cam) {
   const find = el("button", {
     class: "small ghost",
     disabled: !cam.open,
+    "aria-label": `Find ${cam.name}`,
     tip: cam.hidden ? "Bring this camera's hidden window back." : "Flash this camera's window so you can spot it.",
     onclick: () => panes.invoke("mgr:find-camera", cam.key),
   }, "Find");
@@ -592,6 +612,7 @@ function renderCamera(cam) {
   const hide = el("button", {
     class: "small ghost",
     "data-focus-key": `hide-${cam.key}`,
+    "aria-label": `Hide ${cam.name} from the list`,
     tip: `Hide from this list, for a camera nobody uses right now. It moves to "Hidden from list" at the bottom, and Show all skips it.${cam.open ? " Its window closes." : ""}`,
     onclick: () => panes.invoke("mgr:set-list-hidden", { key: cam.key, hidden: true }).then(refresh),
   }, "Hide from list"); // not just "Hide": Hide all and Hide cameras take windows off screen instead

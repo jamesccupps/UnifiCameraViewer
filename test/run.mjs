@@ -1768,12 +1768,25 @@ async function listSuite() {
     await new Promise((r) => setTimeout(r, 50)); // "close" fires a moment later
     return { withPort: !!withPort, bare, password: f.password.value };
   })()`;
+  // Screen-reader names on the row and console buttons, and the tab strip's arrow keys.
+  const a11y = `(() => {
+    const row = ${lobbyRow};
+    const names = [...row.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"));
+    const showAll = [...${card("Building")}.querySelectorAll("button")].find((b) => b.textContent === "Show all")?.getAttribute("aria-label");
+    const cams = document.querySelector('[data-tab="cameras"]');
+    cams.focus();
+    cams.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    const afterRight = { selected: document.querySelector('[role="tab"][aria-selected="true"]')?.dataset.tab, focused: document.activeElement?.dataset.tab };
+    document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    return { names, showAll, afterRight, back: document.querySelector('[role="tab"][aria-selected="true"]')?.dataset.tab, dot: row.querySelector(".dot")?.getAttribute("aria-label") };
+  })()`;
   const { result, config } = await runApp({
-    userData, results, seconds: 21, extraArgs: ["--mock"],
+    userData, results, seconds: 22, extraArgs: ["--mock"],
     env: {
       PANES_SELFTEST_ACTIONS: JSON.stringify([
         { at: 19500, do: "manager-js", js: consoleDialog }, // after the selection check: the dialog takes the focus
         { at: 20000, do: "manager-js", js: thumbStates },
+        { at: 20600, do: "manager-js", js: a11y },
         { at: 18000, do: "manager-js", js: editorTip },
         { at: 17200, do: "manager-js", js: narrowNames },
         { at: 13300, do: "manager-js", js: markForPatch },
@@ -1795,6 +1808,11 @@ async function listSuite() {
     act(focusQuality)?.value === true && act(rerendered)?.value?.rerendered === true, JSON.stringify([act(focusQuality), act(rerendered)].map((a) => a?.value ?? a?.error)));
   check("an open console menu closes when the list loses focus", act(menuThenBlur)?.value?.opened === true && act(menuThenBlur).value.closed === true,
     JSON.stringify(act(menuThenBlur)?.value ?? act(menuThenBlur)?.error));
+  const ax = act(a11y)?.value;
+  check("buttons say which camera or console they act on, and the tabs follow the arrow keys",
+    ax?.names?.includes("Find Building Lobby") && ax.names.includes("Hide Building Lobby from the list") && ax.showAll === "Show all on Building"
+      && ax.afterRight?.selected === "layouts" && ax.afterRight.focused === "layouts" && ax.back === "cameras" && ax.dot === "online",
+    JSON.stringify(ax ?? act(a11y)?.error));
   const cd = act(consoleDialog)?.value;
   check("the console dialog warns about a port in the address, and Esc clears a typed password",
     cd?.withPort === true && cd.bare === "" && cd.password === "", JSON.stringify(cd ?? act(consoleDialog)?.error));

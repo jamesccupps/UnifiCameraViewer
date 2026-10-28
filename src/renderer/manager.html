@@ -23,14 +23,14 @@
   </header>
 
   <nav class="tabs" role="tablist" aria-label="Sections">
-    <button role="tab" data-tab="cameras" aria-selected="true">Cameras</button>
-    <button role="tab" data-tab="layouts" aria-selected="false">Layouts</button>
-    <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
+    <button role="tab" data-tab="cameras" id="tabbtn-cameras" aria-controls="tab-cameras" aria-selected="true">Cameras</button>
+    <button role="tab" data-tab="layouts" id="tabbtn-layouts" aria-controls="tab-layouts" aria-selected="false" tabindex="-1">Layouts</button>
+    <button role="tab" data-tab="settings" id="tabbtn-settings" aria-controls="tab-settings" aria-selected="false" tabindex="-1">Settings</button>
   </nav>
 
   <main>
     <!-- Cameras -->
-    <section id="tab-cameras" class="tab-panel" role="tabpanel">
+    <section id="tab-cameras" class="tab-panel" role="tabpanel" aria-labelledby="tabbtn-cameras">
       <div class="toolbar">
         <input id="filter" type="search" placeholder="Find a camera…" aria-label="Find a camera" spellcheck="false" autocomplete="off"
           data-tip="Type part of a camera's name or model to narrow the list. Esc clears it.">
@@ -42,7 +42,7 @@
     </section>
 
     <!-- Layouts -->
-    <section id="tab-layouts" class="tab-panel hidden" role="tabpanel">
+    <section id="tab-layouts" class="tab-panel hidden" role="tabpanel" aria-labelledby="tabbtn-layouts">
       <div class="panel">
         <h2>Arrange the windows on this screen</h2>
         <p class="muted small lead">Click a layout to tile the camera windows on the screen this list is on. Cameras keep their order, left to right and top to bottom, so drag the one you want biggest to the top left first. Windows that don't fit stay where they are.</p>
@@ -67,7 +67,7 @@
     </section>
 
     <!-- Settings -->
-    <section id="tab-settings" class="tab-panel hidden" role="tabpanel">
+    <section id="tab-settings" class="tab-panel hidden" role="tabpanel" aria-labelledby="tabbtn-settings">
       <div class="panel settings">
         <h2>Cameras</h2>
         <div class="grid">
