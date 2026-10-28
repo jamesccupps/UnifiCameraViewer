@@ -38,11 +38,19 @@ const STATE_LABEL = {
 const rpcError = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-async function refresh() {
+// Most 3 s polls find nothing changed; rendering then costs ~7 ms for 50 cameras and changes nothing.
+// After a click, though, always render: a toggle whose action changed nothing must snap back.
+// (Called as refresh() or .then(refresh) after actions; the poll and mgr:changed pass onlyIfChanged.)
+let lastStateJson = "";
+async function refresh(opts) {
   if (refreshing) return;
   refreshing = true;
   try {
-    state = await panes.invoke("mgr:state");
+    const next = await panes.invoke("mgr:state");
+    const json = JSON.stringify(next);
+    if (opts?.onlyIfChanged === true && json === lastStateJson) return;
+    lastStateJson = json;
+    state = next;
     render();
   } finally {
     refreshing = false;
@@ -57,7 +65,7 @@ function el(tag, attrs = {}, ...children) {
     else if (k === "tip") node.dataset.tip = v;
     // CSSOM, not a style="" attribute: the page's CSP (style-src 'self') blocks inline style attributes.
     else if (k === "style") Object.assign(node.style, v);
-    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else if (k.startsWith("on")) listen(node, k.slice(2), v);
     else if (k in node && typeof v !== "string") node[k] = v;
     else node.setAttribute(k, v === true ? "" : v);
   }
@@ -66,6 +74,61 @@ function el(tag, attrs = {}, ...children) {
     node.append(c instanceof Node ? c : document.createTextNode(String(c)));
   }
   return node;
+}
+
+// Handlers live in a table on the node, behind one listener per event type, so patch() can hand an
+// existing node the newest handlers (whose closures see the newest state) instead of stale ones.
+function listen(node, type, fn) {
+  node.__on ??= {};
+  if (!(type in node.__on)) node.addEventListener(type, dispatch);
+  node.__on[type] = fn;
+}
+function dispatch(e) {
+  return this.__on?.[e.type]?.call(this, e);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Re-rendering by patching. The list is rendered from scratch on every change and every 3 s poll,
+// but the fresh tree is patched onto what's on screen instead of replacing it. Replacing it lost a
+// click whose mousedown landed on the old node, cleared a text selection, moved the focus, closed an
+// open dropdown on any mgr:changed, and re-decoded every thumbnail. Elements are matched by data-key
+// where they have one (consoles, camera rows), otherwise by tag in order.
+
+const keyOf = (n) => (n.nodeType === 1 ? n.dataset.key ?? null : null);
+// Properties el() sets that aren't (all) reflected in attributes.
+const PROPS = { INPUT: ["checked", "value", "disabled"], SELECT: ["disabled"], OPTION: ["selected", "disabled"], BUTTON: ["disabled"], DETAILS: ["open"], TEXTAREA: ["value"] };
+
+function patchChildren(parent, kids) {
+  const old = [...parent.childNodes];
+  const keyed = new Map(old.filter(keyOf).map((n) => [keyOf(n), n]));
+  let loose = old.filter((n) => !keyOf(n));
+  const next = kids.map((k) => {
+    const key = keyOf(k);
+    const match = key ? keyed.get(key) : loose.find((o) => o.nodeName === k.nodeName);
+    if (!match || match.nodeName !== k.nodeName) return k;
+    if (key) keyed.delete(key);
+    else loose = loose.filter((o) => o !== match);
+    return patch(match, k);
+  });
+  next.forEach((n, i) => { if (parent.childNodes[i] !== n) parent.insertBefore(n, parent.childNodes[i] ?? null); });
+  while (parent.childNodes.length > next.length) parent.lastChild.remove();
+}
+
+function patch(a, b) {
+  if (a.nodeType === 3) {
+    if (a.data !== b.data) a.data = b.data;
+    return a;
+  }
+  for (const { name } of [...a.attributes]) if (!b.hasAttribute(name) && name !== "style") a.removeAttribute(name);
+  for (const { name, value } of [...b.attributes]) if (name !== "style" && a.getAttribute(name) !== value) a.setAttribute(name, value);
+  if (a.style.cssText !== b.style.cssText) a.style.cssText = b.style.cssText;
+  for (const type of Object.keys(b.__on ?? {})) listen(a, type, b.__on[type]);
+  for (const type of Object.keys(a.__on ?? {})) if (!(type in (b.__on ?? {}))) a.__on[type] = undefined;
+  patchChildren(a, [...b.childNodes]);
+  // After the children: a select's value needs its options in place first.
+  for (const p of PROPS[a.nodeName] ?? []) if (a[p] !== b[p]) a[p] = b[p];
+  if (a.nodeName === "SELECT" && a.value !== b.value) a.value = b.value;
+  return a;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -181,7 +244,7 @@ function thumb(cam) {
 function paintThumb(node) {
   const p = previewCache.get(node.dataset.previewKey);
   if (node.hasAttribute("data-offline")) node.replaceChildren(el("span", {}, "offline"));
-  else if (p?.url) node.replaceChildren(el("img", { src: p.url, alt: "" }));
+  else if (p?.url) { if (node.querySelector("img")?.getAttribute("src") !== p.url) node.replaceChildren(el("img", { src: p.url, alt: "" })); }
   else node.replaceChildren();
 }
 
@@ -289,7 +352,8 @@ function render() {
   renderLayouts();
   renderUpdate();
 
-  if (focusedKey) document.querySelector(`[data-focus-key="${CSS.escape(focusedKey)}"]`)?.focus();
+  // Patching keeps the focused element itself; this is for one that was replaced.
+  if (focusedKey && document.activeElement?.dataset?.focusKey !== focusedKey) document.querySelector(`[data-focus-key="${CSS.escape(focusedKey)}"]`)?.focus();
   document.querySelector("main").scrollTop = scroll;
   reattachTip();
   observePreviews();
@@ -316,7 +380,7 @@ function renderConsoles() {
     ? `${matching} of ${plural(all.length, "camera")}`
     : `${plural(all.length - tucked, "camera")} · ${open} open${tucked ? ` · ${tucked} hidden from list` : ""}`;
   document.getElementById("btn-arrange-auto").disabled = !state.onScreenCount;
-  consolesEl.replaceChildren(...(state.consoles.length ? state.consoles.map((c) => renderConsole(c, q)) : [renderEmpty()]));
+  patchChildren(consolesEl, state.consoles.length ? state.consoles.map((c) => renderConsole(c, q)) : [renderEmpty()]);
 }
 
 const matches = (cam, q) => `${cam.name} ${cam.model ?? ""}`.toLowerCase().includes(q);
@@ -434,7 +498,7 @@ function renderConsole(c, q) {
   const list = empty || shown.length
     ? el("ul", { class: `cams${state.settings.showPreviews ? " with-previews" : ""}` }, empty ? el("li", { class: "empty" }, empty) : shown.map((cam) => renderCamera(cam)))
     : null;
-  return el("article", { class: "panel" }, head, msg ? el("p", { class: `console-msg${bad ? " bad" : ""}` }, msg) : null, trust, list, renderTucked(c, tucked));
+  return el("article", { class: "panel", "data-key": c.id }, head, msg ? el("p", { class: `console-msg${bad ? " bad" : ""}` }, msg) : null, trust, list, renderTucked(c, tucked));
 }
 
 /** The collapsed "Hidden from list" section at the bottom of a console's card. */
@@ -446,7 +510,7 @@ function renderTucked(c, tucked) {
     ontoggle: (e) => { if (e.target.open) expandedHidden.add(c.id); else expandedHidden.delete(c.id); },
   },
   el("summary", { tip: "Cameras you hid from this list. Show all and the layout editor skip them. Expand to put one back." }, `Hidden from list (${tucked.length})`),
-  el("ul", { class: "cams" }, tucked.map((cam) => el("li", {},
+  el("ul", { class: "cams" }, tucked.map((cam) => el("li", { "data-key": cam.key },
     el("div", { class: "cam-name" },
       el("span", { class: `dot ${cam.online ? "live" : "bad"}` }),
       el("b", { title: cam.name }, cam.name),
@@ -512,7 +576,7 @@ function renderCamera(cam) {
     onclick: () => panes.invoke("mgr:set-list-hidden", { key: cam.key, hidden: true }).then(refresh),
   }, "Hide");
 
-  return el("li", {}, toggle, state.settings.showPreviews ? thumb(cam) : null, name, channelSelect, find, hide);
+  return el("li", { "data-key": cam.key }, toggle, state.settings.showPreviews ? thumb(cam) : null, name, channelSelect, find, hide);
 }
 
 filterInput.addEventListener("input", () => renderConsoles());
@@ -564,13 +628,13 @@ async function arrange(templateId) {
 function renderArrange() {
   const n = state.onScreenCount;
   const box = document.getElementById("arrange-templates");
-  box.replaceChildren(...state.templates.map((t) => {
+  patchChildren(box, state.templates.map((t) => {
     const cells = t.cells?.length ?? null;
     const fits = cells === null || n <= cells;
     const tipText = cells === null
       ? "Pick the grid with the biggest tiles for the windows on screen, for this screen's size and shape."
       : `Tile up to ${plural(cells, "camera")}${t.cells.length > 1 && t.cells[0][2] > 1 ? ", the first one big" : ""}.${fits ? "" : ` You have ${n} on screen; the last ${n - cells} stay where they are.`}`;
-    return el("button", { class: "tpl", disabled: !n, tip: tipText, "data-template": t.id, onclick: () => arrange(t.id) },
+    return el("button", { class: "tpl", disabled: !n, tip: tipText, "data-template": t.id, "data-key": t.id, onclick: () => arrange(t.id) },
       templatePicture(t),
       el("span", {}, t.label),
       el("small", {}, cells === null ? "best fit" : plural(cells, "camera")));
@@ -578,7 +642,7 @@ function renderArrange() {
 }
 
 function renderGrid(g) {
-  return el("li", { class: "grid-row" },
+  return el("li", { class: "grid-row", "data-key": g.id },
     el("b", { title: g.name }, g.name),
     el("small", {}, `grid window · ${plural(g.count, "camera")}${g.hidden ? " · hidden" : ""}`),
     el("button", {
@@ -601,8 +665,8 @@ function renderGrid(g) {
 
 function renderLayouts() {
   const grids = (state.grids ?? []).map(renderGrid);
-  layoutList.replaceChildren(...(state.layouts.length || grids.length
-    ? [...grids, ...state.layouts.map((l) => el("li", {},
+  patchChildren(layoutList, (state.layouts.length || grids.length
+    ? [...grids, ...state.layouts.map((l) => el("li", { "data-key": l.id },
       el("b", { title: l.name }, l.name),
       el("small", {}, plural(l.count, "camera")),
       el("button", {
@@ -986,10 +1050,10 @@ document.getElementById("btn-quit").addEventListener("click", () => panes.invoke
 // Don't re-render under an open dropdown, menu or dialog. An open dropdown, not a focused one: a
 // quality select keeps the focus after it's used, which once stopped the status updates for hours.
 const busy = () => dialog.open || layoutDialog.open || editorDialog.open || !!openMenuFor || !!document.querySelector("select:open");
-panes.onChanged(() => { if (!busy()) refresh(); }); // else the next poll picks it up
+panes.onChanged(() => { if (!busy()) refresh({ onlyIfChanged: true }); }); // else the next poll picks it up
 // Camera online/offline status isn't pushed; poll lightly while the list is visible.
 setInterval(() => {
   if (document.hidden || busy()) return;
-  refresh();
+  refresh({ onlyIfChanged: true });
 }, 3_000);
 refresh();

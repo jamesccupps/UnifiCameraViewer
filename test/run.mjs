@@ -1408,9 +1408,11 @@ async function gridSuite() {
     applyLabel === "Save and open" && grid?.name === "Wall" && grid.templateId === "2x2" && grid.open === true
       && JSON.stringify(grid.tiles.map((t) => t?.key ?? null)) === JSON.stringify([keys.fish, keys.ramp, null, keys.dock]) && grid.tiles[0].dewarp?.mode === "panorama",
     JSON.stringify({ applyLabel, grid }));
+  // The tiles were hidden and shown again at 7.5 and 9 s and are back live around 12 s, so by the end
+  // they have 2-4 s of video: 15 frames (1 s) is enough to show they decode.
   const end = last(run1.result);
   const tile = (cams, i) => cams[`grid:Wall#${i}`];
-  check("every filled tile is live in the one grid window", [0, 1, 3].every((i) => tile(end, i)?.status === "live" && tile(end, i).decodedFrames >= 30) && !tile(end, 2),
+  check("every filled tile is live in the one grid window", [0, 1, 3].every((i) => tile(end, i)?.status === "live" && tile(end, i).decodedFrames >= 15) && !tile(end, 2),
     JSON.stringify([0, 1, 2, 3].map((i) => tile(end, i) && `${tile(end, i).status}/${tile(end, i).decodedFrames}`)));
   check("the 360° tile shows its own view (Panorama)", tile(end, 0)?.dewarp?.active && tile(end, 0).dewarp.mode === "panorama", JSON.stringify(tile(end, 0)?.dewarp));
   const [b0, b1, b3] = [0, 1, 3].map((i) => tile(end, i)?.bounds);
@@ -1581,7 +1583,7 @@ async function listSuite() {
   fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
     version: 1,
     consoles: [
-      { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Stair"] },
+      { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Stair"], mockDropout: { camera: "Stair", offMs: 9000, onMs: 14000 } },
       { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp"] },
     ],
     windows: {
@@ -1618,14 +1620,42 @@ async function listSuite() {
     return out;
   })()`;
   // A quality select that has just been used keeps the focus; the 3 s status re-render must go on.
+  // (Stair goes offline at ~9 s and back at ~14 s: renders happen only when something changed, and
+  // camera status reaches the list only through the poll.)
   const lobbyRow = `[...document.querySelectorAll(".cams li")].find((l) => l.querySelector(".cam-name b")?.textContent === "Building Lobby")`;
   const focusQuality = `(() => {
     const sel = document.querySelector('[data-focus-key="q-${keys.lobby}"]');
     sel?.focus();
-    ${lobbyRow}.__marked = true;
+    ${lobbyRow}.dataset.probe = "1"; // not in a fresh render: the next re-render's patch removes it
     return document.activeElement === sel;
   })()`;
-  const rerendered = `(() => ({ rerendered: !${lobbyRow}?.__marked, selectFocused: document.activeElement?.tagName === "SELECT" }))()`;
+  const rerendered = `(() => ({ rerendered: !${lobbyRow}?.hasAttribute("data-probe"), selectFocused: document.activeElement?.tagName === "SELECT" }))()`;
+  // Re-renders patch what's on screen, so nodes, a text selection and the focus survive one.
+  const dockRow = lobbyRow.replace("Building Lobby", "Building Dock");
+  const markForPatch = `(() => {
+    const row = ${lobbyRow};
+    row.__marked = true;
+    const img = row.querySelector(".thumb img");
+    if (img) img.__marked = true;
+    const name = ${dockRow}.querySelector(".cam-name b");
+    const range = document.createRange();
+    range.selectNodeContents(name);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+    [...row.querySelectorAll("button")].find((b) => b.textContent === "Find")?.focus();
+    row.dataset.probe = "1";
+    return { img: !!img, selected: getSelection().toString(), focus: document.activeElement?.textContent };
+  })()`;
+  const afterPatch = `(() => {
+    const row = ${lobbyRow};
+    return {
+      rerendered: !row.hasAttribute("data-probe"),
+      sameRow: row.__marked === true,
+      sameImg: row.querySelector(".thumb img")?.__marked === true,
+      selected: getSelection().toString(),
+      focus: document.activeElement?.textContent,
+    };
+  })()`;
   // A "⋯" menu left open (which also holds the re-renders off) closes when the list loses focus.
   const menuThenBlur = `(async () => {
     const d = ${card("Building")}.querySelector("details.menu");
@@ -1636,9 +1666,11 @@ async function listSuite() {
     return { opened, closed: !document.querySelector("details.menu[open]") };
   })()`;
   const { result, config } = await runApp({
-    userData, results, seconds: 14, extraArgs: ["--mock"],
+    userData, results, seconds: 19, extraArgs: ["--mock"],
     env: {
       PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 13300, do: "manager-js", js: markForPatch },
+        { at: 17800, do: "manager-js", js: afterPatch },
         { at: 2500, do: "manager-js", js: clickRow("Building Dock", "Hide") },
         { at: 3500, do: "manager-js", js: readList },
         { at: 4000, do: "manager-js", js: showAll },
@@ -1646,7 +1678,7 @@ async function listSuite() {
         { at: 6500, do: "manager-js", js: clickRow("Building Dock", "Show in list") },
         { at: 7500, do: "manager-js", js: readList },
         { at: 8000, do: "manager-js", js: focusQuality },
-        { at: 11700, do: "manager-js", js: rerendered },
+        { at: 13000, do: "manager-js", js: rerendered },
         { at: 12000, do: "manager-js", js: menuThenBlur },
       ]),
     },
@@ -1656,6 +1688,12 @@ async function listSuite() {
     act(focusQuality)?.value === true && act(rerendered)?.value?.rerendered === true, JSON.stringify([act(focusQuality), act(rerendered)].map((a) => a?.value ?? a?.error)));
   check("an open console menu closes when the list loses focus", act(menuThenBlur)?.value?.opened === true && act(menuThenBlur).value.closed === true,
     JSON.stringify(act(menuThenBlur)?.value ?? act(menuThenBlur)?.error));
+  const marked = act(markForPatch)?.value;
+  const patched = act(afterPatch)?.value;
+  check("a re-render keeps the rows, thumbnails, text selection and focus on screen",
+    marked?.img && marked.selected === "Building Dock" && marked.focus === "Find"
+      && patched?.rerendered && patched.sameRow && patched.sameImg && patched.selected === "Building Dock" && patched.focus === "Find",
+    JSON.stringify({ marked, patched }));
   const [hid, before, all, palette, back, after] = result.actions.map((a) => a.value ?? { error: a.error });
   check("Hide on a camera row hid it from the list", hid === true && JSON.stringify(before?.listed) === JSON.stringify(["Building Lobby", "Building Stair"]),
     JSON.stringify(before ?? hid));
