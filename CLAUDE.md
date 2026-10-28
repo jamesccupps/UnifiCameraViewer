@@ -89,6 +89,8 @@ scripts/verify-release.mjs  Check a release folder like installed copies will (s
 scripts/check-packaged.mjs  Run the built app from a plain and an awkward install folder; checks its pages still get IPC answers (release workflow)
 .github/workflows/release.yml  Tag vX.Y.Z -> test, sign with the UPDATE_SIGNING_KEY secret, verify, smoke-test the installer, publish
 release-notes/vX.Y.Z.md     Release text the workflow publishes
+site/                       The project page, https://jamesccupps.github.io/UnifiCameraViewer/ (see Project page); left out of the build
+.github/workflows/pages.yml Publishes site/ plus assets/icon.png to GitHub Pages when they change on main
 ```
 
 ## How video flows
@@ -414,6 +416,18 @@ For a full update:
    - the relaunched copy finding nothing to install.
 
 Don't use `--mock` for this. The packaged build has no ffmpeg, so mock cameras just fail and retry.
+
+## Project page
+
+`site/index.html` is a hand-written page, modeled on Slate's (jamesccupps/Slate `site/`). `pages.yml` copies `site/` and `assets/icon.png` (as `images/icon.png`) into the Pages artifact and deploys it. The repository's Settings → Pages → Source must be "GitHub Actions". The page fetches the latest version from GitHub's API and links to `releases/latest/download/…`, so a release needs no redeploy. Check its feature cards when a release adds or changes something they describe. `build-win.js` ignores `site/`, so its pictures never reach `app.asar` or the small updates.
+
+The pictures in `site/images/` are from demo mode, never the real cameras (they'd show the sites):
+- Self-test runs with `--mock`, `PANES_MOCK_FISHEYE` set to the ceiling fixture, and a scratch config with the windows or grid at the places wanted.
+- Just before the capture, a `manager-js` action hides `#mock-badge` and swaps the demo labels in the list's text ("Mock G5" → "G5 Bullet", "(mock)" → a console model).
+- The editor shot sets `document.documentElement.style.zoom = 0.8` first, since the list's fixed 860×640 cuts the dialog off.
+- The hero, the grid window and the social preview (1280×640) are put together from those captures in an offscreen Electron window, at the captures' own positions.
+- A hand-written `dewarp` with only `mode` and `mount` shows a blank panorama: give it the full record (`views`, `pano`, `lensFov`, `focus`), as the app writes it.
+- The page itself was checked as full-page offscreen captures at 1280 and 390 px wide, in light and dark.
 
 ## Known limitations / not built
 

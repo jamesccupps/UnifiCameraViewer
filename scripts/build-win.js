@@ -49,7 +49,7 @@ const [appPath] = await withRetry(() => packager({
     ProductName: "Protect Panes",
     InternalName: "ProtectPanes",
   },
-  ignore: [/^\/dist($|\/)/, /^\/scripts($|\/)/, /^\/test($|\/)/, /^\/\.git/, /^\/\.github($|\/)/, /^\/release-notes($|\/)/, /^\/CLAUDE\.md$/, /^\/ROADMAP\.md$/, /^\/\.gitignore$/, /\.log$/],
+  ignore: [/^\/dist($|\/)/, /^\/scripts($|\/)/, /^\/test($|\/)/, /^\/\.git/, /^\/\.github($|\/)/, /^\/release-notes($|\/)/, /^\/site($|\/)/,/^\/CLAUDE\.md$/, /^\/ROADMAP\.md$/, /^\/\.gitignore$/, /\.log$/],
   // Optional: use a pre-downloaded electron-vX-win32-x64.zip instead of fetching it.
   ...(process.env.ELECTRON_ZIP_DIR && { electronZipDir: process.env.ELECTRON_ZIP_DIR }),
 }));

@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Protect Panes: UniFi Protect live view on Windows, one window per camera</title>
+<meta name="description" content="Protect Panes is a free, open source Windows app for UniFi Protect live view: each camera in its own window, anywhere on your screens, or in grid windows, across several consoles. No RTSP, no cloud login.">
+<link rel="canonical" href="https://jamesccupps.github.io/UnifiCameraViewer/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Protect Panes: UniFi Protect live view on Windows">
+<meta property="og:description" content="Free and open source. Each camera in its own window, anywhere on your screens, or in grid windows, across several consoles. No RTSP, no cloud login.">
+<meta property="og:url" content="https://jamesccupps.github.io/UnifiCameraViewer/">
+<meta property="og:image" content="https://jamesccupps.github.io/UnifiCameraViewer/images/social-preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" href="images/icon.png">
+<link rel="apple-touch-icon" href="images/icon.png">
+<meta name="color-scheme" content="light dark">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Protect Panes",
+  "description": "UniFi Protect live view on Windows: each camera in its own window, anywhere on your screens, or in grid windows, across several consoles. No RTSP, local login, 360° dewarping, layouts with Protect liveview import, signed in-place updates.",
+  "url": "https://jamesccupps.github.io/UnifiCameraViewer/",
+  "codeRepository": "https://github.com/jamesccupps/UnifiCameraViewer",
+  "downloadUrl": "https://github.com/jamesccupps/UnifiCameraViewer/releases/latest",
+  "applicationCategory": "MultimediaApplication",
+  "applicationSubCategory": "Security camera viewer",
+  "operatingSystem": "Windows 10, Windows 11",
+  "image": "https://jamesccupps.github.io/UnifiCameraViewer/images/social-preview.png",
+  "screenshot": "https://jamesccupps.github.io/UnifiCameraViewer/images/hero.jpg",
+  "license": "https://opensource.org/licenses/MIT",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "author": { "@type": "Person", "name": "James Cupps", "url": "https://jamesccupps.github.io/" }
+}
+</script>
+<style>
+  :root {
+    --bg: #f6f8fa; --panel: #ffffff; --text: #1b2129; --muted: #59636f; --line: #dfe4ea;
+    --accent: #0b63b6; --code: #eef1f5; --hero: linear-gradient(160deg, #123150 0%, #0e141b 100%);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111417; --panel: #1a1e23; --text: #e6e9ee; --muted: #9aa4b1; --line: #2a3038; --accent: #5aaaf7; --code: #22272e; }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 "Segoe UI", system-ui, -apple-system, Ubuntu, "DejaVu Sans", sans-serif; }
+  a { color: var(--accent); }
+  code { background: var(--code); border-radius: 4px; padding: 1px 5px; font: 14px Consolas, "DejaVu Sans Mono", monospace; overflow-wrap: anywhere; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+  header.hero { background: var(--hero); color: #fff; padding: 56px 0 40px; }
+  .brand { display: flex; align-items: center; gap: 16px; }
+  .brand img { width: 64px; height: 64px; }
+  .brand h1 { margin: 0; font-size: 44px; font-weight: 600; letter-spacing: -0.5px; }
+  .tagline { font-size: 22px; margin: 18px 0 6px; max-width: 700px; }
+  .facts { color: #a9c3dd; margin: 0 0 26px; max-width: 700px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; padding: 12px 22px; border-radius: 8px; font-weight: 600;
+         text-decoration: none; background: #fff; color: #123150; font-size: 17px; }
+  .btn:hover { background: #e6f0fa; }
+  .btn.ghost { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.45); font-weight: 500; font-size: 15px; padding: 10px 16px; }
+  .btn.ghost:hover { background: rgba(255,255,255,.1); }
+  .btn small { font-weight: 400; opacity: .75; font-size: 13px; }
+  .sub { color: #a9c3dd; font-size: 14px; margin-top: 12px; }
+  .sub a { color: #d8e8f7; }
+  .demo { margin: 34px 0 0; }
+  .demo img { width: 100%; height: auto; display: block; border-radius: 8px; box-shadow: 0 18px 50px rgba(0,0,0,.45); }
+  .demo figcaption { color: #8fa8c2; font-size: 13px; margin-top: 10px; }
+  section { padding: 44px 0 8px; }
+  h2 { font-size: 26px; margin: 0 0 18px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+  .card h3 { margin: 0 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  .card p + p { margin-top: 8px; }
+  .card ul { margin: 6px 0 0; padding-left: 20px; color: var(--muted); font-size: 15px; }
+  .shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 20px; }
+  .shots figure { margin: 0; }
+  .shots img { width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); display: block; }
+  .shots figcaption { color: var(--muted); font-size: 14px; margin-top: 6px; }
+  .note { color: var(--muted); font-size: 14px; margin: 14px 0 0; }
+  .install { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  footer { color: var(--muted); font-size: 14px; padding: 40px 0 50px; border-top: 1px solid var(--line); margin-top: 44px; }
+  footer p { margin: 0 0 6px; }
+  @media (max-width: 600px) {
+    header.hero { padding: 36px 0 28px; }
+    .brand h1 { font-size: 34px; }
+    .brand img { width: 52px; height: 52px; }
+    .tagline { font-size: 19px; }
+  }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wrap">
+    <div class="brand"><img src="images/icon.png" alt=""><h1>Protect Panes</h1></div>
+    <p class="tagline">UniFi Protect live view on Windows, one window per camera.</p>
+    <p class="facts">Put each camera anywhere on your screens, at any size, next to whatever else you run, or gather them in grid windows. Several consoles at once, with no RTSP and no cloud login.</p>
+    <div class="actions">
+      <a class="btn" id="primary" href="https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download/ProtectPanes-Setup.exe">Download for Windows <small id="primary-note">ProtectPanes-Setup.exe</small></a>
+      <a class="btn ghost" id="secondary" href="https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download/ProtectPanes-win32-x64.zip">Portable zip</a>
+      <a class="btn ghost" href="https://github.com/jamesccupps/UnifiCameraViewer">Source on GitHub</a>
+    </div>
+    <p class="sub"><span id="version">Free and open source (MIT).</span> Windows 10 and 11 (64-bit). <a href="https://github.com/jamesccupps/UnifiCameraViewer/releases">All releases</a></p>
+    <figure class="demo">
+      <img src="images/hero.jpg" width="2080" height="1083" alt="Camera windows of several sizes on a desktop, a 360° camera in Quad view among them, with the Protect Panes camera list in front showing two consoles and their cameras">
+      <figcaption>Demo mode: test patterns and a synthetic 360° image stand in for camera video.</figcaption>
+    </figure>
+  </div>
+</header>
+
+<main class="wrap">
+  <section>
+    <h2>Your cameras, where you want them</h2>
+    <div class="grid">
+      <div class="card"><h3>One window per camera</h3><p>Borderless windows you place and size anywhere, on any monitor. They go back to the same places at every start, and when an unplugged monitor comes back. Opening a camera doesn't take the focus from the program you're working in.</p></div>
+      <div class="card"><h3>Grid windows and layouts</h3><p>Drag cameras onto a grid (1 + 5, 2 + 8, 4 × 4 and more) and open it as one window you can maximize or put in full screen, or as separate windows. Switch layouts from the tray. Double-click a tile to enlarge it.</p></div>
+      <div class="card"><h3>Imports Protect liveviews</h3><p>Open a liveview saved on the console as a grid, with the same layout and each camera in its tile. Tiles that cycle through several cameras in Protect keep cycling.</p></div>
+      <div class="card"><h3>No RTSP, no cloud</h3><p>Video comes over the console's own livestream connection, the one Protect's web interface uses, so RTSPS can stay off on every camera. It signs in by IP with a local, view-only account: no UI.com account, no MFA prompt.</p></div>
+      <div class="card"><h3>360° cameras</h3><p>Fisheye cameras open in Quad view: four virtual pan-tilt-zoom views of one stream. Drag to aim, scroll to zoom, or switch to Single view or Panorama. It's done on the graphics chip, with no extra bandwidth.</p></div>
+      <div class="card"><h3>Light on an office PC</h3><p>GPU video decoding, Medium quality by default, and each tile picks Low, Medium or High from its size. Minimized windows stop streaming. Runs on an office PC with integrated Intel graphics.</p></div>
+      <div class="card"><h3>Several consoles</h3><p>Connects to several UniFi OS consoles at once (UDM, UNVR, Cloud Key) and lists each one's cameras with a preview. The camera on a UniFi Access door reader (UA G3 Pro) plays too.</p></div>
+      <div class="card"><h3>Careful with your network</h3><p>It remembers each console's security certificate from the first connection and stops if a different one shows up, so a device posing as the console doesn't get the password. Passwords are encrypted for your Windows account.</p></div>
+      <div class="card"><h3>Signed updates</h3><p>It checks for updates and installs them with one click. A download is installed only if it carries the release signature and matches its signed checksum. Most updates are a couple of MB.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>A closer look</h2>
+    <div class="shots">
+      <figure><img src="images/camera-list.png" width="1269" height="905" alt="The camera list: two consoles, each camera with a preview, a quality choice, Find and Hide from list" loading="lazy"><figcaption>The camera list: every console's cameras, with previews. Flip a switch to open a camera's window.</figcaption></figure>
+      <figure><img src="images/layout-editor.png" width="1269" height="905" alt="The layout editor with a 1 + 5 grid, each tile filled with a camera's picture" loading="lazy"><figcaption>The layout editor: drag cameras onto a grid, then open it as one grid window or as separate windows.</figcaption></figure>
+      <figure><img src="images/grid-window.jpg" width="1600" height="914" alt="A grid window in a 1 + 5 layout, a 360° camera's panorama in the big tile" loading="lazy"><figcaption>A grid window, 1 + 5, with a 360° camera as a panorama in the big tile.</figcaption></figure>
+      <figure><img src="images/360-quad.jpg" width="1440" height="810" alt="A 360° camera window in Quad view, four views of one fisheye picture, with the time in the corner" loading="lazy"><figcaption>A 360° camera in Quad view. The app adds the time, since dewarping cuts out the camera's own.</figcaption></figure>
+    </div>
+    <p class="note">All pictures are from the app's demo mode: test patterns and a synthetic 360° image stand in for camera video.</p>
+  </section>
+
+  <section>
+    <h2>Install</h2>
+    <div class="install">
+      <div class="card" id="windows">
+        <h3>Installer (recommended)</h3>
+        <p><a href="https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download/ProtectPanes-Setup.exe">Download ProtectPanes-Setup.exe</a> and run it. It installs for your Windows user only, with no admin prompt, adds Start menu and desktop shortcuts, and uninstalls from Settings → Apps.</p>
+        <p>The app isn't code-signed, so Windows shows <em>Windows protected your PC</em> the first time: click <strong>More info</strong>, then <strong>Run anyway</strong>.</p>
+      </div>
+      <div class="card" id="portable">
+        <h3>Portable</h3>
+        <p><a href="https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download/ProtectPanes-win32-x64.zip">Download the zip</a>, unzip it somewhere in your own profile, such as <code>%LOCALAPPDATA%\Programs\Protect Panes</code>, and run <code>ProtectPanes.exe</code>.</p>
+        <p>Avoid <code>C:\Program Files</code>, which updates can't write to, and folders at the root of <code>C:\</code>, which other accounts on the PC can change.</p>
+      </div>
+      <div class="card" id="setup">
+        <h3>Set up each console</h3>
+        <p>In UniFi OS, add a user restricted to <strong>local access only</strong> and give it <strong>View Only</strong> access in Protect. A UI.com account won't work: those need MFA.</p>
+        <p>Then click <strong>Add console</strong> in Protect Panes and enter a name, the console's IP address, and that user's name and password.</p>
+      </div>
+    </div>
+    <p class="note">You need a UniFi OS console running Protect on the same network as the PC. Cameras set to H.265 need a PC that decodes HEVC in hardware; otherwise set them to Standard (H.264) in Protect. Live view only: there's no playback, timeline or events.</p>
+  </section>
+
+  <section>
+    <h2>Feedback</h2>
+    <p>Found a bug or have an idea? <a href="https://github.com/jamesccupps/UnifiCameraViewer/issues">Open an issue</a> on GitHub. The connection log (camera list → Settings → Open log folder) helps with anything that won't connect.</p>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Protect Panes is free and open source under the MIT license, made by <a href="https://jamesccupps.github.io/">James Cupps</a>. <a href="https://github.com/jamesccupps/UnifiCameraViewer">github.com/jamesccupps/UnifiCameraViewer</a></p>
+    <p>An independent project, not made, endorsed or supported by Ubiquiti. UniFi and UniFi Protect are trademarks of Ubiquiti Inc.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // The big button is for a Windows PC. Elsewhere it says so, and a phone gets the release page to send to a PC.
+  var ua = navigator.userAgent || "";
+  var platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+  // (an iPad says it's a Mac, but has a touch screen)
+  var phone = /Android|iPhone|iPad|iPod/i.test(ua) || (navigator.userAgentData && navigator.userAgentData.mobile) ||
+    (/Mac/i.test(platform) && navigator.maxTouchPoints > 1);
+  var windows = /Win/i.test(platform + " " + ua) && !phone;
+  var primary = document.getElementById("primary"), note = document.getElementById("primary-note");
+  if (phone) {
+    primary.href = "https://github.com/jamesccupps/UnifiCameraViewer/releases/latest";
+    primary.firstChild.nodeValue = "Get it for your PC ";
+    note.textContent = "Windows 10 and 11";
+  } else if (!windows) {
+    note.textContent = "Windows 10 and 11 only";
+  }
+  // The latest version, from GitHub (the page works without it).
+  try {
+    fetch("https://api.github.com/repos/jamesccupps/UnifiCameraViewer/releases/latest").then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      if (d && d.tag_name) document.getElementById("version").textContent = "Version " + d.tag_name.replace(/^v/, "") + ", free and open source (MIT).";
+    }).catch(function () {});
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>

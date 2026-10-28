@@ -2,6 +2,11 @@
 
 UniFi Protect live view, one camera per window. Place each window anywhere on the screen, at any size, next to whatever else you run (exacqVision, etc.). Positions are remembered. Connects to several consoles at once (e.g. Building and Garage).
 
+**[⬇ Download for Windows](https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download/ProtectPanes-Setup.exe)** (installer, 64-bit Windows 10 or 11) · [Portable zip](https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download/ProtectPanes-win32-x64.zip) · [All releases](https://github.com/jamesccupps/UnifiCameraViewer/releases) · [Website](https://jamesccupps.github.io/UnifiCameraViewer/)
+
+![Camera windows of several sizes, a 360° camera in Quad view among them, with the camera list in front](site/images/hero.jpg)
+*Demo mode: test patterns and a synthetic 360° image stand in for camera video.*
+
 - **No RTSP/RTSPS.** Video comes over the console's own livestream connection, the same one Protect's web UI uses. You can leave RTSPS turned off on every camera.
 - **Direct, local login.** Signs into each console by IP with a local account. No UI.com, no cloud, no MFA prompt.
 - **Light on resources.** One process, GPU video decoding, Medium quality by default, and minimized windows stop streaming.
