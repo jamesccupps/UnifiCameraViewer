@@ -929,7 +929,7 @@ function openDialog(c) {
   form.host.value = c?.host ?? "";
   form.username.value = c?.username ?? "";
   form.password.value = "";
-  form.password.placeholder = c ? "Leave blank to keep the saved password" : "";
+  form.password.placeholder = c ? "Leave blank to keep the saved password (not if the address changes)" : "";
   form.password.required = !c;
   dialogError.textContent = "";
   hideTip();

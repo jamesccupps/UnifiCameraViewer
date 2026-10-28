@@ -253,7 +253,9 @@ async function saveConsole(input) {
     startConnection(cfg);
   } else {
     if (consoleKey(host) !== consoleKey(cfg.host)) {
-      // Another address is another device: its certificate is trusted afresh.
+      // Another address is another device. The saved password isn't sent to it unasked (a mistyped
+      // IP would hand it to whatever answers there), and its certificate is trusted afresh.
+      if (!password) throw new Error("Enter the password again for the new address.");
       certSeen.delete(consoleKey(cfg.host));
       delete cfg.certSha256;
     }

@@ -2016,15 +2016,23 @@ async function e2eSuite() {
       const card = [...document.querySelectorAll("article.panel")].find((a) => a.querySelector(".console-head b")?.textContent === "Garage");
       return { button: [...card.querySelectorAll("button")].some((b) => b.textContent.startsWith("Trust the new certificate")), msg: card.querySelector(".console-msg")?.textContent ?? "" };
     })()`;
+    // Pointing a saved console at another address without typing the password again: refused, so the
+    // saved password never goes to whatever answers there.
+    const moveHost = `panes.invoke("mgr:save-console", { id: ${JSON.stringify(ids.B)}, name: "Building", host: "127.0.0.1:${P.garage}", username: "viewer", password: "" })
+      .then(() => "saved", (err) => String(err.message))`;
     const run2 = await runApp({
       userData, results: path.join(userData, "results-2"), seconds: 11,
       env: {
         PANES_SELFTEST_ACTIONS: JSON.stringify([
           { at: 5000, do: "manager-js", js: readTrust },
           { at: 6500, do: "manager-js", js: `panes.invoke("mgr:trust-cert", ${JSON.stringify(ids.G)}).then(() => true)` },
+          { at: 8000, do: "manager-js", js: moveHost },
         ]),
       },
     });
+    const moved = run2.result.actions.find((a) => a.act.js === moveHost)?.value;
+    check("a console's address can't be changed without typing its password again",
+      /password again/.test(moved ?? "") && run2.config.consoles.find((c) => c.id === ids.B)?.host === `127.0.0.1:${P.building}`, JSON.stringify(moved));
     clearTimeout(snap2);
     const shown = run2.result.actions.find((a) => a.act.js === readTrust)?.value;
     check("a console presenting a different certificate is refused before the login is sent",
