@@ -293,7 +293,7 @@ window.Dewarper = (() => {
       const found = detectCircle(this.video);
       if (found) {
         this.detectedCircle = found;
-        this.onChange({ circle: found });
+        this.onChange({ circle: found, auto: true }); // a first-view guess: a circle set elsewhere wins
       }
     }
 

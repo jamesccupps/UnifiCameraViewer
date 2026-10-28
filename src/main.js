@@ -525,10 +525,12 @@ function applyLayout(id) {
   for (const [key, saved] of want) {
     const entry = (store.data.windows[key] ??= { open: false, bounds: null, channel: null, onTop: false, name: "" });
     const restart = entry.channel !== (saved.channel ?? null) || (entry.range ?? "auto") !== (saved.range ?? "auto");
+    const lens = lensOf(entry.dewarp); // the camera's lens, not the one this layout was saved with
     for (const f of LAYOUT_FIELDS) {
       if (saved[f] === undefined) delete entry[f];
       else entry[f] = structuredClone(saved[f]);
     }
+    if (entry.dewarp && Object.keys(lens).length) applyLens(entry.dewarp, lens);
     entry.channel ??= null;
     const cw = camWins.get(key);
     if (cw && !cw.win.isDestroyed()) {
@@ -997,6 +999,37 @@ function defaultDewarp(mount, mode = "quad") {
   };
 }
 
+// The lens (where its image circle sits, how it's mounted, how wide it sees) belongs to the camera,
+// not to one view of it. A window, each layout and each grid tile keeps its own dewarp copy, so a fix
+// made in one (Adjust image circle in the window) was undone by the next layout switch and never
+// reached the camera's grid tiles. Lens edits now go to every copy, and applying a layout keeps the
+// lens the camera has.
+const LENS_FIELDS = ["mount", "lensFov", "circle"];
+const lensOf = (d) => Object.fromEntries(LENS_FIELDS.filter((f) => d?.[f] !== undefined).map((f) => [f, structuredClone(d[f])]));
+
+function applyLens(d, lens) {
+  if (lens.mount && lens.mount !== d.mount) { // other geometry: that copy's views start over
+    d.views = defaultViews(lens.mount);
+    d.pano = defaultDewarp(lens.mount).pano;
+    d.focus = -1;
+  }
+  Object.assign(d, structuredClone(lens));
+}
+
+const lensCopies = (key) => [
+  store.data.windows[key]?.dewarp,
+  ...store.data.layouts.map((l) => l.windows[key]?.dewarp),
+  ...store.data.grids.flatMap((g) => g.tiles.filter((t) => t?.key === key).map((t) => t.dewarp)),
+].filter(Boolean);
+
+function shareLens(key, lens, from = null) {
+  for (const d of lensCopies(key)) applyLens(d, lens);
+  for (const cw of players()) if (cw.key === key && cw !== from) refreshCameraMeta(cw);
+}
+
+/** A circle the camera already has in another copy (its window first), or null. */
+const knownCircle = (key, except) => structuredClone(lensCopies(key).find((d) => d !== except && d.circle)?.circle ?? null);
+
 /** First time a 360° camera is shown, switch it to quad view with the mount Protect reports. */
 function ensureDewarp(cw, cam) {
   const entry = entryOf(cw);
@@ -1019,6 +1052,7 @@ function updateDewarp(cw, changes) {
   }
   Object.assign(d, changes);
   entry.dewarp = d;
+  if (changes.mount || changes.lensFov) shareLens(cw.key, lensOf(d), cw);
   store.save();
   refreshCameraMeta(cw);
 }
@@ -1049,7 +1083,14 @@ function saveDewarpFromRenderer(cw, patch) {
     const x = num(patch.circle.x, 0, 1);
     const y = num(patch.circle.y, 0, 1);
     const r = num(patch.circle.r, 0.05, 1.5);
-    if (x !== null && y !== null && r !== null) d.circle = { x, y, r };
+    if (x !== null && y !== null && r !== null) {
+      // The page guesses a circle on first view when its copy has none. If the camera already has
+      // one (fixed by hand in its window, say), that one wins rather than the guess spreading.
+      const known = patch.auto === true && knownCircle(cw.key, d);
+      d.circle = known || { x, y, r };
+      if (known) refreshCameraMeta(cw);
+      else shareLens(cw.key, { circle: d.circle }, cw);
+    }
   }
   store.save();
 }

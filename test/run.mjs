@@ -1243,6 +1243,59 @@ async function gridSuite() {
   check("Close grid closes it, and it stays closed", closeAct?.ok && run2.config.grids[0].open === false && !Object.keys(last(run2.result)).some((k) => k.startsWith("grid:")),
     `${closeAct?.error ?? ""} open=${run2.config.grids[0].open}`);
   console.log(`  results: ${userData}`);
+
+  // The lens belongs to the camera, not to one view of it. A 360° camera is in a window, a grid tile
+  // and a saved layout, all with image circle A. The window's circle is fixed to B (what Adjust image
+  // circle sends), then the layout is applied: the tile must have B too, and the layout mustn't
+  // bring A back.
+  const lensDir = tmpDir("grid-lens");
+  const circleA = { x: 0.5, y: 0.5, r: 0.45 };
+  const quad = (circle) => ({ mode: "quad", mount: "ceiling", lensFov: 180, circle, views: [0, 90, -90, 180].map((pan) => ({ pan, tilt: -35, fov: 62 })), focus: -1, pano: { pan: 0, tilt: -35 } });
+  // Garage's 360° camera has its circle (B) fixed in a closed grid's tile, and its window opens for
+  // the first time: the window's first-view guess must not replace B.
+  const fishB = `${B}/bbbbbbbb-cam360`;
+  fs.writeFileSync(path.join(lensDir, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [
+      { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby"] },
+      { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp"] },
+    ],
+    windows: {
+      [keys.fish]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2, dewarp: quad(circleA) },
+      [fishB]: { open: true, bounds: { x: 0, y: 300, width: 480, height: 270 }, channel: 2 },
+    },
+    grids: [
+      { id: "grid-1", name: "Lens", templateId: "2x2", bounds: { x: 500, y: 0, width: 640, height: 400 }, open: true, tiles: [{ key: keys.fish, channel: 2, dewarp: quad(circleA) }, null, null, null] },
+      { id: "grid-2", name: "Garage grid", templateId: "2x2", bounds: { x: 500, y: 420, width: 640, height: 400 }, open: false, tiles: [{ key: fishB, channel: 2, dewarp: quad(CEILING_TRUTH) }, null, null, null] },
+    ],
+    layouts: [{ id: "lay-1", name: "Day", windows: {
+      [keys.fish]: { bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2, dewarp: quad(circleA) },
+      [fishB]: { bounds: { x: 0, y: 300, width: 480, height: 270 }, channel: 2, dewarp: quad(null) },
+    } }],
+    settings: { startHidden: true },
+  }, null, 2));
+  const readCircle = "window.__panesStats().dewarp.circle";
+  const run3 = await runApp({
+    userData: lensDir, results: path.join(lensDir, "results"), seconds: 11, extraArgs: ["--mock"],
+    env: {
+      ...env,
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 1500, do: "camera-js", win: 0, js: `panes.send("cam:dewarp", { circle: ${JSON.stringify(CEILING_TRUTH)} }), true` },
+        { at: 4000, do: "tray-click", label: "Day" },
+        { at: 8500, do: "camera-js", win: 0, js: readCircle },
+        { at: 8500, do: "camera-js", tile: "Lens#0", js: readCircle },
+        { at: 8500, do: "camera-js", win: 1, js: readCircle },
+      ]),
+    },
+  });
+  const isB = (c) => !!c && ["x", "y", "r"].every((k) => Math.abs(c[k] - CEILING_TRUTH[k]) < 1e-6);
+  const read = (pick) => run3.result.actions.find((a) => a.act.js === readCircle && pick(a.act));
+  const pages = { window: read((a) => a.win === 0)?.value, tile: read((a) => a.tile === "Lens#0")?.value, garageWindow: read((a) => a.win === 1)?.value };
+  const saved = { window: run3.config.windows[keys.fish]?.dewarp?.circle, tile: run3.config.grids[0].tiles[0]?.dewarp?.circle, garageWindow: run3.config.windows[fishB]?.dewarp?.circle, garageTile: run3.config.grids[1].tiles[0]?.dewarp?.circle };
+  check("a fixed image circle reaches the camera's grid tiles, and applying a layout keeps it",
+    isB(pages.window) && isB(pages.tile) && isB(saved.window) && isB(saved.tile), JSON.stringify({ pages, saved }));
+  check("a window's first-view circle guess doesn't replace a circle fixed in a grid tile",
+    isB(pages.garageWindow) && isB(saved.garageWindow) && isB(saved.garageTile), JSON.stringify({ pages, saved }));
 }
 
 /**

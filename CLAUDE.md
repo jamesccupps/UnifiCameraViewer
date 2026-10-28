@@ -103,7 +103,7 @@ release-notes/vX.Y.Z.md     Release text the workflow publishes
 
 Adding a channel means editing **both** the preload allowlist and `registerIpc()` in main.js. Main identifies camera pages (windows and grid tiles) by `event.sender.id` → `senders` → player, never by anything the renderer sends.
 
-- **Camera → main:** `cam:ready`, `cam:aspect {width,height}`, `cam:reset`, `cam:context-menu`, `cam:toggle-top`, `cam:close`, `cam:dewarp {views?, pano?, focus?, circle?}`, `cam:picture {brightness, contrast}`
+- **Camera → main:** `cam:ready`, `cam:aspect {width,height}`, `cam:reset`, `cam:context-menu`, `cam:toggle-top`, `cam:close`, `cam:dewarp {views?, pano?, focus?, circle?, auto?}`, `cam:picture {brightness, contrast}`
 - **Main → camera:** `cam:init`, `cam:media`, `cam:status`, `cam:meta`, `cam:highlight`, `cam:command {cmd: "calibrate" | "autodetect" | "picture"}`
 - **Grid window page:** in `grid:layout {rects, filled}`, out `grid:context-menu tileIndex|null`.
 - **Camera list (invoke):** `mgr:state`, `mgr:save-console`, `mgr:remove-console`, `mgr:reconnect`, `mgr:open-camera`, `mgr:close-camera`, `mgr:find-camera`, `mgr:set-channel`, `mgr:set-setting`, `mgr:bring-to-front`, `mgr:reset-positions`, `mgr:open-all`, `mgr:hide-cameras consoleId|null`, `mgr:show-cameras consoleId|null`, `mgr:apply-all {consoleId|null, changes}`, `mgr:save-layout name`, `mgr:apply-layout id`, `mgr:delete-layout id`, `mgr:import-liveview {consoleId, liveviewId}`, `mgr:set-update-source`, `mgr:check-update`, `mgr:install-update`, `mgr:close-all consoleId`, `mgr:arrange {templateId}`, `mgr:save-editor-layout {id?, as: "windows" | "grid", name, displayId, templateId, cells: [{key, mode} | null], apply}`, `mgr:set-list-hidden {key, hidden}`, `mgr:preview key` (→ `{url, at}` or null), `mgr:open-grid id`, `mgr:close-grid id`, `mgr:delete-grid id`, `mgr:open-log-folder`, `mgr:open-project` (a fixed URL; the renderer can't pass one), `mgr:quit`. `changes` goes through `cleanChanges()`, which keeps only `channel`, `onTop`, `hideName`, `clock`, `range` and `picture`.
@@ -128,6 +128,11 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
 - Angles are degrees. `fov` is vertical FOV. Pan wraps to (-180, 180]; tilt clamps to ±90.
 - `circle` is normalized: `x` = center x / video width, `y` = center y / video height, `r` = radius / video height.
 - `undefined` means never decided. On first view, `ensureDewarp()` turns on quad for fisheye cameras. `null` means a normal camera.
+- **The lens is per camera, the view is per copy.** `mount`, `lensFov` and `circle` describe the physical lens. The window entry, every layout and every grid tile keep their own `dewarp` copy. Before 1.4.3 a circle fixed in the window was undone by the next layout switch and never reached the camera's grid tiles.
+  - `shareLens()` writes a lens edit into every copy, open or closed: a circle from Adjust image circle or Auto-detect, a mount or lens FOV from the menu. Another mount resets that copy's views.
+  - `applyLayout()` keeps the lens the camera has, not the one the layout was saved with.
+  - A page guesses a circle on first view when its copy has none, and sends it with `auto: true`. If another copy already has a circle, that one wins and the guess isn't spread (`knownCircle()`).
+  - The grid suite's third run checks all three.
 
 ## Gotchas
 
