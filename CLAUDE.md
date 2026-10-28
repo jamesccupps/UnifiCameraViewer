@@ -56,6 +56,7 @@ src/main.js                 App lifecycle, camera windows and grid windows' play
 src/console-connection.js   One logged-in console (ProtectClient), connect/backoff, state; channelList / resolveChannel / fisheyeInfo
 src/cert-pins.js            TLS trust on first use for the consoles: wraps tls.connect, checks each console's certificate SHA-256
 src/camera-stream.js        Pumps one camera's livestream subscription to its page (init/media/status), reconnect handling
+src/bare-livestream.js      Livestreams for UniFi Access cameras (UA G3 Pro): reads Protect's socket itself and builds the fMP4 (no Electron imports)
 src/avc-range.js            Rewrites the H.264 SPS in the init segment to declare full color range (see Gotchas)
 src/grid.js                 Screen layouts (1, 2x2, 1+5 … 5x5, Auto), cell rects, aspect fit, reading order, quality-for-tile-size (no Electron imports)
 src/grid-window.js          Grid windows: one framed window, a WebContentsView per tile running camera.html?tile=1, tile geometry
@@ -226,6 +227,18 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
   - The editor opens it as new, set to one grid window, with "Open as" still changeable. Saving goes through the editor's normal path. So separate windows get the editor's tile rects and quality from tile size, not the old even grid at each window's current quality.
   - Unverified: that Protect's slot order for an uneven layout (1 + 5, 2 + 8, 1 + 12) matches the editor's cell order (big tiles first, then reading order). Only 2x2 liveviews have been checked against the library, using the fake console's. Check an uneven liveview on a real console.
   - The fake console serves one 2x2 liveview, including an empty slot and a cycling slot. The mock serves whatever `mockLiveviews` lists (a slot can be an array of camera indexes; `seconds` per liveview).
+- **UniFi Access cameras (bare-livestream.js).** A UA G3 Pro door reader (`isAdoptedByAccessApp`) stayed black. Found on the owner's site, 2026-10-28, by logging the raw socket:
+  - Its livestream socket sends `codec`, `init`, one `begin`, then only `video` frames: one H.264 access unit each (4-byte NAL lengths), ~30 a second. There's no `moof`/`mdat`/`end`, no timestamps (`extendedVideoMetadata` changes nothing) and no audio, though the init declares an AAC track and the codec string says `mp4a.40.2`.
+  - The library emits a media segment only on `end`, so it buffered forever and stayed `connecting` until its 30 s establishing deadline, then retried. Protect *does* send the video: 1.5 MB in 10 s.
+  - Without `allowPartialGOP` and `progressive` the reader sends nothing after the init, at any `fragmentDurationMillis`. So `livestreamParams()` copies the library's request exactly.
+  - `CameraStream` uses `conn.bareLivestream()` for these cameras. It negotiates the socket URL through the library's `client.transport` (public API), as the library's own sessions do, and opens it with undici and its own agent (certificate checks off; cert-pins.js still checks the pin).
+  - Each access unit becomes one moof+mdat (`fragment()`). The init loses its audio trak and trex (`videoOnlyInit()`), because the page's player waits for audio it's told about. The codec string loses `mp4a`.
+  - Timing: each frame lasts the channel's nominal frame time plus a quarter of the drift from the wall clock, clamped to 0.5-2x. Frames arrive in bursts (a keyframe spans messages), so arrival times alone would be jerky. The timeline is contiguous, so there are no gaps to stall on.
+  - A stream that sends moof/mdat/end within its first 15 video frames is treated as framed: segments are assembled like the library's, with the init left alone. No Access camera has been seen doing this; it's there so one that streams normally still plays.
+  - A socket the console closes, or 10 s with no frames, ends the stream with an error, so `CameraStream` waits 3 s before retrying instead of reconnecting in a tight loop.
+  - No pooling: the same reader in a window and a grid tile is two sockets.
+  - The fake console's `FAKE_ACCESS=1` adds a door reader (cam4) that streams this way (e2e, on Garage). `test/connection-unit.mjs` feeds ffmpeg's real fMP4 through a fake socket and checks the decode, the timeline and the framed fallback.
+  - Only a UA G3 Pro has been seen. Other Access devices with cameras (intercoms, G3 Reader Pro) are untested.
 - **Cycling grid tiles (grid-window.js).**
   - A tile with `cycle: {seconds, then: [{key, ...tile settings}]}` shows its own camera, then each of `then`, every `seconds` (clamped to 3-3600). `tileMembers(tile)` is `[tile, ...then]`; anything that looks for a camera in a grid (lens sharing, "in grid X", Put a camera here, removing a console) goes through it.
   - Each member is a settings record of its own, and the player's `cw.tile` is the member it shows. So quality, picture and the 360° view are per camera, and a menu change while Dock is showing changes Dock's.

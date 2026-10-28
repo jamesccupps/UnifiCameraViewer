@@ -774,6 +774,17 @@ async function connectionSuite() {
   const near = (v, want) => v >= want * 0.8 && v < want * 1.8;
   check("a stream that never starts backs off, and video in between starts the back-off over",
     g.length >= 5 && near(g[0], 40) && near(g[1], 120) && near(g[2], 360) && near(g[3], 40) && near(g[4], 120), JSON.stringify(g));
+  // UniFi Access readers (bare-livestream.js), fed ffmpeg's real fMP4 through a fake socket.
+  const br = out.bareReader;
+  check("Access reader: bare samples become fragments a decoder plays, every frame, video track only",
+    br?.initCodec === "avc1.64000d" && br.rawTraks === 2 && br.initTraks === 1 && br.media === br.samples && br.decoded === br.samples && br.state === "live", JSON.stringify(br));
+  check("Access reader: the timeline is contiguous and keeps up with the clock through network bursts",
+    br?.contiguous && br.durationsInRange && br.driftFrames < 2, JSON.stringify(br && { contiguous: br.contiguous, inRange: br.durationsInRange, drift: br.driftFrames }));
+  check("Access reader: a socket the console closes ends the stream with an error (so it's retried after a wait)",
+    /closed/.test(br?.endedWith ?? ""), JSON.stringify(br?.endedWith));
+  const fr = out.framedReader;
+  check("Access reader that sends the usual begin/moof/mdat/end: segments as the library makes them, init untouched",
+    fr?.initSame && fr.initCodec === "avc1.64000d,mp4a.40.2" && fr.media === fr.fragments && fr.sameBytes, JSON.stringify(fr));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2199,7 +2210,7 @@ async function e2eSuite() {
   const P = { building: 18443, garage: 18444, bad: 18445 };
   const servers = await Promise.all([
     startConsole(P.building, "ok", "Building", { FAKE_FISHEYE: path.join(FIXTURES, "fisheye-ceiling.png") }),
-    startConsole(P.garage, "ok", "Garage"),
+    startConsole(P.garage, "ok", "Garage", { FAKE_ACCESS: "1" }), // plus a UniFi Access door reader
     startConsole(P.bad, "badauth", "Nope"),
   ]);
   try {
@@ -2214,6 +2225,7 @@ async function e2eSuite() {
       offline: `${ids.B}/${cam(P.building, 2)}`,
       fisheye: `${ids.B}/${cam(P.building, 3)}`,
       garage: `${ids.G}/${cam(P.garage, 0)}`,
+      keypad: `${ids.G}/${cam(P.garage, 4)}`,
       badLogin: `${ids.X}/whatever00000000000000`,
     };
     const win = (x, y, w, h, channel) => ({ open: true, bounds: { x, y, width: w, height: h }, channel });
@@ -2232,6 +2244,7 @@ async function e2eSuite() {
         [keys.fisheye]: win(500, 0, 960, 540, 1),
         [keys.garage]: win(500, 560, 600, 338, 0),
         [keys.badLogin]: win(1120, 560, 480, 270, 1),
+        [keys.keypad]: win(1620, 0, 240, 320, 1), // last, so the windows above keep their win: indexes
       },
       // Garage in a grid tile too, on the same channel: the library pools the two onto one session.
       grids: [{ id: "g-e2e", name: "E2E grid", templateId: "2x2", bounds: { x: 1120, y: 0, width: 640, height: 400 }, open: true, tiles: [{ key: keys.garage, channel: 0 }, null, null, null] }],
@@ -2306,6 +2319,12 @@ async function e2eSuite() {
     check("offline camera shows offline", cams[keys.offline]?.status === "offline", cams[keys.offline]?.status);
     check("camera on wrong-password console shows an error", cams[keys.badLogin]?.status === "error", cams[keys.badLogin]?.status);
     check("garage High channel is 1920x1080", cams[keys.garage]?.videoWidth === 1920 && cams[keys.garage]?.videoHeight === 1080);
+    // A UniFi Access reader sends bare access units (no moof/mdat/end) and an init declaring an AAC
+    // track it never sends: bare-livestream.js builds the fragments and drops the audio track.
+    const kp = cams[keys.keypad];
+    check("an Access door reader plays: live, decoding, portrait, video only, near the live edge",
+      kp?.status === "live" && kp.decodedFrames >= 30 && kp.videoWidth === 360 && kp.videoHeight === 480 && /avc1/.test(kp.mime) && !/mp4a/.test(kp.mime) && kp.lag < 1.5,
+      kp && JSON.stringify({ status: kp.status, frames: kp.decodedFrames, size: `${kp.videoWidth}x${kp.videoHeight}`, mime: kp.mime, lag: kp.lag?.toFixed(2), resets: kp.resetRequests }));
     const reconnect = result.actions.find((a) => a.act.label === "Reconnect stream");
     check("Reconnect stream reconnects even while a grid tile shares the camera's stream",
       reconnect?.ok && negotiatesBefore !== null && garageNegotiates() > negotiatesBefore && cams[keys.garage]?.status === "live" && cams["grid:E2E grid#0"]?.status === "live",

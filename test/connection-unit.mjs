@@ -1,9 +1,13 @@
 // Unit checks for ConsoleConnection with a fake ProtectClient.connect. test/run.mjs runs this under
 // Electron's Node (ELECTRON_RUN_AS_NODE=1), since unifi-protect needs Node >= 22.20. Prints one
 // JSON object of results; run.mjs makes the assertions.
+import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { ProtectAuthError, ProtectLivestreamUnavailableError } from "unifi-protect";
+import { bareLivestream, videoOnlyInit } from "../src/bare-livestream.js";
 import { CameraStream } from "../src/camera-stream.js";
 import { ConsoleConnection } from "../src/console-connection.js";
+import { splitBoxes, trackSamples } from "./fake-console/fmp4.mjs";
 
 const quiet = { debug() {}, info() {}, warn() {}, error() {} };
 const fakeClient = () => ({
@@ -127,6 +131,88 @@ const out = {};
   await until(() => at.length >= 6, 3_000);
   stream.stop();
   out.neverStarts = { gaps: at.slice(1).map((t, i) => Math.round(t - at[i])) };
+}
+
+// UniFi Access readers (bare-livestream.js). ffmpeg makes 2 s of real fragmented MP4 with an AAC
+// track; it goes into bareLivestream through a fake socket the way each kind of camera sends it.
+{
+  const ffmpeg = createRequire(import.meta.url)("ffmpeg-static");
+  const made = spawnSync(ffmpeg, [
+    "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=15", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000",
+    "-t", "2", "-c:v", "libx264", "-preset", "ultrafast", "-g", "15", "-c:a", "aac", "-f", "mp4", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-frag_duration", "100000", "pipe:1",
+  ], { maxBuffer: 50e6 });
+  const { boxes } = splitBoxes(made.stdout);
+  const init = Buffer.concat(boxes.filter((b) => b.type === "ftyp" || b.type === "moov").map((b) => b.data));
+  const fragments = [];
+  for (let i = 0; i < boxes.length; i++) if (boxes[i].type === "moof" && boxes[i + 1]?.type === "mdat") fragments.push([boxes[i].data, boxes[i + 1].data]);
+  const samples = fragments.flatMap(([moof, mdat]) => trackSamples(moof, mdat, 1));
+  const frame = (type, payload = Buffer.alloc(0)) => { const h = Buffer.alloc(4); h[0] = type; h.writeUIntBE(payload.length, 1, 3); return Buffer.concat([h, payload]); };
+  const decodedFrames = (bytes) => {
+    const r = spawnSync(ffmpeg, ["-hide_banner", "-i", "pipe:0", "-map", "0:v:0", "-f", "null", "-"], { input: bytes, maxBuffer: 50e6 });
+    return Number([...String(r.stderr).matchAll(/frame=\s*(\d+)/g)].at(-1)?.[1] ?? -1);
+  };
+  const traks = (data) => (data.toString("latin1").match(/trak/g) ?? []).length;
+
+  // Feeds `messages` (each [atMs, Buffer]) to a stream and collects what it yields until the socket closes.
+  const run = async (messages) => {
+    const on = {};
+    let clock = 0;
+    const sock = { addEventListener: (ev, fn) => { on[ev] = fn; }, close() {}, binaryType: "" };
+    const sub = bareLivestream({ resolveUrl: async () => "wss://fake", connect: () => sock, fps: 15, now: () => clock });
+    await until(() => on.message);
+    for (const [at, data] of messages) { clock = at; on.message({ data }); }
+    on.close({ code: 1006 });
+    const got = [];
+    let endedWith = null;
+    try { for await (const seg of sub) got.push(seg); } catch (err) { endedWith = err.message; }
+    return { got, endedWith, state: sub.state };
+  };
+
+  // As the UA G3 Pro sends it: codec, init (AAC declared), one begin, then bare samples, two per
+  // message every 133 ms (network bursts at 15 fps).
+  const bare = await run([
+    [0, Buffer.concat([frame(248, Buffer.from("avc1.64000d,mp4a.40.2")), frame(250, init), frame(249)])],
+    ...Array.from({ length: Math.ceil(samples.length / 2) }, (_, k) => [k * 133.33, Buffer.concat(samples.slice(k * 2, k * 2 + 2).map((s) => frame(252, s)))]),
+  ]);
+  const v = videoOnlyInit(init);
+  const media = bare.got.filter((s) => s.type === "media").map((s) => s.data);
+  // Each fragment: tfdt (version 1: flags, then a 64-bit time) and the one trun sample's duration
+  // (after flags, sample_count and data_offset).
+  const timing = media.map((m) => {
+    const tfdt = m.indexOf("tfdt");
+    const trun = m.indexOf("trun");
+    return { dts: Number(m.readBigUInt64BE(tfdt + 8)), duration: m.readUInt32BE(trun + 16) };
+  });
+  const nominal = v.timescale / 15;
+  const last = timing.at(-1);
+  const lastArrivalMs = (Math.ceil(samples.length / 2) - 1) * 133.33;
+  out.bareReader = {
+    initCodec: bare.got[0]?.codec,
+    initTraks: bare.got[0] && traks(Buffer.from(bare.got[0].data)),
+    rawTraks: traks(init),
+    samples: samples.length,
+    media: media.length,
+    decoded: decodedFrames(Buffer.concat([bare.got[0].data, ...media])),
+    contiguous: timing.every((t, i) => i === 0 || t.dts === timing[i - 1].dts + timing[i - 1].duration),
+    durationsInRange: timing.every((t) => t.duration >= nominal / 2 && t.duration <= nominal * 2),
+    // How far the last frame's time is from when it arrived, in frames.
+    driftFrames: last && Math.abs((last.dts / v.timescale) * 1000 - lastArrivalMs) / (1000 / 15),
+    state: bare.state,
+    endedWith: bare.endedWith,
+  };
+
+  // The usual framing (begin, video, moof, mdat header, end): segments as the library makes them,
+  // with the init left alone.
+  const framed = await run(fragments.map(([moof, mdat], k) => [k * 100, Buffer.concat([
+    ...(k === 0 ? [frame(248, Buffer.from("avc1.64000d,mp4a.40.2")), frame(250, init)] : []),
+    frame(249), frame(251, moof), frame(254, mdat.subarray(0, 8)), frame(252, mdat.subarray(8)), frame(255)])]));
+  out.framedReader = {
+    initCodec: framed.got[0]?.codec,
+    initSame: !!framed.got[0] && Buffer.compare(Buffer.from(framed.got[0].data), init) === 0,
+    fragments: fragments.length,
+    media: framed.got.filter((s) => s.type === "media").length,
+    sameBytes: framed.got.filter((s) => s.type === "media").every((s, k) => Buffer.compare(Buffer.from(s.data), Buffer.concat(fragments[k])) === 0),
+  };
 }
 
 console.log(JSON.stringify(out));

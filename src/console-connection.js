@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { ProtectAuthError, ProtectAuthorizationError, ProtectClient } from "unifi-protect";
+import { bareLivestream, livestreamParams } from "./bare-livestream.js";
 import { errorText, sleep } from "./util.js";
 
 // A refused login isn't always a wrong password. The library reports every non-2xx login answer as
@@ -83,6 +84,31 @@ export class ConsoleConnection extends EventEmitter {
   /** Live camera projection from the library, or undefined. */
   camera(id) {
     try { return this.#client?.camera(id); } catch { return undefined; }
+  }
+
+  /**
+   * A livestream for a camera the library can't stream (bare-livestream.js): the socket URL is
+   * negotiated the way the library does it, through its logged-in transport.
+   */
+  bareLivestream(cam, channel, signal) {
+    const client = this.#client;
+    const host = this.#cfg.host;
+    const fps = cam.config.channels?.find((c) => c.id === channel)?.fps;
+    return bareLivestream({
+      fps: fps > 0 ? fps : 30,
+      signal,
+      log: this.#log,
+      resolveUrl: async (sig) => {
+        if (!client) throw new Error("not connected");
+        const res = await client.transport.send(`https://${host}/proxy/protect/api/ws/livestream?${livestreamParams(cam.id, channel)}`, sig ? { signal: sig } : {});
+        res.ensureOk();
+        const body = res.json();
+        if (typeof body?.url !== "string") throw new Error("the livestream endpoint sent no socket URL");
+        const url = new URL(body.url);
+        url.hostname = new URL(`https://${host}`).hostname; // like the library: the console's address, not the one it reports
+        return url.toString();
+      },
+    });
   }
 
   /** Plain camera list for the UI. */

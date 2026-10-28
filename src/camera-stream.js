@@ -120,12 +120,17 @@ export class CameraStream {
       this.#setStatus("connecting", "Connecting…");
 
       const dropSub = new AbortController();
-      const sub = cam.livestream({
-        source: { type: "channel", channel: this.channel },
-        signal: AbortSignal.any([signal, dropSub.signal]),
-        discardOnDispose: true,
-        urgency: () => URGENCY_MS,
-      });
+      const subSignal = AbortSignal.any([signal, dropSub.signal]);
+      // A camera adopted by UniFi Access (a UA G3 Pro door reader) streams bare H.264 frames the
+      // library never turns into segments: bare-livestream.js reads those itself.
+      const sub = cam.config?.isAdoptedByAccessApp && conn.bareLivestream
+        ? conn.bareLivestream(cam, this.channel, subSignal)
+        : cam.livestream({
+          source: { type: "channel", channel: this.channel },
+          signal: subSignal,
+          discardOnDispose: true,
+          urgency: () => URGENCY_MS,
+        });
 
       // The library hides short stalls inside the iterator (it just parks). Surface them. Its live
       // recovery never gives up, though: for a camera that went offline, or a channel turned off in

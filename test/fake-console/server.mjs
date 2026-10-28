@@ -7,6 +7,9 @@
 //                   cam1  normal; sends a bogus codec string (exercises the renderer's codec fallback)
 //                   cam2  offline (state DISCONNECTED)
 //                   cam3  AI 360 fisheye, ceiling mount, only when FAKE_FISHEYE=<png> is set
+//                   cam4  UniFi Access door reader (UA G3 Pro), portrait, only when FAKE_ACCESS=1: its
+//                         livestream is codec + init (AAC track declared) + one begin, then bare video
+//                         samples, no moof/mdat/end and no audio, like the real reader
 // mode "badauth": every login gets 401.
 //
 // Speaks exactly what the unifi-protect library needs: POST /api/auth/login, GET /proxy/protect/api/bootstrap,
@@ -21,12 +24,14 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
+import { splitBoxes, trackSamples } from "./fmp4.mjs";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.argv[2] || 8443);
 const mode = process.argv[3] || "ok";
 const prefix = process.argv[4] || "Fake";
 const FISHEYE = process.env.FAKE_FISHEYE || "";
+const ACCESS = process.env.FAKE_ACCESS === "1";
 const USER = "viewer";
 const PASS = "secret";
 const log = (...a) => console.log(`[fake:${port}]`, ...a);
@@ -38,18 +43,25 @@ function ffmpegPath() {
 
 const SIZES = { 0: [1920, 1080], 1: [1280, 720], 2: [640, 360] };
 const SQUARE = { 0: [1920, 1920], 1: [1280, 1280], 2: [640, 640] };
+const PORTRAIT = { 0: [600, 800], 1: [360, 480], 2: [240, 320] };
 
 const cameraId = (p, i) => `${p}cam${i}`.padEnd(24, "0");
 
-const cameras = [0, 1, 2, ...(FISHEYE ? [3] : [])].map((i) => {
+const sizesOf = (i) => (i === 3 ? SQUARE : i === 4 ? PORTRAIT : SIZES);
+// Camera numbers, not list positions: without the fisheye, the door reader (4) is the 4th camera.
+const NUMBERS = [0, 1, 2, ...(FISHEYE ? [3] : []), ...(ACCESS ? [4] : [])];
+const cameras = NUMBERS.map((i) => {
   const fish = i === 3;
+  const reader = i === 4;
+  const name = fish ? `${prefix} Lobby 360` : reader ? `${prefix} Door Keypad` : `${prefix} Cam ${i + 1}`;
   return {
     id: cameraId(port, i),
-    name: fish ? `${prefix} Lobby 360` : `${prefix} Cam ${i + 1}`,
-    displayName: fish ? `${prefix} Lobby 360` : `${prefix} Cam ${i + 1}`,
+    name,
+    displayName: name,
     modelKey: "camera",
-    type: fish ? "UVC AI 360" : "UVC G5 Bullet",
-    marketName: fish ? "AI 360" : "G5 Bullet",
+    type: fish ? "UVC AI 360" : reader ? "UA G3 Pro" : "UVC G5 Bullet",
+    marketName: fish ? "AI 360" : reader ? "UA G3 Pro" : "G5 Bullet",
+    isAdoptedByAccessApp: reader,
     state: i === 2 ? "DISCONNECTED" : "CONNECTED",
     isAdopted: true,
     isAdoptedByOther: false,
@@ -58,7 +70,7 @@ const cameras = [0, 1, 2, ...(FISHEYE ? [3] : [])].map((i) => {
     featureFlags: { hasSpeaker: false, hasPackageCamera: false, isDoorbell: false, hasLuxCheck: false, hasFisheye: fish },
     channels: [0, 1, 2].map((ch) => ({
       id: ch, name: ["High", "Medium", "Low"][ch], enabled: true,
-      width: (fish ? SQUARE : SIZES)[ch][0], height: (fish ? SQUARE : SIZES)[ch][1],
+      width: sizesOf(i)[ch][0], height: sizesOf(i)[ch][1],
       fps: 15, bitrate: 2_000_000, isRtspEnabled: false, rtspAlias: "", videoId: `video${ch}`,
     })),
   };
@@ -155,9 +167,10 @@ function frame(type, payload = Buffer.alloc(0)) {
 }
 
 function streamTo(ws, camId, channel) {
-  const idx = cameras.findIndex((c) => c.id === camId);
+  const idx = NUMBERS[cameras.findIndex((c) => c.id === camId)];
   const fish = idx === 3;
-  const [w, h] = (fish ? SQUARE : SIZES)[channel] ?? SIZES[1];
+  const reader = idx === 4;
+  const [w, h] = sizesOf(idx)[channel] ?? SIZES[1];
   const video = fish
     ? ["-loop", "1", "-framerate", "15", "-i", FISHEYE]
     : ["-f", "lavfi", "-i", `testsrc2=size=${w}x${h}:rate=15`];
@@ -176,24 +189,27 @@ function streamTo(ws, camId, channel) {
   let init = [];
   let moof = null;
   proc.stdout.on("data", (chunk) => {
-    buf = Buffer.concat([buf, chunk]);
-    while (buf.length >= 8) {
-      const size = buf.readUInt32BE(0);
-      const type = buf.toString("latin1", 4, 8);
-      if (size < 8 || buf.length < size) break;
-      const box = Buffer.from(buf.subarray(0, size));
-      buf = buf.subarray(size);
+    const { boxes, rest } = splitBoxes(Buffer.concat([buf, chunk]));
+    buf = Buffer.from(rest);
+    for (const { type, data: box } of boxes) {
       if (ws.readyState !== ws.OPEN) return;
       if (type === "ftyp") init.push(box);
       else if (type === "moov") {
         init.push(box);
         const codec = idx === 1 ? "H264-main-bogus" : "avc1.4d401f,mp4a.40.2";
-        ws.send(Buffer.concat([frame(248, Buffer.from(codec)), frame(250, Buffer.concat(init))]));
+        // The reader's single "begin" comes right after the init, as on the real one.
+        ws.send(Buffer.concat([frame(248, Buffer.from(codec)), frame(250, Buffer.concat(init)), ...(reader ? [frame(249)] : [])]));
         init = [];
       } else if (type === "moof") moof = box;
       else if (type === "mdat" && moof) {
-        // Split the mdat like the controller does: header frame, then payload as "video".
-        ws.send(Buffer.concat([frame(249), frame(251, moof), frame(254, box.subarray(0, 8)), frame(252, box.subarray(8)), frame(255)]));
+        if (reader) {
+          // Bare access units only: no moof, mdat, end or audio.
+          const samples = trackSamples(moof, box, 1);
+          if (samples.length) ws.send(Buffer.concat(samples.map((sm) => frame(252, sm))));
+        } else {
+          // Split the mdat like the controller does: header frame, then payload as "video".
+          ws.send(Buffer.concat([frame(249), frame(251, moof), frame(254, box.subarray(0, 8)), frame(252, box.subarray(8)), frame(255)]));
+        }
         moof = null;
       }
     }
