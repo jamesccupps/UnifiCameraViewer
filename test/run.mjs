@@ -1700,10 +1700,25 @@ async function listSuite() {
     window.dispatchEvent(new Event("blur"));
     return { opened, closed: !document.querySelector("details.menu[open]") };
   })()`;
+  // A hover tip inside the layout editor (a modal dialog) must show above it.
+  const editorTip = `(async () => {
+    document.querySelector('[data-tab="layouts"]').click();
+    document.getElementById("btn-new-layout").click();
+    await new Promise((r) => setTimeout(r, 300)); // opening a modal sends its own pointerover first
+    const target = document.getElementById("editor-as");
+    target.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 600));
+    const tip = document.getElementById("tip");
+    const out = { open: tip.matches(":popover-open"), text: tip.textContent.slice(0, 20), dialogOpen: document.getElementById("editor-dialog").open };
+    document.getElementById("editor-cancel").click();
+    document.querySelector('[data-tab="cameras"]').click();
+    return out;
+  })()`;
   const { result, config } = await runApp({
     userData, results, seconds: 19, extraArgs: ["--mock"],
     env: {
       PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 18000, do: "manager-js", js: editorTip },
         { at: 13300, do: "manager-js", js: markForPatch },
         { at: 17800, do: "manager-js", js: afterPatch },
         { at: 2500, do: "manager-js", js: clickRow("Building Dock", "Hide") },
@@ -1723,6 +1738,8 @@ async function listSuite() {
     act(focusQuality)?.value === true && act(rerendered)?.value?.rerendered === true, JSON.stringify([act(focusQuality), act(rerendered)].map((a) => a?.value ?? a?.error)));
   check("an open console menu closes when the list loses focus", act(menuThenBlur)?.value?.opened === true && act(menuThenBlur).value.closed === true,
     JSON.stringify(act(menuThenBlur)?.value ?? act(menuThenBlur)?.error));
+  const et = act(editorTip)?.value;
+  check("hover tips show inside the layout editor, above the dialog", et?.dialogOpen && et.open && et.text.startsWith("Separate windows"), JSON.stringify(et ?? act(editorTip)?.error));
   const marked = act(markForPatch)?.value;
   const patched = act(afterPatch)?.value;
   check("a re-render keeps the rows, thumbnails, text selection and focus on screen",

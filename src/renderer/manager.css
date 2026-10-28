@@ -328,7 +328,10 @@ dialog.editor { width: min(1040px, 96vw); max-height: 94vh; padding: 16px 18px; 
 /* Hover tips: one floating box, positioned by manager.js next to whatever has data-tip */
 .tip {
   position: fixed;
-  z-index: 100;
+  inset: auto; /* a popover: undo the UA's centring */
+  margin: 0;
+  border: 0;
+  overflow: visible;
   max-width: 300px;
   padding: 6px 9px;
   border-radius: 6px;

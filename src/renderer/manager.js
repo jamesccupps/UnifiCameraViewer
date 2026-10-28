@@ -140,11 +140,16 @@ let tipFor = null;
 let tipTimer = null;
 let pointer = { x: -1, y: -1 };
 
+// A popover, like the preview: a fixed div can't sit above the layout editor's modal dialog (the top
+// layer), so no tip ever showed in the editor. Measured from 0,0 each time: at its last spot near the
+// right edge it wrapped narrow, and landed off-centre once it widened again.
 function placeTip(target) {
   const text = target.dataset.tip;
   if (!text) return;
   tip.textContent = text;
-  tip.hidden = false;
+  tip.style.left = "0px";
+  tip.style.top = "0px";
+  if (!tip.matches(":popover-open")) tip.showPopover();
   const r = target.getBoundingClientRect();
   const t = tip.getBoundingClientRect();
   let top = r.bottom + 8;
@@ -158,7 +163,7 @@ function hideTip() {
   clearTimeout(tipTimer);
   tipTimer = null;
   tipFor = null;
-  tip.hidden = true;
+  if (tip.matches(":popover-open")) tip.hidePopover();
 }
 
 function tipTarget(node) {
@@ -191,7 +196,7 @@ document.addEventListener("focusout", hideTip);
 /** After a re-render the hovered element is new; point the visible tip at its replacement. */
 function reattachTip() {
   if (!tipFor || tipFor.isConnected) return;
-  const wasShown = !tip.hidden;
+  const wasShown = tip.matches(":popover-open");
   const t = tipTarget(document.elementFromPoint(pointer.x, pointer.y));
   hideTip();
   if (t) {
