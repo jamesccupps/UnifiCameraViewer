@@ -669,7 +669,9 @@ async function connectionSuite() {
 // Window sizes across launches (mock consoles): at 150 % scaling Electron reads a window back up to
 // 1 DIP bigger than it was set (4 DIP for constructor bounds), and saving that made every window
 // grow on each launch. Odd sizes and positions, aspect lock off so nothing snaps the size back.
-// The scale is forced to 1.5 so this reproduces on any display, CI's 100 % included.
+// The scale is forced to 1.5 so this reproduces on any display, CI's 100 % included. Everything fits
+// a 1024 x 768 screen at that scale (683 x 512 DIP, less the taskbar), which is what CI's runner has:
+// a saved place that doesn't fit is moved on purpose, and that isn't what this checks.
 
 async function boundsSuite() {
   console.log("\nWindow bounds suite (mock consoles, three launches)");
@@ -677,9 +679,9 @@ async function boundsSuite() {
   const A = "aaaaaaaa-0000-4000-8000-000000000001";
   const keys = { lobby: `${A}/aaaaaaaa-cam0`, dock: `${A}/aaaaaaaa-cam1` };
   const start = {
-    [keys.lobby]: { x: 37, y: 211, width: 641, height: 361 },
-    [keys.dock]: { x: 733, y: 77, width: 577, height: 355 },
-    grid: { x: 101, y: 451, width: 801, height: 451 },
+    [keys.lobby]: { x: 37, y: 21, width: 301, height: 171 },
+    [keys.dock]: { x: 351, y: 23, width: 277, height: 157 },
+    grid: { x: 11, y: 211, width: 401, height: 251 },
   };
   fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
     version: 1,
@@ -715,7 +717,7 @@ async function boundsSuite() {
   const cfg4 = JSON.parse(fs.readFileSync(path.join(userData, "config.json"), "utf8"));
   const stair = `${A}/aaaaaaaa-cam2`;
   cfg4.consoles[0].mockCameras = ["Lobby", "Dock", "Stair"];
-  cfg4.windows[stair] = { open: true, bounds: { x: 200, y: -300, width: 480, height: 400 }, channel: 2 };
+  cfg4.windows[stair] = { open: true, bounds: { x: 200, y: -300, width: 320, height: 400 }, channel: 2 };
   fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify(cfg4, null, 2));
   const r4 = await runApp({
     userData, results: path.join(userData, "results-4"), seconds: 10, extraArgs: ["--mock", "--force-device-scale-factor=1.5"],
