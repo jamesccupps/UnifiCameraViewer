@@ -1832,7 +1832,7 @@ function managerState() {
 }
 
 function createTray() {
-  const img = nativeImage.createFromPath(path.join(ASSETS, IS_WIN ? "tray.png" : "tray.png"));
+  const img = nativeImage.createFromPath(path.join(ASSETS, "tray.png"));
   tray = new Tray(img.isEmpty() ? nativeImage.createEmpty() : img);
   tray.setToolTip("Protect Panes");
   tray.on("click", () => showManager());
