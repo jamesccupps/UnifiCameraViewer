@@ -2648,6 +2648,8 @@ async function cycleSuite() {
     await panes.invoke("mgr:save-editor-layout", { id: g.id, as: "grid", name: g.name, displayId: g.editor.displayId, templateId: g.editor.templateId, cells: g.editor.cells, apply: false });
     return g.editor.cells[0];
   })()`;
+  // Each camera row's status line in the camera list.
+  const rowsJs = `(() => Object.fromEntries([...document.querySelectorAll(".cams li")].map((li) => [li.querySelector(".cam-name b")?.textContent, li.querySelector(".cam-name small")?.textContent ?? ""])))()`;
   const ENLARGE_AT = 13500;
   const { result, config } = await runApp({
     userData, results, seconds: 20, extraArgs: ["--mock"],
@@ -2655,6 +2657,7 @@ async function cycleSuite() {
       PANES_SELFTEST_ACTIONS: JSON.stringify([
         { at: 2000, do: "manager-js", js: importJs },
         { at: 2800, do: "manager-js", js: saveDraftJs },
+        { at: 3500, do: "manager-js", js: rowsJs }, // before the first switch: tile 0 shows Lobby
         { at: 4000, do: "manager-js", js: resaveJs },
         // Tile 0 is hidden behind the enlarged tile 1 from here on: it should stop cycling.
         { at: ENLARGE_AT, do: "menu-click", tile: "Cycle#1", label: "Enlarge this tile" },
@@ -2682,6 +2685,10 @@ async function cycleSuite() {
     JSON.stringify(t1.map((s) => `${name(s.key)}:${s.status}`)));
   const active = result.connections[A]?.active ?? {};
   check("cameras cycled away from leave no stream running", Object.values(active).every((n) => n === 0), JSON.stringify(active));
+  const rows = result.actions.find((a) => a.act.js === rowsJs)?.value;
+  check("the camera list says 'in grid' for the camera a cycling tile shows, not for the others in its cycle",
+    /in grid Cycle/.test(rows?.["Building Lobby"] ?? "") && !/in grid/.test(rows?.["Building Dock"] ?? "x") && !/in grid/.test(rows?.["Building Stair"] ?? "x"),
+    JSON.stringify(rows && { lobby: rows["Building Lobby"], dock: rows["Building Dock"], stair: rows["Building Stair"] }));
 
   const draft = result.actions.find((a) => a.act.js === saveDraftJs)?.value;
   check("an imported cycling slot shows its cycle in the editor", draft?.text === "↻ cycles 3 cameras, 7 s each" && /Building Dock, Building Stair and back, 7 s each/.test(draft.tip ?? ""), JSON.stringify(draft));

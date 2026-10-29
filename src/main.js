@@ -1806,8 +1806,9 @@ function managerState() {
           // turned off in Protect the list said "High" for a window that would open at Low.
           channel: cw?.stream?.channel ?? (cam.channels?.length ? pickChannel(cam.channels.map((ch) => ch.id), w?.channel) : w?.channel ?? null),
           onTop: !!w?.onTop, status: cw?.stream?.status ?? null,
-          // Grids it's on screen in: the row said "closed" while the camera played in a grid.
-          inGrids: [...gridWins.values()].filter((gw) => gw.isOpen && !gw.grid.hidden && gw.grid.tiles.some((t) => tileMembers(t).some((m) => m.key === key))).map((gw) => gw.grid.name),
+          // Grids it's on screen in: the row said "closed" while the camera played in a grid. A tile's
+          // player is the camera it shows now, so a cycle's other cameras aren't counted while away.
+          inGrids: [...gridWins.values()].filter((gw) => gw.isOpen && !gw.grid.hidden && gw.players.some((p) => p.key === key)).map((gw) => gw.grid.name),
         };
       });
       return {
