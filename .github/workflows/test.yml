@@ -2,10 +2,14 @@
 # UniFi OS consoles. Screenshots, result.json and logs are kept as an artifact for a week.
 name: Tests
 
+# Not for a push that only changes the project page, Markdown or release notes: nothing the tests run.
+# A push that changes anything else alongside them still runs.
 on:
   push:
     branches: [main]
+    paths-ignore: ["site/**", "**/*.md", "release-notes/**"]
   pull_request:
+    paths-ignore: ["site/**", "**/*.md", "release-notes/**"]
 
 permissions:
   contents: read
