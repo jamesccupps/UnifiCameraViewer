@@ -913,6 +913,10 @@ async function connectionSuite() {
   const pw = out.pausedWithSegmentsLeft;
   check("a paused stream sends nothing more and stays paused, though its subscription still has segments",
     pw?.mediaAfter === 0 && pw.status === "paused" && !pw.statusesAfter.includes("live"), JSON.stringify(pw));
+  // 400 ms with a 100 ms gap: about four subscriptions. Without the gap, one every ~5 ms.
+  const ec = out.endsCleanly;
+  check("a stream that ends without an error waits before subscribing again, and says it's reconnecting",
+    ec?.subs >= 2 && ec.subs <= 6 && ec.reconnecting, JSON.stringify(ec));
   const np = out.noPassword;
   check("a console with no saved password (imported) asks for it, and doesn't log in with none",
     np?.state === "authfailed" && /No password saved/.test(np.message) && np.calls === 0, JSON.stringify(np));

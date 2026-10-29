@@ -9,6 +9,8 @@ const URGENCY_MS = 5_000;
 // negotiate but sends nothing, a 403) is tried again later and later, not every 10 s forever. Any
 // video resets it.
 const UNAVAILABLE_RETRY_MS = [10_000, 30_000, 120_000, 300_000];
+// Before subscribing again after a stream error, or a stream that just ended.
+const RESTART_GAP_MS = 3_000;
 
 /*
  * Pumps one camera's Protect livestream (fMP4 over the console's own websocket - no RTSP/RTSPS)
@@ -37,6 +39,7 @@ export class CameraStream {
    * @param {(channel: string, payload: any) => void} opts.send
    * @param {object} opts.log
    * @param {number[]} [opts.unavailableRetryMs] - replaces UNAVAILABLE_RETRY_MS (unit tests)
+   * @param {number} [opts.restartGapMs] - replaces RESTART_GAP_MS (unit tests)
    */
   constructor(opts) {
     this.#opts = opts;
@@ -184,7 +187,11 @@ export class CameraStream {
           log.info(`stopped recovering ${cameraId} ch${this.channel}: ${dropped}`);
           continue;
         }
+        // The library ends iteration (without an error) when its recovery gives up. Subscribing again
+        // at once renegotiated back to back, each try counted by its per-console circuit breaker.
         log.info(`stream for ${cameraId} ended; restarting`);
+        this.#setStatus("reconnecting", "Reconnecting…");
+        await this.#sleep(this.#opts.restartGapMs ?? RESTART_GAP_MS, signal);
       } catch (err) {
         if (signal.aborted) return;
         if (dropped) {
@@ -196,7 +203,7 @@ export class CameraStream {
           continue;
         }
         const retry = this.#opts.unavailableRetryMs ?? UNAVAILABLE_RETRY_MS;
-        const wait = err instanceof ProtectLivestreamUnavailableError ? retry[Math.min(unavailable++, retry.length - 1)] : 3_000;
+        const wait = err instanceof ProtectLivestreamUnavailableError ? retry[Math.min(unavailable++, retry.length - 1)] : this.#opts.restartGapMs ?? RESTART_GAP_MS;
         log.warn(`livestream ${cameraId} ch${this.channel}: ${errorText(err)}; trying again in ${Math.round(wait / 1000)} s`);
         this.#setStatus("reconnecting", "Reconnecting…");
         await this.#sleep(wait, signal);

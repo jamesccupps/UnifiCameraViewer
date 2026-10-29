@@ -182,6 +182,33 @@ const out = {};
   stream.stop();
 }
 
+// CameraStream on a subscription that keeps ending without an error (the library's iteration ends
+// when its recovery gives up): it waits before subscribing again, like after an error, instead of
+// renegotiating back to back. Each fake stream ends after a timer, so a loop that doesn't wait still
+// lets this script's own timers run.
+{
+  let subs = 0;
+  const statuses = [];
+  const sub = () => {
+    subs++;
+    return {
+      state: "connecting",
+      initSegment: null,
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise((r) => setTimeout(() => r({ done: true, value: undefined }), 5)) }),
+      async [Symbol.asyncDispose]() {},
+    };
+  };
+  const cam = { isOnline: true, config: { channels: [{ id: 1, enabled: true }] }, livestream: sub };
+  const stream = new CameraStream({
+    getConnection: () => ({ state: "connected", name: "C", camera: () => cam }),
+    cameraId: "cam", resolveChannel: () => 1, send: (ch, p) => { if (ch === "cam:status") statuses.push(p.state); }, log: quiet, restartGapMs: 100,
+  });
+  stream.start();
+  await new Promise((r) => setTimeout(r, 400));
+  stream.stop();
+  out.endsCleanly = { subs, reconnecting: statuses.includes("reconnecting") };
+}
+
 // UniFi Access readers (bare-livestream.js). ffmpeg makes 2 s of real fragmented MP4 with an AAC
 // track; it goes into bareLivestream through a fake socket the way each kind of camera sends it.
 {
