@@ -1934,7 +1934,9 @@ async function importSettings() {
   if (fs.statSync(file).size > MAX_IMPORT_BYTES) throw new Error("That file is too big to be a Protect Panes settings export.");
   let data;
   try {
-    data = JSON.parse(fs.readFileSync(file, "utf8"));
+    // Without a byte-order mark, which Windows PowerShell 5.1 writes at the start of UTF-8 (an export
+    // edited and saved with Set-Content or Out-File), and which JSON.parse refuses.
+    data = JSON.parse(fs.readFileSync(file, "utf8").replace(/^﻿/, ""));
   } catch {
     throw new Error("That file isn't a Protect Panes settings export: it isn't valid JSON.");
   }

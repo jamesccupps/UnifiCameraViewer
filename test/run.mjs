@@ -618,10 +618,11 @@ async function transferSuite() {
   // What's imported is that export edited the way a crafted or hand-edited file could be: update
   // checks aimed at a network share (Windows would send it the user's credentials at every start), a
   // setting of the wrong kind, one this version doesn't know, an address typed as a URL, and a second
-  // console with the first one's id.
+  // console with the first one's id. Saved with a byte-order mark, as Windows PowerShell 5.1's
+  // Set-Content / Out-File -Encoding utf8 write UTF-8.
   const craftedFile = path.join(tmpDir("transfer-crafted"), "crafted.json");
   const [firstConsole, ...otherConsoles] = file?.consoles ?? [];
-  fs.writeFileSync(craftedFile, JSON.stringify({
+  fs.writeFileSync(craftedFile, "﻿" + JSON.stringify({
     ...file,
     consoles: [firstConsole, ...otherConsoles.map((c) => ({ ...c, host: `https://${c.host}/` })), { ...firstConsole, name: "Duplicate", host: "mock-dup" }],
     settings: { ...file?.settings, updateSource: "\\\\attacker.example\\share", showPreviews: "no", futureThing: 1 },
@@ -655,6 +656,7 @@ async function transferSuite() {
   const run2 = await importOnce(craftedFile, "results");
   const good = run2.result.actions[0]?.value;
   check("Import refuses a file that isn't a settings export", /isn't a Protect Panes settings export/.test(bad?.error ?? ""), JSON.stringify(bad));
+  check("Import reads an export saved with a UTF-8 byte-order mark", good?.restarting === false, JSON.stringify(good));
   const cfg = run2.config;
   const byHost = (h) => cfg?.consoles.find((c) => c.host === h);
   check("Import replaces the consoles, layouts, grids, windows and settings with the file's",
