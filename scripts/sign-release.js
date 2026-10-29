@@ -51,6 +51,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const zip = path.resolve(process.argv[2] || path.join("dist", "ProtectPanes-win32-x64.zip"));
   const setup = path.resolve(process.argv[4] || path.join(path.dirname(zip), "ProtectPanes-Setup.exe"));
   const gz = path.join(path.dirname(zip), "ProtectPanes-app.asar.gz");
+  const version = process.argv[3] || pkg.version;
+  // build-win.js makes no small update for a release with this file; one here anyway isn't this build's.
+  const fullUpdateOnly = path.join("release-notes", `v${version}.full-update`);
+  if (fs.existsSync(gz) && fs.existsSync(fullUpdateOnly)) throw new Error(`${gz} is here, but ${fullUpdateOnly} says this release has no small update`);
   // The Electron the build ran on: npm ci installs exactly the lockfile's.
   const electron = JSON.parse(fs.readFileSync("package-lock.json", "utf8")).packages?.["node_modules/electron"]?.version;
   if (fs.existsSync(gz) && !/^\d+\.\d+\.\d+$/.test(electron ?? "")) throw new Error("package-lock.json doesn't name the Electron version the app.asar is for");
@@ -58,6 +62,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     zip,
     installer: fs.existsSync(setup) ? setup : null,
     asar: fs.existsSync(gz) ? { gz, electron } : null,
-    version: process.argv[3] || pkg.version,
+    version,
   }));
 }

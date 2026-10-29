@@ -106,16 +106,25 @@ if (process.platform === "win32") {
 }
 
 // Everything the app itself is lives in app.asar (no native modules, nothing unpacked), so a copy
-// already on this Electron only needs that file. The manifest names the Electron it was built for;
-// a release that changes anything else in the folder must leave the asar out (delete the .gz
-// before signing) so every copy takes the full update.
+// already on this Electron only needs that file. The manifest names the Electron it was built for,
+// which is all an installed copy compares. A release that changes anything else in the folder (the
+// icon, the exe's metadata, packager or builder options) has a release-notes/vX.Y.Z.full-update file:
+// then there's no small update, and every copy takes the full one.
 const asarRaw = path.join(appPath, "resources", "app.asar");
 const asarGz = path.resolve("dist", "ProtectPanes-app.asar.gz");
-fs.writeFileSync(asarGz, zlib.gzipSync(fs.readFileSync(asarRaw), { level: 9 }));
+const fullUpdateOnly = path.join("release-notes", `v${pkg.version}.full-update`);
 const electron = createRequire(import.meta.url)("electron/package.json").version;
-console.log(`app.asar: ${asarGz} (${(fs.statSync(asarGz).size / 1e6).toFixed(1)} MB, for Electron ${electron})`);
+let asar = null;
+if (fs.existsSync(fullUpdateOnly)) {
+  fs.rmSync(asarGz, { force: true }); // an older build's would otherwise be signed and shipped with this one
+  console.log(`no small update: ${fullUpdateOnly} says this release changes more than app.asar`);
+} else {
+  fs.writeFileSync(asarGz, zlib.gzipSync(fs.readFileSync(asarRaw), { level: 9 }));
+  asar = { gz: asarGz, unpacked: asarRaw, electron };
+  console.log(`app.asar: ${asarGz} (${(fs.statSync(asarGz).size / 1e6).toFixed(1)} MB, for Electron ${electron})`);
+}
 
 // latest.json lets installed copies update in place (Settings -> Updates). Publish it with the zip,
-// the installer and the asar.
-if (fs.existsSync(DEFAULT_KEY_FILE)) console.log("signed:", signRelease({ zip, installer, asar: { gz: asarGz, unpacked: asarRaw, electron }, version: pkg.version }));
+// the installer and the asar (when there is one).
+if (fs.existsSync(DEFAULT_KEY_FILE)) console.log("signed:", signRelease({ zip, installer, asar, version: pkg.version }));
 else console.warn(`not signed: no key at ${DEFAULT_KEY_FILE} (run node scripts/make-signing-key.js once)`);

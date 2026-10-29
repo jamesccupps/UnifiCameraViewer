@@ -78,7 +78,8 @@ jobs:
           if (Test-Path $exe) { throw "uninstall left $exe behind" }
           "installer ok: $v"
 
-      # The three files exactly as tested above. They're compressed already, so no compression here.
+      # The files exactly as tested above; no small update (.gz) for a release with a
+      # release-notes/vX.Y.Z.full-update file. They're compressed already, so no compression here.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-files
@@ -141,4 +142,6 @@ jobs:
           notes="release-notes/$tag.md"
           opts=(--repo "$GITHUB_REPOSITORY" --title "Protect Panes ${tag#v}" --verify-tag)
           if [ -f "$notes" ]; then opts+=(--notes-file "$notes"); else opts+=(--generate-notes); fi
-          gh release create "$tag" dist/ProtectPanes-Setup.exe dist/ProtectPanes-win32-x64.zip dist/ProtectPanes-app.asar.gz dist/latest.json "${opts[@]}"
+          files=(dist/ProtectPanes-Setup.exe dist/ProtectPanes-win32-x64.zip)
+          if [ -f dist/ProtectPanes-app.asar.gz ]; then files+=(dist/ProtectPanes-app.asar.gz); fi
+          gh release create "$tag" "${files[@]}" dist/latest.json "${opts[@]}"

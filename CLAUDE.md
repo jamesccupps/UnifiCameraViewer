@@ -320,7 +320,13 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
 - **Small updates.** A release also carries `ProtectPanes-app.asar.gz`; `latest.json`'s signed `asar` entry has its `electron` version and the unpacked size/SHA-256. A copy on that same Electron, installed or portable, downloads only that; the helper's `-AsarGz` mode gunzips next to `resources\app.asar`, checks the unpacked hash, swaps the one file and rolls back on failure.
   - It's `.gz`, not `.asar`, so Electron's patched `fs` never treats the download as an archive.
   - The helper hashes with `[Security.Cryptography.SHA256]`, not `Get-FileHash`. Started from PowerShell 7 (GitHub's runners, or a user's pwsh window), Windows PowerShell inherits pwsh's `PSModulePath` and `Get-FileHash` isn't found. That failed the first v1.4.0 release run, and it can't be reproduced on a PC without pwsh. Keep the helper off cmdlets that come from modules where a .NET call does the job. Expand-Archive and Move-Item worked in that same run.
-  - Everything the app is lives in app.asar (no native modules, nothing unpacked). **A release that changes anything else in the folder** (Electron, packager or builder options, the icon) **must leave the .gz out** (delete it before signing), so every copy takes the full update.
+  - Everything the app is lives in app.asar (no native modules, nothing unpacked). A new Electron needs nothing: the manifest's `asar.electron` is the new version, so copies on the old one take the full update.
+  - **A release that changes anything else in the folder** (packager or builder options, the icon, the exe's metadata) **needs a `release-notes/vX.Y.Z.full-update` file** (any content; a line saying why).
+    - With it, `build-win.js` makes no .gz and deletes an old one, so `latest.json` has no `asar` entry and every copy takes the full update.
+    - `sign-release.js` refuses to sign if a .gz turns up anyway.
+    - The release workflow publishes only the files there are.
+    - Before 1.4.4 the .gz was always built, signed and published, so the rule ("delete it before signing") couldn't be followed through CI.
+    - Checked with a local build carrying the marker: no .gz, a manifest without `asar` that verifies, the upload list without it, and signing refused once a .gz was put back.
   - An installed copy's Settings → Apps version stays at what Setup.exe last wrote until the next full update.
 - **Start with Windows and Defender.** Microsoft Defender raised "Anomaly detected in ASEP registry" (Medium) on the owner's PC in 1.4.0.
   - The cause: `applyLoginItem()` called `setLoginItemSettings` on every launch. With the setting off, Electron deletes the `protect-panes` value (the AppUserModelId) under `HKCU\…\CurrentVersion\Run` and `…\Explorer\StartupApproved\Run`. A test suite launches the app dozens of times.
@@ -375,7 +381,7 @@ Action results carry `t` (epoch ms), so a check can compare against the samples 
 
 Releases are built and published by `.github/workflows/release.yml` when a `vX.Y.Z` tag is pushed:
 1. Bump `version` in package.json (and the lockfile: `npm install --package-lock-only --ignore-scripts`).
-2. Write `release-notes/vX.Y.Z.md`, the release text. Without it the workflow falls back to GitHub's generated notes.
+2. Write `release-notes/vX.Y.Z.md`, the release text. Without it the workflow falls back to GitHub's generated notes. If the release changes anything outside app.asar but not Electron (the icon, packager or builder options), also add `release-notes/vX.Y.Z.full-update` (see Small updates).
 3. `npm test`, commit, push `main`.
 4. `git tag -a vX.Y.Z -m "Protect Panes X.Y.Z"` and `git push origin vX.Y.Z`.
 
