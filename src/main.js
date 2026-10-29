@@ -288,7 +288,7 @@ async function removeConsole(id) {
 
 // Every explicit open (switch, Find, Show all, Show cameras) ends with the window on screen, so it
 // also clears a "hidden" flag.
-function openCameraWindow(key, { focus = false, flash = true } = {}) {
+function openCameraWindow(key, { flash = true } = {}) {
   const existing = camWins.get(key);
   if (existing) {
     const entry = store.data.windows[key];
@@ -359,7 +359,7 @@ function openCameraWindow(key, { focus = false, flash = true } = {}) {
   win.loadFile(path.join(__dirname, "renderer", "camera.html"));
   if (process.env.PANES_DEVTOOLS === "1") win.webContents.openDevTools({ mode: "detach" });
   // Never steal focus from whatever the operator is using (exacqVision etc.).
-  win.once("ready-to-show", () => { if (focus) win.show(); else win.showInactive(); });
+  win.once("ready-to-show", () => win.showInactive());
   // Arrange and the editor's "Use what's on screen" count only visible windows, per screen. The
   // notify at the end of openCamera comes before ready-to-show, so tell the list on each change.
   for (const ev of ["show", "hide", "minimize", "restore"]) win.on(ev, notifyManager);
