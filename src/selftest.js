@@ -53,8 +53,10 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
   }
 
   const gridTiles = () => hooks.gridTiles?.() ?? [];
+  let sampleStartedAt = 0;
   const sample = async () => {
     const row = { t: Date.now(), cams: {} };
+    sampleStartedAt = row.t;
     for (const [key, cw] of camWins) {
       try {
         const stats = await cw.win.webContents.executeJavaScript("window.__panesStats && window.__panesStats()");
@@ -197,6 +199,11 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
 
   setTimeout(async () => {
     clearInterval(timer);
+    // The interval's last tick can land on this same moment (a run of 26 s, ticks every 2 s). A final
+    // sample right after it read the same frame counts, and checks comparing the last two samples
+    // ("plays again") failed on video that was playing fine. Seen in CI.
+    const sinceLast = Date.now() - sampleStartedAt;
+    if (sinceLast < 500) await new Promise((r) => setTimeout(r, 500 - sinceLast));
     await sample();
     const result = {
       connections: {},
