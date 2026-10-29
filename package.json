@@ -1,7 +1,7 @@
 {
   "name": "protect-panes",
   "productName": "Protect Panes",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "description": "Free-floating UniFi Protect live-view windows, one per camera, across multiple consoles.",
   "license": "MIT",
   "author": "James Cupps",
