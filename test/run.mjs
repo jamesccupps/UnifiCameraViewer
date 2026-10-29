@@ -1972,10 +1972,14 @@ async function listSuite() {
     document.querySelector('[data-tab="cameras"]').click();
     return out;
   })()`;
-  // A quality select that has just been used keeps the focus; the 3 s status re-render must go on.
-  // (Stair goes offline at ~9 s and back at ~14 s: renders happen only when something changed, and
-  // camera status reaches the list only through the poll.)
+  // A quality select that has just been used keeps the focus; the re-renders that changes in main
+  // bring must go on. Renders happen only when something changed, so right after the focus a setting
+  // nothing else in this run uses is changed in main, which tells the list at once (mgr:changed).
+  // This used to count on Stair going offline at ~9 s and the next 3 s poll landing before the check
+  // at 13 s. The drop is timed from startup, not from the test's clock, and that failed twice in a row
+  // on the 1.4.4 release run's slower runner.
   const lobbyRow = `[...document.querySelectorAll(".cams li")].find((l) => l.querySelector(".cam-name b")?.textContent === "Building Lobby")`;
+  const changeSetting = `panes.invoke("mgr:set-setting", { name: "arrangeQuality", value: false }).then(() => true)`;
   const focusQuality = `(() => {
     const sel = document.querySelector('[data-focus-key="q-${keys.lobby}"]');
     sel?.focus();
@@ -2092,6 +2096,7 @@ async function listSuite() {
         { at: 6500, do: "manager-js", js: clickRow("Building Dock", "Show in list") },
         { at: 7500, do: "manager-js", js: readList },
         { at: 8000, do: "manager-js", js: focusQuality },
+        { at: 8300, do: "manager-js", js: changeSetting },
         { at: 13000, do: "manager-js", js: rerendered },
         { at: 12000, do: "manager-js", js: menuThenBlur },
       ]),
