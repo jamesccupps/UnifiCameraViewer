@@ -1251,8 +1251,18 @@ async function updateSuite() {
       let log;
       try { ({ log } = updater.install({ installDir, exeName: "ProtectPanes.exe", pid: exited, noLaunch: true })); }
       finally { process.chdir(cwd); }
-      const read = () => (fs.existsSync(log) ? fs.readFileSync(log, "utf8") : "");
-      for (let i = 0; i < 120 && !/update: done/.test(read()); i++) await new Promise((r) => setTimeout(r, 500));
+      // The helper's Add-Content holds the log open while it writes a line, and an open landing then
+      // fails with EBUSY (it ended a full run once): read again a moment later.
+      const read = async () => {
+        for (let i = 0; ; i++) {
+          try { return fs.existsSync(log) ? fs.readFileSync(log, "utf8") : ""; }
+          catch (err) {
+            if (i >= 20 || !["EBUSY", "EPERM"].includes(err.code)) throw err;
+            await new Promise((r) => setTimeout(r, 50));
+          }
+        }
+      };
+      for (let i = 0; i < 120 && !/update: done/.test(await read()); i++) await new Promise((r) => setTimeout(r, 500));
       return read();
     };
     // "&" and "%" mean something to cmd.exe and "'" to PowerShell; the helper must not care.
