@@ -7,7 +7,7 @@ Hard requirements, all deliberate:
 - **Direct login by IP** with a local account. No ui.com/cloud, no MFA.
 - **Low resource use.** Medium channel by default, GPU decode via MSE, minimized windows stop streaming, WebGL only for 360° windows.
 
-Current version: **1.4.4**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
+Current version: **1.4.5**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
 - **1.2.0:** color-range fix for crushed shadows, name label collapse and per-window hide, clock on 360° views, Apply to all, Hide / Show cameras, named layouts with Protect liveview import, signed in-place updates.
 - **1.3.0:** the Setup.exe installer, Arrange and Close all, the layout editor, the tabbed camera list with hover tips, 360° Single view, and undici patched for security.
 - **1.3.1:** portable copies' in-app update fixed (the helper's working folder blocked the swap); Arrange / "Use what's on screen" missing just-shown windows.
@@ -19,6 +19,7 @@ Current version: **1.4.4**, released through the GitHub Actions release workflow
   - Security: the update location stays per PC on import, imported settings are type-checked, and releases are signed in a job that never runs the build's dependencies.
   - Fixes: Access reader windows stay paused; saves survive a deleted config.json; import cleans up addresses, drops duplicate console ids and reads a byte-order mark; incomplete 360° records are filled in; a stream that keeps ending waits before reconnecting; "in grid" covers only what a cycling tile shows.
   - Also: a project page (site/), and `release-notes/vX.Y.Z.full-update` for releases that must skip the small update.
+- **1.4.5:** security updates from a second review: Electron 45.0.0 → 45.2.3 (Chromium MediaSource and ffmpeg fixes among them), Electron fuses on the packaged exe, the update helper started by System32 paths, and undici 8.12.4. Grid → Layout asks before a smaller layout drops cameras. A full update for every copy, since the Electron version changed. Not taken from that review yet: B2/P3 (enlarging a tile restarts its stream; the real fix is starting the new stream before stopping the old), the smaller fixes B3, B4, B6, B7, U3 and U5, and unifi-protect 5.4.0 (wait for a 5.4.1, or a firmware update that breaks 5.3.1).
 
 The owner ran 1.0 to 1.2 on the real consoles, and their installed copy updated itself from 1.3.1 to 1.4.0 in the app (the installer path). Later versions are tested against the real consoles only through runs from source on a copy of the config. For 1.4.3 the owner used such a run themselves before the release: liveview import, enlarge, reconnect and the Access reader.
 
