@@ -82,8 +82,13 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function init() {
-  // Before any window exists, so none of them ever shows up on the screen of whoever runs the tests.
-  if (process.env.PANES_SELFTEST_DIR) (await import("./selftest.js")).keepWindowsOutOfTheWay();
+  // Before any window exists, so none of them (nor a message box) ever shows up on the screen of
+  // whoever runs the tests.
+  if (process.env.PANES_SELFTEST_DIR) {
+    const selftest = await import("./selftest.js");
+    selftest.keepWindowsOutOfTheWay();
+    selftest.answerDialogs();
+  }
   store = new Store();
   log = createLogger(path.join(app.getPath("userData"), "protect-panes.log"));
   log.info(`Protect Panes ${app.getVersion()} starting${MOCK ? " (mock mode)" : ""}`);
@@ -932,9 +937,30 @@ function setGridTile(grid, index, tile) {
 }
 
 /** Switch a grid's layout; cameras keep their order, and ones past the last tile come out. */
-function setGridTemplate(grid, templateId) {
+async function setGridTemplate(grid, templateId) {
   const tpl = templateById(templateId);
   if (!tpl?.cells) return;
+  // The placed cameras keep their order and close up, so a smaller layout loses the ones past its
+  // last tile, with their tile settings. That's saved at once with no undo: ask first.
+  const lost = grid.tiles.filter(Boolean).slice(tpl.cells.length);
+  if (lost.length) {
+    const names = lost.map((t) => {
+      const more = t.cycle?.then?.length ?? 0;
+      return more ? `${cameraTitle(t.key)} (and the ${more === 1 ? "camera" : `${more} cameras`} it cycles to)` : cameraTitle(t.key);
+    });
+    const n = lost.length === 1 ? "1 camera" : `${lost.length} cameras`;
+    const { response } = await dialog.showMessageBox(gridWins.get(grid.id)?.win, {
+      type: "warning",
+      buttons: [`Remove ${n} and switch`, "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      message: `Switch "${grid.name}" to ${tpl.label}?`,
+      detail: `${tpl.label} has ${tpl.cells.length === 1 ? "1 tile" : `${tpl.cells.length} tiles`}, so ${n} come${lost.length === 1 ? "s" : ""} out of the grid: ${names.join(", ")}. `
+        + "Their tile settings (quality, 360° view, picture, cycle) go with them.",
+    });
+    if (response !== 0 || !store.data.grids.includes(grid)) return;
+  }
+  // Placed again: the grid may have changed while the question was open.
   const placed = grid.tiles.filter(Boolean);
   grid.templateId = tpl.id;
   grid.tiles = Array.from({ length: tpl.cells.length }, (_, i) => placed[i] ?? null);

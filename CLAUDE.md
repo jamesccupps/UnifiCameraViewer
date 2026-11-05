@@ -42,7 +42,7 @@ npm run test:update       # signed manifest, verified download, the real swap he
 npm run test:arrange      # layout geometry (unit) + Arrange / Close all on real windows
 npm run test:editor       # layout editor: synthetic drag-and-drop into tiles, 360° view per tile, Edit, fill from screen
 npm run test:list         # camera list: Hide from list, previews (thumbnails, hover, request caching, setting)
-npm run test:grid         # grid windows: built in the editor, tiles live, tile/grid menus, Hide/Show, relaunch, layout switch
+npm run test:grid         # grid windows: built in the editor, tiles live, tile/grid menus, Hide/Show, relaunch, layout switch (a smaller one asks first)
 npm run test:transfer     # settings export/import: no passwords in the file, which passwords survive an import, this-PC settings, backup
 npm run test:cycle        # cycling grid tiles: order, per-camera settings, stops when hidden, no leftover streams, import and re-save
 npm run test:e2e          # fake UniFi OS consoles over HTTPS/WSS through the real unifi-protect library (incl. snapshots, 1.3.x passwords)
@@ -310,6 +310,7 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
   - A view's webContents isn't closed with its window: `#drop()` closes it, or its renderer lingers.
   - `sync()` matches views to `grid.tiles` by tile object identity, so a layout switch or a new camera keeps the other tiles' pages and streams. Anything that rebuilds `tiles` must reuse the existing tile objects: `saveEditorGrid()` once copied them (`{ ...kept }`), so every editor save of an open grid closed and reopened all its pages and streams. It now mutates the kept tile and refreshes each player's meta (a changed 360° view). The grid suite checks JS markers survive both a layout switch and an editor save.
   - Tile quality: `tileQuality()` sets `autoChannel` from the tile's physical width (debounced 600 ms after a resize, so a drag doesn't restart streams). A tile `channel` set from its menu overrides it.
+  - The Layout submenu (`setGridTemplate()`) keeps the placed cameras in order and closes up the gaps, so a smaller layout drops the ones past its last tile, with their tile settings, and saves at once. Since 1.4.5 it asks first, naming them (and noting a tile's cycle); before, a 3 × 3 switched to 2 × 2 lost five cameras without a word. A bigger layout doesn't ask. The layout editor drops them the same way, but only says so: nothing is saved until Save.
   - `page-title-updated` is prevented, or the page's `<title>` renames the window.
   - Hide / Show cameras (global only) hide grids too; per-console Hide all doesn't, since a grid mixes consoles.
   - The base page (`grid-window.*`) draws empty tiles and sends `grid:context-menu` with the tile index. An empty tile's menu offers "Put a camera here".
@@ -385,6 +386,8 @@ Any camera action takes `tile: "<grid name>#<index>"` instead of `win` to drive 
 `PANES_SELFTEST_DUMP_SEC=n` saves the first n seconds of each window's stream as `<cameraId>.mp4` in the results folder. That's how the color-range finding was measured (`ffmpeg -i` for flags, `signalstats` for levels). Against real consoles it records real video, so delete the dumps afterwards.
 
 Action results carry `t` (epoch ms), so a check can compare against the samples taken before an action. Each sample row also has main-process `visible` and `bounds` per window.
+
+Message boxes never show in self-test runs: a test can't click one, and it would land on the screen of whoever is using the PC. `answerDialogs()` (selftest.js) replaces `dialog.showMessageBox`. Each question goes into result.json as `dialogs: [{t, message, detail, buttons, response}]`, and the answer is the next button index in `PANES_SELFTEST_ANSWERS` (a JSON list), else the dialog's `cancelId`. The settings import's question is skipped in tests anyway (`PANES_TEST_FILE`).
 
 `win` is the index in window-open order. That's config order.
 

@@ -1785,6 +1785,7 @@ async function gridSuite() {
   const small = tile(mid, 1)?.bounds;
   check("Layout → 1 + 5 from a tile's menu: the first camera gets the big tile", big && small && big.width > 1.7 * small.width && run2.config.grids[0].templateId === "1+5",
     JSON.stringify({ big, small }));
+  check("a bigger layout loses nothing, so it doesn't ask", run2.result.dialogs?.length === 0, JSON.stringify(run2.result.dialogs));
   check("switching the layout keeps the tiles' pages (no reload)", a2[3]?.value === 42, JSON.stringify(a2[3]));
   check("Close grid closes it, and it stays closed", closeAct?.ok && run2.config.grids[0].open === false && !Object.keys(last(run2.result)).some((k) => k.startsWith("grid:")),
     `${closeAct?.error ?? ""} open=${run2.config.grids[0].open}`);
@@ -1882,6 +1883,46 @@ async function gridSuite() {
     t4(enlargedD, 0)?.visible && t4(enlargedD, 0).bounds.width > 500 && !t4(enlargedD, 1)?.visible
       && [0, 1, 2].every((i) => t4(endD, i)?.visible && t4(endD, i).status === "live" && t4(endD, i).bounds.width < 400),
     JSON.stringify({ enlarged: view(enlargedD), end: view(endD) }));
+
+  // Layout → a smaller template drops the cameras past its last tile, with their tile settings, and
+  // saves at once. It asks first: answered Cancel, then Remove (the harness answers the dialog).
+  const shrinkDir = tmpDir("grid-shrink");
+  const sk = (i) => `${A}/aaaaaaaa-cam${i}`;
+  fs.writeFileSync(path.join(shrinkDir, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Stair"] }],
+    windows: {},
+    grids: [{ id: "grid-shrink", name: "Shrink", templateId: "2x2", bounds: { x: 0, y: 0, width: 640, height: 400 }, open: true,
+      tiles: [{ key: sk(0), channel: 2 }, null, { key: sk(1), channel: 2 }, { key: sk(2), channel: 2, cycle: { seconds: 60, then: [{ key: sk(0), channel: 2 }] } }] }],
+    settings: { startHidden: true },
+  }, null, 2));
+  const run5 = await runApp({
+    userData: shrinkDir, results: path.join(shrinkDir, "results"), seconds: 9, extraArgs: ["--mock"],
+    env: {
+      PANES_SELFTEST_ANSWERS: JSON.stringify([1, 0]),
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 2800, do: "camera-js", tile: "Shrink#0", js: "window.__marker = 7" },
+        { at: 3000, do: "menu-click", tile: "Shrink#0", label: "1" },
+        { at: 5500, do: "menu-click", tile: "Shrink#0", label: "1" },
+        { at: 7500, do: "camera-js", tile: "Shrink#0", js: "window.__marker ?? null" },
+      ]),
+    },
+  });
+  const a5 = run5.result.actions;
+  const [q1, q2] = run5.result.dialogs ?? [];
+  const shrinkTiles = (s) => Object.keys(s?.cams ?? {}).filter((k) => k.startsWith("grid:Shrink#")).sort();
+  const afterCancel = run5.result.samples.filter((s) => s.t > a5[1]?.t && s.t < a5[2]?.t).at(-1);
+  check("a smaller layout asks first, naming the cameras that would go",
+    q1?.message === 'Switch "Shrink" to 1?' && q1.buttons[0] === "Remove 2 cameras and switch"
+      && /2 cameras come out of the grid: .*Dock.*, .*Stair.* \(and the camera it cycles to\)/.test(q1.detail),
+    JSON.stringify(q1));
+  check("Cancel leaves the grid as it was", JSON.stringify(shrinkTiles(afterCancel)) === JSON.stringify(["grid:Shrink#0", "grid:Shrink#2", "grid:Shrink#3"]),
+    JSON.stringify(shrinkTiles(afterCancel)));
+  const g5 = run5.config.grids[0];
+  check("Remove switches, saves the smaller layout and keeps the first camera's page",
+    q2?.response === 0 && g5.templateId === "1" && g5.tiles.length === 1 && g5.tiles[0]?.key === sk(0)
+      && JSON.stringify(shrinkTiles(run5.result.samples.at(-1))) === JSON.stringify(["grid:Shrink#0"]) && a5[3]?.value === 7,
+    JSON.stringify({ templateId: g5.templateId, tiles: g5.tiles.map((t) => t?.key ?? null), end: shrinkTiles(run5.result.samples.at(-1)), marker: a5[3] }));
 }
 
 /**

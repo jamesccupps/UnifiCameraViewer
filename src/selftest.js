@@ -1,4 +1,4 @@
-import { app, BrowserWindow, screen } from "electron";
+import { app, BrowserWindow, dialog, screen } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -22,6 +22,23 @@ export function keepWindowsOutOfTheWay() {
     win.setFocusable(false);
     win.setSkipTaskbar(true);
   });
+}
+
+/**
+ * A native message box can't be clicked by a test, and it would show on the screen of whoever is
+ * using the PC, whatever the test windows do. In self-test runs dialog.showMessageBox answers
+ * instead: the answer is the next button index in PANES_SELFTEST_ANSWERS (a JSON list), else the
+ * dialog's cancelId, and every question goes into result.json as `dialogs`.
+ */
+const asked = [];
+export function answerDialogs() {
+  const answers = JSON.parse(process.env.PANES_SELFTEST_ANSWERS || "[]");
+  dialog.showMessageBox = async (win, options) => {
+    const o = options ?? win;
+    const response = answers.length ? answers.shift() : (o.cancelId ?? 0);
+    asked.push({ t: Date.now(), message: o.message, detail: o.detail ?? "", buttons: o.buttons ?? [], response });
+    return { response, checkboxChecked: false };
+  };
 }
 export function runSelfTest({ camWins, log, connections, hooks }) {
   const dir = process.env.PANES_SELFTEST_DIR;
@@ -210,6 +227,7 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
       windows: {},
       samples,
       actions: results,
+      dialogs: asked,
       displays: screen.getAllDisplays().map((d) => ({ id: d.id, bounds: d.bounds, workArea: d.workArea, scaleFactor: d.scaleFactor })),
       objectPrototype: Object.keys(Object.prototype), // anything here means something polluted it
     };
