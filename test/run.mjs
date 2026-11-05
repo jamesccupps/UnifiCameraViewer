@@ -1261,7 +1261,21 @@ async function updateSuite() {
     fs.mkdirSync(path.join(installDir, "resources"), { recursive: true });
     fs.writeFileSync(path.join(installDir, "ProtectPanes.exe"), "v1");
     fs.writeFileSync(path.join(installDir, "resources", "app.asar"), "v1");
-    const log1 = await runHelper(u1, installDir);
+    // cmd's search looks in the working folder (here the updates folder) before PATH, unless
+    // NoDefaultCurrentDirectoryInExePath is set: Claude Code's shells set it, an app started from
+    // Explorer doesn't have it. So it's cleared for this launch, and a powershell.exe waits in the
+    // updates folder: node.exe, which refuses -NoProfile, so if it ran instead no helper would.
+    const planted = path.join(u1.stageDir, "powershell.exe");
+    fs.copyFileSync(process.execPath, planted);
+    const cwdSearch = process.env.NoDefaultCurrentDirectoryInExePath;
+    delete process.env.NoDefaultCurrentDirectoryInExePath;
+    let log1;
+    try { log1 = await runHelper(u1, installDir); }
+    finally {
+      if (cwdSearch !== undefined) process.env.NoDefaultCurrentDirectoryInExePath = cwdSearch;
+      fs.rmSync(planted, { force: true });
+    }
+    check("the helper runs System32's PowerShell, not a powershell.exe in the updates folder", /update: done/.test(log1), log1.trim() || "no helper log: the planted powershell.exe ran");
     check("swap helper replaced the install folder with the new version",
       fs.readFileSync(path.join(installDir, "ProtectPanes.exe"), "utf8") === "v2" && fs.readFileSync(path.join(installDir, "resources", "app.asar"), "utf8") === "v2" && /installed/.test(log1),
       log1.trim());

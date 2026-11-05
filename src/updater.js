@@ -270,13 +270,19 @@ export class Updater extends EventEmitter {
      * Measured on Windows 11: a detached powershell.exe (DETACHED_PROCESS, no console) exits 0 at
      * once without running anything, and a non-detached child sits in libuv's kill-on-close job, so
      * it would die with the app. A detached cmd.exe running "start" gives PowerShell its own console
-     * outside that job. Nothing on cmd's line is a path: the call travels base64-encoded, so no
-     * "&" or "%" in a user or folder name can be read by cmd.
+     * outside that job. The only path on cmd's line is PowerShell's own, under SystemRoot: the call
+     * travels base64-encoded, so no "&" or "%" in a user or folder name can be read by cmd.
      * cwd: started from Explorer or a shortcut, the app's working folder is the install folder, and
      * Windows won't rename a folder that's any process's working folder, the helper's included.
+     * Both programs by full path: cmd's search, which "start" uses, looks in the working folder (the
+     * updates folder) before PATH, so a powershell.exe there ran instead of the real one (measured;
+     * the update suite plants one). NoDefaultCurrentDirectoryInExePath turns that search off, but an
+     * app started from Explorer doesn't have it.
      */
     const encoded = Buffer.from(invoke, "utf16le").toString("base64");
-    const child = spawn(process.env.ComSpec || "cmd.exe", ["/d", "/c", "start", "/min", "powershell.exe", "-NoProfile", "-NonInteractive",
+    const sys32 = path.join(process.env.SystemRoot || "C:\\Windows", "System32");
+    const powershell = path.join(sys32, "WindowsPowerShell", "v1.0", "powershell.exe");
+    const child = spawn(path.join(sys32, "cmd.exe"), ["/d", "/c", "start", "/min", powershell, "-NoProfile", "-NonInteractive",
       "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], { cwd: this.#opts.stageDir, detached: true, stdio: "ignore", windowsHide: true });
     child.unref();
     return { script, log };
