@@ -86,7 +86,7 @@ test/legacy-password.cjs    Writes a password the way 1.3.x did (sync safeStorag
 test/connection-unit.mjs    ConsoleConnection with a fake ProtectClient.connect (run under Electron's Node by the connection suite)
 test/fake-console/          Fake UniFi OS console (HTTPS + WSS + snapshots) and its throwaway self-signed cert
 test/fixtures/              Synthetic fisheye frames with known geometry (ceiling circle truth: x .513, y .4938, r .4818)
-scripts/build-win.js        @electron/packager folder + zip, then electron-builder NSIS --prepackaged on that same folder -> Setup.exe; signs latest.json if the key exists
+scripts/build-win.js        @electron/packager folder, Electron fuses flipped, zip, then electron-builder NSIS --prepackaged on that same folder -> Setup.exe; signs latest.json if the key exists
 .github/workflows/test.yml  CI: npm test on windows-latest, plus a real Setup.exe install / start / uninstall on the runner
 scripts/sign-release.js     Writes latest.json {payload, signature} for a zip, installer and app.asar.gz (Ed25519, private key outside the repo)
 scripts/make-signing-key.js One-time: create the signing key pair (refuses to overwrite)
@@ -326,13 +326,19 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
   - It's `.gz`, not `.asar`, so Electron's patched `fs` never treats the download as an archive.
   - The helper hashes with `[Security.Cryptography.SHA256]`, not `Get-FileHash`. Started from PowerShell 7 (GitHub's runners, or a user's pwsh window), Windows PowerShell inherits pwsh's `PSModulePath` and `Get-FileHash` isn't found. That failed the first v1.4.0 release run, and it can't be reproduced on a PC without pwsh. Keep the helper off cmdlets that come from modules where a .NET call does the job. Expand-Archive and Move-Item worked in that same run.
   - Everything the app is lives in app.asar (no native modules, nothing unpacked). A new Electron needs nothing: the manifest's `asar.electron` is the new version, so copies on the old one take the full update.
-  - **A release that changes anything else in the folder** (packager or builder options, the icon, the exe's metadata) **needs a `release-notes/vX.Y.Z.full-update` file** (any content; a line saying why).
+  - **A release that changes anything else in the folder** (packager or builder options, the icon, the exe's metadata, the fuses) **needs a `release-notes/vX.Y.Z.full-update` file** (any content; a line saying why).
     - With it, `build-win.js` makes no .gz and deletes an old one, so `latest.json` has no `asar` entry and every copy takes the full update.
     - `sign-release.js` refuses to sign if a .gz turns up anyway.
     - The release workflow publishes only the files there are.
     - Before 1.4.4 the .gz was always built, signed and published, so the rule ("delete it before signing") couldn't be followed through CI.
     - Checked with a local build carrying the marker: no .gz, a manifest without `asar` that verifies, the upload list without it, and signing refused once a .gz was put back.
   - An installed copy's Settings → Apps version stays at what Setup.exe last wrote until the next full update.
+- **Electron fuses (build-win.js, since 1.4.5).** Right after packaging, before the zip and Setup.exe are made from the folder, `flipFuses()` (`@electron/fuses`, pinned) turns off `RunAsNode`, `EnableNodeOptionsEnvironmentVariable` and `EnableNodeCliInspectArguments`, and turns on `OnlyLoadAppFromAsar`.
+  - What it stops: the shipped exe working as node.exe (`ELECTRON_RUN_AS_NODE`), honouring `NODE_OPTIONS`, opening a debugger on `--inspect`, and loading a `resources\app` folder when app.asar is missing. It doesn't protect the passwords from malware running as the same user.
+  - Not `EnableEmbeddedAsarIntegrityValidation`: a small update swaps app.asar under an unchanged exe, the embedded hash would no longer match, and the app wouldn't start.
+  - Only the packaged exe is changed. `node_modules/electron/dist/electron.exe` keeps Electron's defaults, which the tests rely on (`ELECTRON_RUN_AS_NODE` for the unit checks). The fake installer in the update suite is a copy of node.exe, so its `NODE_OPTIONS` still works.
+  - Checked on the 1.4.5 build against a copy set back to the defaults. On the defaults copy, each of the four worked; on the fused build, none did (the `NODE_OPTIONS` fuse checked on its own, with run-as-node left on). Even with the defaults, a `resources\app` folder loads only when app.asar is gone, so that fuse buys little: whoever can delete app.asar can replace it. check-packaged passes, and Setup.exe and the zip carry the same exe as the folder.
+  - Don't test the no-app.asar case with the fuse on: Electron throws "Unable to find a valid app" and shows a main-process error dialog on the screen.
 - **Start with Windows and Defender.** Microsoft Defender raised "Anomaly detected in ASEP registry" (Medium) on the owner's PC in 1.4.0.
   - The cause: `applyLoginItem()` called `setLoginItemSettings` on every launch. With the setting off, Electron deletes the `protect-panes` value (the AppUserModelId) under `HKCU\…\CurrentVersion\Run` and `…\Explorer\StartupApproved\Run`. A test suite launches the app dozens of times.
   - Now it reads `getLoginItemSettings()` and writes only when that differs from the setting (`syncLoginItem()`, util.js).

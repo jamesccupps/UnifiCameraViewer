@@ -6,6 +6,7 @@
 //   dist/latest.json                                signed manifest for in-app updates, when the signing key is present
 // The installer is electron-builder's NSIS target in --prepackaged mode, so the zip and the
 // installer carry byte-identical app files.
+import { flipFuses, FuseV1Options, FuseVersion } from "@electron/fuses";
 import { packager } from "@electron/packager";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -55,6 +56,24 @@ const [appPath] = await withRetry(() => packager({
 }));
 
 console.log("packaged:", appPath);
+
+// Fuses, flipped before the zip and the installer are made from this folder. With Electron's
+// defaults the shipped exe doubles as node.exe (ELECTRON_RUN_AS_NODE), honours NODE_OPTIONS, opens
+// a debugger on --inspect, and loads a resources\app folder when app.asar is missing. Same-user
+// malware could still read what this user can, so this doesn't guard the passwords; it stops the
+// exe being used as a Node runtime or a debug target.
+// Not EnableEmbeddedAsarIntegrityValidation: a small update replaces app.asar under an unchanged
+// exe, so the hash embedded in the exe would no longer match and the app wouldn't start.
+// Changing these changes the exe: that release needs release-notes/vX.Y.Z.full-update.
+await flipFuses(path.join(appPath, "ProtectPanes.exe"), {
+  version: FuseVersion.V1,
+  [FuseV1Options.RunAsNode]: false,
+  [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
+  [FuseV1Options.EnableNodeCliInspectArguments]: false,
+  [FuseV1Options.OnlyLoadAppFromAsar]: true,
+});
+console.log("fuses: no run-as-node, no NODE_OPTIONS, no --inspect, app.asar only");
+
 fs.copyFileSync("README.md", path.join(appPath, "README.md"));
 
 const zip = path.resolve("dist", "ProtectPanes-win32-x64.zip");
