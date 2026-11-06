@@ -8,9 +8,9 @@ import path from "node:path";
  *
  * {
  *   version: 1,
- *   consoles: [{ id, name, host, username, password: { enc: "safe" | "plain", data: base64 } }],
- *   windows:  { "<consoleId>/<cameraId>": { open, hidden, listHidden, bounds: {x,y,width,height}, channel, onTop, name, hideName, clock, range, dewarp } },
- *   settings: { lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin },
+ *   consoles: [{ id, name, host, username, password: { enc: "safe" | "plain", data: base64 }, certSha256? }],
+ *   windows:  { "<consoleId>/<cameraId>": { open, hidden, listHidden, bounds: {x,y,width,height}, channel, onTop, name, hideName, clock, range, picture, dewarp } },
+ *   settings: { lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin, arrangeQuality, showPreviews, updateSource },
  *   layouts:  [{ id, name, windows: { "<consoleId>/<cameraId>": { bounds, channel, onTop, hideName, clock, range, picture, dewarp } }, editor? }],
  *   grids:    [{ id, name, templateId, bounds, open, hidden, onTop, editor?, tiles: [{ key, channel, range, picture, hideName, clock, dewarp, cycle? } | null] }]
  * }
