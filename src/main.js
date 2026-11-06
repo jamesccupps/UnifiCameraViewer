@@ -131,6 +131,13 @@ async function init() {
   screen.on("display-metrics-changed", () => displaysChanged(true));
   // At startup only say whether there's an update; downloading waits for a click.
   if (sourceKind(store.settings.updateSource)) updater.check({ download: false });
+  // A wall PC can run for weeks and would hear of a release only at its next start: check again once
+  // a day, the same way. Not while an update is downloading or ready to install: a check resets
+  // "ready", and the download would have to start over. PANES_UPDATE_CHECK_MS is for test runs only.
+  const recheckMs = (process.env.PANES_SELFTEST_DIR && Number(process.env.PANES_UPDATE_CHECK_MS)) || 24 * 60 * 60_000;
+  setInterval(() => {
+    if (sourceKind(store.settings.updateSource) && !["downloading", "ready"].includes(updater.state.status)) updater.check({ download: false });
+  }, recheckMs);
 
   if (!MOCK) pinConsoleCertificates();
   const MockConnection = MOCK ? (await import("./mock.js")).MockConnection : null;

@@ -278,6 +278,8 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
   3. Require a newer version (no downgrades).
   4. Download to `.part` while hashing, then check size and sha256 against the signed values. On any failure, close the file, then delete it.
 
+  Checking: at startup, then every 24 h (since 1.4.6; a wall PC used to hear of a release only at its next start). Both only say there's an update (`check({ download: false })`); downloading waits for a click. The timer skips "downloading" and "ready": a check resets "ready", and the download would start over. `PANES_UPDATE_CHECK_MS` shortens the timer in self-test runs only; the update suite's real-key run counts the checks in its log.
+
   Installing:
   - Only the packaged app installs (`app.isPackaged`).
   - `PANES_UPDATE_PUBKEY_FILE` swaps the key for tests, and only from source.

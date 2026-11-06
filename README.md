@@ -96,6 +96,8 @@ Installed copies (from `ProtectPanes-Setup.exe`, 1.3.0 on) and portable copies f
 2. Click **Check for updates**. A newer version is downloaded and checked first: it has to carry the release signature this copy of the app trusts, and match its signed checksum. Anything else is refused.
 3. Click **Install … and restart**. The app closes, installs the new version and opens again. Installer copies run the new installer silently; portable copies swap their folder. Settings and layouts carry over.
 
+The app also checks by itself when it starts and once a day after that, so a PC that runs for weeks still hears about a release. It only says so in **Settings → Updates**; nothing is downloaded until you click.
+
 From 1.4.0 on, most updates are small. When a release uses the same Electron as the copy you're running, only the app's own file changes, so the download is a couple of MB instead of 120-160 MB. Releases that move to a new Electron still come as the full installer or zip. One side effect on installed copies: Settings → Apps keeps showing the version the installer last wrote until the next full update. The app's own About section always shows the real version.
 
 The folder the app lives in has to be one you can write to and other accounts can't, e.g. `%LOCALAPPDATA%\Programs\Protect Panes`, not `C:\Program Files` or a folder at the root of `C:\`. When an update location is set, the app also checks once at startup (one small request for `latest.json`) and says so in the list and the tray menu. It never downloads without a click.

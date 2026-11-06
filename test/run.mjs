@@ -1509,9 +1509,12 @@ async function updateSuite() {
     && fs.readdirSync(path.join(app1.userData, "updates")).some((f) => f === "ProtectPanes-9.9.9.zip"), JSON.stringify(afterCheck));
   check("running from source refuses to install", /packaged app/.test(String(installTry)), String(installTry));
 
-  const app2 = await launch("realkey", {}, [{ at: 2500, do: "manager-js", js: read }]);
+  // Checked every 2 s here instead of once a day; each check fails on the signature and logs it.
+  const app2 = await launch("realkey", { PANES_UPDATE_CHECK_MS: "2000" }, [{ at: 2500, do: "manager-js", js: read }]);
   const real = app2.result.actions[0]?.value;
   check("with its real key the app refuses a release signed by another key", /signature doesn't match/.test(real?.status) && !fs.existsSync(path.join(app2.userData, "updates", "ProtectPanes-9.9.9.zip")), JSON.stringify(real));
+  const checks = (fs.readFileSync(path.join(app2.userData, "protect-panes.log"), "utf8").match(/update check: /g) ?? []).length;
+  check("a long-running copy checks for updates again on a timer (once a day; 2 s in this run)", checks >= 3, `${checks} checks logged in 8 s`);
   console.log(`  results: ${dir}`);
 }
 
