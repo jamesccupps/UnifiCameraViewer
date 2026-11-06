@@ -226,6 +226,7 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
   - Save current layout snapshots the on-screen windows (not hidden). It takes live bounds from the window unless it's minimized or maximized, then copies `LAYOUT_FIELDS` from the entry.
   - `applyLayout()` closes every open window not in the layout, writes the saved fields over each entry, moves or restarts existing windows, and calls `openCameraWindow`, which creates the window or un-hides it.
   - Layouts are switchable from the tray (Layouts submenu) and the camera list.
+  - Cameras of a console that's gone come out of everything at startup and on Remove console (`pruneCameras()`): window entries, grid tiles and their cycles, and each layout's windows and editor cells (and their cycles). Until 1.4.6 layouts kept them: applying skipped them, but the Layouts tab counted them and an export carried them. The layouts suite's second run checks both paths.
 - **Protect liveview import.**
   - `ConsoleConnection.liveviews()` maps `client.liveviews` to `{id, name, slots: [{cameras: [cameraId], seconds}]}`. `seconds` is Protect's `cycleInterval`.
   - `cycleMode` isn't read. The library types it as a plain string, and the fake console's "time" is the only value seen. So every slot with several cameras cycles on time, and a mode that switches on motion (if Protect has one) isn't reproduced. Unverified on a real console: the mode values, and that `cycleInterval` is in seconds.

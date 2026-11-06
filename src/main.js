@@ -103,12 +103,9 @@ async function init() {
     store.flush();
   }
 
-  // Drop window entries and grid tiles whose console no longer exists.
+  // Drop whatever points at a camera on a console that no longer exists.
   const consoleIds = new Set(store.data.consoles.map((c) => c.id));
-  for (const key of Object.keys(store.data.windows)) {
-    if (!consoleIds.has(key.split("/")[0])) delete store.data.windows[key];
-  }
-  for (const g of store.data.grids) g.tiles = g.tiles.map((t) => pruneTile(t, (key) => consoleIds.has(key.split("/")[0])));
+  pruneCameras((key) => consoleIds.has(key.split("/")[0]));
 
   updater = new Updater({
     currentVersion: app.getVersion(),
@@ -275,11 +272,8 @@ async function saveConsole(input) {
 
 async function removeConsole(id) {
   for (const cw of [...camWins.values()]) if (cw.consoleId === id) cw.win.close();
-  for (const key of Object.keys(store.data.windows)) if (key.startsWith(`${id}/`)) delete store.data.windows[key];
-  for (const g of store.data.grids) {
-    g.tiles = g.tiles.map((t) => pruneTile(t, (key) => !key.startsWith(`${id}/`)));
-    gridWins.get(g.id)?.sync();
-  }
+  pruneCameras((key) => !key.startsWith(`${id}/`));
+  for (const g of store.data.grids) gridWins.get(g.id)?.sync();
   store.data.consoles = store.data.consoles.filter((c) => c.id !== id);
   store.flush();
   const conn = connections.get(id);
@@ -779,6 +773,28 @@ const TILE_FIELDS = ["range", "picture", "hideName", "clock"]; // what a new til
 let pendingEditor = null; // grid id the camera list should open in the editor (tile menu → Edit grid…)
 
 /** A tile with only the cameras `keep` accepts, changed in place; null when its own camera goes. */
+/**
+ * Drop every camera `keep` says no to: window entries, grid tiles (and their cycles), and saved
+ * layouts' windows and editor cells. Layouts used to keep a removed console's cameras: applying one
+ * skipped them, but the Layouts tab counted them and an export carried them.
+ */
+function pruneCameras(keep) {
+  for (const key of Object.keys(store.data.windows)) if (!keep(key)) delete store.data.windows[key];
+  for (const g of store.data.grids) g.tiles = g.tiles.map((t) => pruneTile(t, keep));
+  for (const l of store.data.layouts) {
+    for (const key of Object.keys(l.windows)) if (!keep(key)) delete l.windows[key];
+    if (!Array.isArray(l.editor?.cells)) continue;
+    l.editor.cells = l.editor.cells.map((c) => {
+      if (typeof c?.key !== "string" || !keep(c.key)) return null;
+      if (Array.isArray(c.cycle?.keys)) {
+        c.cycle.keys = c.cycle.keys.filter((k) => typeof k === "string" && keep(k));
+        if (!c.cycle.keys.length) delete c.cycle;
+      }
+      return c;
+    });
+  }
+}
+
 function pruneTile(t, keep) {
   if (!t || !keep(t.key)) return null;
   if (t.cycle) {

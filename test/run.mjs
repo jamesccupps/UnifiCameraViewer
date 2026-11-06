@@ -1139,6 +1139,50 @@ async function layoutsSuite() {
     `${openSet(end)} ${JSON.stringify(["lobby", "dock", "ramp"].map((n) => [end[keys[n]]?.bounds, first[keys[n]]?.bounds]))}`);
   check("window left out of the layout is closed in config", config.windows[keys.stair]?.open === false);
   console.log(`  results: ${results}`);
+
+  // A saved layout keeps only cameras on consoles that exist: Z is gone before the start, Garage is
+  // removed during the run. Its windows and its editor cells (with a cycle) both lose them.
+  const Z = "zzzzzzzz-0000-4000-8000-000000000009";
+  const goneDir = tmpDir("layouts-gone");
+  fs.writeFileSync(path.join(goneDir, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [
+      { id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock"] },
+      { id: B, name: "Garage", host: "mock-b", username: "m", password: null, mockCameras: ["Ramp"] },
+    ],
+    windows: {},
+    layouts: [{
+      id: "lay-mixed", name: "Mixed",
+      windows: { [keys.lobby]: { bounds: { x: 0, y: 0, width: 480, height: 270 } }, [keys.ramp]: { bounds: { x: 500, y: 0, width: 480, height: 270 } }, [`${Z}/zzzzzzzz-cam0`]: { bounds: { x: 0, y: 300, width: 480, height: 270 } } },
+      editor: { displayId: 0, templateId: "2x2", cells: [
+        { key: keys.lobby, mode: "quad" },
+        { key: keys.ramp, mode: "quad", cycle: { keys: [`${Z}/zzzzzzzz-cam1`, keys.dock], seconds: 10 } },
+        { key: `${Z}/zzzzzzzz-cam0`, mode: "quad" },
+        null,
+      ] },
+    }],
+    settings: { startHidden: false },
+  }, null, 2));
+  const layoutsTab = `panes.invoke("mgr:state").then((s) => s.layouts.map((l) => ({ count: l.count, cells: l.editor.cells.map((c) => c && [c.key, c.cycle?.keys ?? []]) })))`;
+  const gone = await runApp({
+    userData: goneDir, results: path.join(goneDir, "results"), seconds: 6, extraArgs: ["--mock"],
+    env: {
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 2500, do: "manager-js", js: layoutsTab },
+        { at: 3000, do: "manager-js", js: `panes.invoke("mgr:remove-console", ${JSON.stringify(B)}).then(() => true)` },
+        { at: 4000, do: "manager-js", js: layoutsTab },
+      ]),
+    },
+  });
+  const [atStart, , afterRemove] = gone.result.actions.map((a) => a.value?.[0] ?? a.error);
+  check("at startup a layout drops cameras of a console that's gone (Layouts tab count and editor cells)",
+    atStart?.count === 2 && JSON.stringify(atStart.cells) === JSON.stringify([[keys.lobby, []], [keys.ramp, [keys.dock]], null, null]),
+    JSON.stringify(atStart));
+  const saved = gone.config.layouts[0];
+  check("removing a console takes its cameras out of saved layouts too",
+    afterRemove?.count === 1 && JSON.stringify(afterRemove.cells) === JSON.stringify([[keys.lobby, []], null, null, null])
+      && JSON.stringify(Object.keys(saved?.windows ?? {})) === JSON.stringify([keys.lobby]) && JSON.stringify(saved?.editor?.cells) === JSON.stringify([{ key: keys.lobby, mode: "quad" }, null, null, null]),
+    JSON.stringify({ afterRemove, saved }));
 }
 
 // ---------------------------------------------------------------------------------------------
