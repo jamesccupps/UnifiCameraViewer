@@ -41,19 +41,30 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 // Most 3 s polls find nothing changed; rendering then costs ~7 ms for 50 cameras and changes nothing.
 // After a click, though, always render: a toggle whose action changed nothing must snap back.
 // (Called as refresh() or .then(refresh) after actions; the poll and mgr:changed pass onlyIfChanged.)
+// A refresh asked for while one runs needs no second mgr:state: main answers in order and reads the
+// state when it answers, so the running one's state comes after whatever that caller saw finish.
+// What mustn't be lost is a click's "render anyway": dropped, a toggle that changed nothing stayed
+// as clicked when a poll happened to be running.
 let lastStateJson = "";
+let renderAnyway = false;
 async function refresh(opts) {
-  if (refreshing) return;
+  const always = opts?.onlyIfChanged !== true;
+  if (refreshing) {
+    if (always) renderAnyway = true;
+    return;
+  }
   refreshing = true;
+  renderAnyway = always;
   try {
     const next = await panes.invoke("mgr:state");
     const json = JSON.stringify(next);
-    if (opts?.onlyIfChanged === true && json === lastStateJson) return;
+    if (!renderAnyway && json === lastStateJson) return;
     lastStateJson = json;
     state = next;
     render();
   } finally {
     refreshing = false;
+    renderAnyway = false;
   }
 }
 

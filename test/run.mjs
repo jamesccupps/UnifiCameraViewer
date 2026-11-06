@@ -2293,6 +2293,17 @@ async function listSuite() {
     return r;
   })()`;
   const previewsOff = `(() => { const box = document.querySelector('[data-setting="showPreviews"]'); box.checked = false; box.dispatchEvent(new Event("change")); return true; })()`;
+  // A click's refresh always renders, so a toggle whose action changed nothing snaps back. Asked
+  // for while a poll's refresh (render only if changed) was running, it used to be dropped.
+  const snapBack = `(async () => {
+    const box = document.querySelector('[data-setting="showNames"]');
+    const before = box.checked;
+    refresh({ onlyIfChanged: true }); // a 3 s poll, in flight
+    box.checked = !before;            // a toggle whose action changes nothing
+    refresh();                        // its refresh, while the poll's runs
+    await new Promise((r) => setTimeout(r, 400));
+    return { before, after: box.checked };
+  })()`;
   const run2 = await runApp({
     userData: pd, results: path.join(pd, "results"), seconds: 12, extraArgs: ["--mock"],
     env: {
@@ -2302,9 +2313,13 @@ async function listSuite() {
         { at: 5500, do: "manager-js", js: hoverPalette },
         { at: 9000, do: "manager-js", js: previewsOff },
         { at: 10500, do: "manager-js", js: readThumbs },
+        { at: 11000, do: "manager-js", js: snapBack }, // last: results are kept in the order they finish
       ]),
     },
   });
+  const snap = run2.result.actions.find((a) => a.act.js === snapBack);
+  check("a click's refresh asked for during a poll's still renders (a toggle that changed nothing snaps back)",
+    snap?.value && snap.value.after === snap.value.before, JSON.stringify(snap?.value ?? snap?.error));
   const [thumbs, popList, popPalette, , thumbsOff] = run2.result.actions.map((a) => a.value ?? { error: a.error });
   check("each camera row shows a JPEG preview from the camera",
     thumbs?.["Building Lobby"]?.jpeg && thumbs["Building Dock"]?.jpeg && thumbs["Garage Ramp"]?.jpeg, JSON.stringify(thumbs));
