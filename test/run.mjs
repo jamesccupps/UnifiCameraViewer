@@ -853,6 +853,9 @@ async function securitySuite() {
     await panes.invoke("mgr:set-channel", { key: ${JSON.stringify(`${A}/never-seen`)}, channel: NaN });
     await panes.invoke("mgr:set-setting", { name: "updateSource", value: true });
     await panes.invoke("mgr:set-setting", { name: "toString", value: true });
+    await panes.invoke("mgr:open-camera", ${JSON.stringify(`${lobby}/extra`)});
+    await panes.invoke("mgr:find-camera", ${JSON.stringify(`${A}/x/y`)});
+    await panes.invoke("mgr:set-list-hidden", { key: ${JSON.stringify(`${A}/a/b`)}, hidden: true });
     return true;
   })()`;
   const { result, config } = await runApp({
@@ -870,10 +873,11 @@ async function securitySuite() {
     },
   });
   const val = (doing, js) => result.actions.find((a) => a.act.do === doing && a.act.js === js);
-  check("IPC input that isn't a camera key, a channel or a setting is ignored",
+  check("IPC input that isn't a camera key, a channel or a setting is ignored (open, find and hide included)",
     val("manager-js", badIpc)?.value === true && result.objectPrototype?.length === 0 && config.windows[lobby]?.channel === 2
-      && !(`${A}/never-seen` in config.windows) && config.settings.updateSource === "" && !Object.hasOwn(config.settings, "toString"),
-    JSON.stringify({ act: val("manager-js", badIpc)?.error, proto: result.objectPrototype, lobby: config.windows[lobby]?.channel, settings: config.settings }));
+      && !(`${A}/never-seen` in config.windows) && config.settings.updateSource === "" && !Object.hasOwn(config.settings, "toString")
+      && JSON.stringify(Object.keys(config.windows)) === JSON.stringify([lobby]),
+    JSON.stringify({ act: val("manager-js", badIpc)?.error, proto: result.objectPrototype, lobby: config.windows[lobby]?.channel, settings: config.settings, windows: Object.keys(config.windows) }));
   check("pages can't be navigated away (what a dropped file or link does)",
     val("manager-js", where)?.value === "manager.html" && val("camera-js", where)?.value === "camera.html",
     JSON.stringify([val("manager-js", where), val("camera-js", where)].map((a) => a?.value ?? a?.error)));

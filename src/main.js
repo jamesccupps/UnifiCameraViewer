@@ -287,6 +287,17 @@ async function removeConsole(id) {
 
 // Every explicit open (switch, Find, Show all, Show cameras) ends with the window on screen, so it
 // also clears a "hidden" flag.
+/**
+ * `key` if it's "<consoleId>/<cameraId>" on a console that exists, else null. The one check for
+ * keys a page sends. The camera itself isn't checked: before a console connects its cameras are
+ * only the saved ones, and they can still be opened.
+ */
+function cameraKey(key) {
+  const k = String(key ?? "");
+  const [consoleId, cameraId, ...rest] = k.split("/");
+  return cameraId && !rest.length && store.data.consoles.some((c) => c.id === consoleId) ? k : null;
+}
+
 function openCameraWindow(key, { flash = true } = {}) {
   const existing = camWins.get(key);
   if (existing) {
@@ -303,8 +314,8 @@ function openCameraWindow(key, { flash = true } = {}) {
     if (flash) highlight(existing);
     return;
   }
+  if (!cameraKey(key)) return;
   const [consoleId, cameraId] = key.split("/");
-  if (!consoleId || !cameraId || !store.data.consoles.some((c) => c.id === consoleId)) return;
 
   const entry = (store.data.windows[key] ??= { open: true, bounds: null, channel: null, onTop: false, name: "" });
   entry.open = true;
@@ -500,8 +511,7 @@ function openAllCameras(consoleId) {
  * their console in the camera list, Show all and the layout editor skip them, and the window closes.
  */
 function setListHidden(key, hidden) {
-  const [consoleId, cameraId] = key.split("/");
-  if (!cameraId || !store.data.consoles.some((c) => c.id === consoleId)) return;
+  if (!cameraKey(key)) return;
   const entry = (store.data.windows[key] ??= { open: false, bounds: null, channel: null, onTop: false, name: "" });
   if (hidden) {
     entry.listHidden = true;
@@ -704,8 +714,7 @@ function screensForEditor() {
  * first in one tile only. cycle is { keys: [the other cameras], seconds }.
  */
 function editorCells(input, tpl) {
-  const consoleIds = new Set(store.data.consoles.map((c) => c.id));
-  const known = (k) => typeof k === "string" && consoleIds.has(k.split("/")[0]) && !!k.split("/")[1];
+  const known = (k) => typeof k === "string" && cameraKey(k) !== null;
   const seen = new Set();
   return (Array.isArray(input?.cells) ? input.cells : []).slice(0, tpl.cells.length).map((c) => {
     const key = typeof c?.key === "string" ? c.key : "";
@@ -2122,10 +2131,8 @@ function registerIpc() {
   handle("mgr:set-channel", ({ key, channel } = {}) => {
     // A camera on a known console, and a real channel id. "__proto__" as the key used to write
     // .channel onto Object.prototype (every object then had one); NaN or 1.5 used to be saved.
-    const k = String(key);
-    const [consoleId, cameraId] = k.split("/");
-    if (!cameraId || k.split("/").length !== 2 || !store.data.consoles.some((c) => c.id === consoleId)) return;
-    if (!Number.isInteger(channel) || channel < 0 || channel > 9) return;
+    const k = cameraKey(key);
+    if (!k || !Number.isInteger(channel) || channel < 0 || channel > 9) return;
     const cw = camWins.get(k);
     if (cw) return setChannel(cw, channel);
     const entry = (store.data.windows[k] ??= { open: false, bounds: null, channel: null, onTop: false, name: "" });
@@ -2146,7 +2153,7 @@ function registerIpc() {
   handle("mgr:reset-positions", () => tileOpenWindows());
   handle("mgr:open-all", (consoleId) => openAllCameras(String(consoleId)));
   handle("mgr:set-list-hidden", ({ key, hidden } = {}) => setListHidden(String(key), !!hidden));
-  handle("mgr:preview", (key) => (store.settings.showPreviews ? previews.get(String(key)) : null));
+  handle("mgr:preview", (key) => (store.settings.showPreviews && cameraKey(key) ? previews.get(cameraKey(key)) : null));
   handle("mgr:raise", () => managerWin.moveTop());
   handle("mgr:open-grid", (id) => openGrid(String(id)));
   handle("mgr:close-grid", (id) => closeGrid(String(id)));
