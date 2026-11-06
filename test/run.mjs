@@ -273,6 +273,37 @@ async function mockSuite() {
   check("Any shape takes the panorama window's aspect lock off", config.windows[keys.pano]?.dewarp?.aspect === "free" && cams[keys.pano]?.aspectLock === null,
     JSON.stringify({ saved: config.windows[keys.pano]?.dewarp?.aspect, lock: cams[keys.pano]?.aspectLock }));
   console.log(`  results: ${results}`);
+
+  // A settings refresh (here Show time from the menu) carries the saved aim. Landing mid-drag it
+  // used to snap the view back, and landing in the 400 ms before the aim is sent it lost the whole
+  // drag. Two drags of the same size, each 100 px right and 40 px down: each must count.
+  const aimDir = tmpDir("mock-aim");
+  fs.writeFileSync(path.join(aimDir, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby"] }],
+    windows: {
+      [keys.quad]: { open: true, bounds: { x: 0, y: 0, width: 960, height: 540 }, channel: 1,
+        dewarp: { mode: "quad", mount: "ceiling", lensFov: 180, circle: CEILING_TRUTH, views: [0, 90, -90, 180].map((pan) => ({ pan, tilt: -35, fov: 62 })), focus: -1, pano: { pan: 0, tilt: -35 } } },
+    },
+    settings: { startHidden: true },
+  }, null, 2));
+  const aim = await runApp({
+    userData: aimDir, results: path.join(aimDir, "results"), seconds: 7, extraArgs: ["--mock"],
+    env: {
+      PANES_MOCK_FISHEYE: path.join(FIXTURES, "fisheye-ceiling.png"),
+      PANES_SELFTEST_ACTIONS: JSON.stringify([
+        { at: 3000, do: "drag", win: 0, from: [240, 135], to: [340, 175] },
+        { at: 3080, do: "menu-click", win: 0, label: "Show time" }, // mid-drag
+        { at: 4500, do: "drag", win: 0, from: [240, 135], to: [340, 175] },
+        { at: 4800, do: "menu-click", win: 0, label: "Show time" }, // after it, before the aim is sent
+      ]),
+    },
+  });
+  // One drag: pan 0 -> about -23, tilt -35 -> about -25.8 (62° over the view's 270 px).
+  const v0 = aim.config.windows[keys.quad]?.dewarp?.views?.[0];
+  check("a settings refresh during or just after a 360° drag keeps the aim (both drags count)",
+    v0 && v0.pan < -40 && v0.pan > -52 && v0.tilt > -20 && v0.tilt < -12 && aim.result.actions.filter((a) => a.act.do === "menu-click").every((a) => a.ok),
+    JSON.stringify({ v0, clicks: aim.result.actions.filter((a) => a.act.do === "menu-click").map((a) => a.ok ?? a.error) }));
 }
 
 // ---------------------------------------------------------------------------------------------

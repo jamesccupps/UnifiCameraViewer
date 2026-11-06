@@ -94,6 +94,7 @@ window.Dewarper = (() => {
       this.detectedCircle = null;
       this.frameCallback = null;
       this.drag = null;
+      this.aimPending = false; // views changed here and not sent to main yet
       this.calibrating = false;
       this.glTried = false; // the WebGL context is created only once a 360° view is turned on
       this.glSetups = 0;
@@ -194,7 +195,14 @@ window.Dewarper = (() => {
     // ------------------------------------------------------------------ public
 
     setConfig(cfg) {
+      // While the aim is being changed here (a drag, or the moments before a wheel zoom is sent),
+      // the page's views are the truth. A settings refresh (a connection event, a Settings toggle,
+      // a lens change in another copy) carries the last saved aim: it used to snap the view back
+      // mid-drag, and the wait before sending then sent that old aim. Another mount or mode wins.
+      const aim = cfg && this.cfg && (this.drag || this.aimPending) && cfg.mode === this.cfg.mode && cfg.mount === this.cfg.mount
+        ? { views: this.cfg.views, pano: this.cfg.pano } : null;
       this.cfg = cfg ? structuredClone(cfg) : null;
+      if (aim) Object.assign(this.cfg, aim);
       const on = !!this.cfg && this.cfg.mode !== "off";
       if (on && !this.glTried) {
         this.glTried = true;
@@ -441,7 +449,8 @@ window.Dewarper = (() => {
         this.#draw();
         this.#emitViews();
       });
-      const end = () => { this.drag = null; };
+      // Let go: send the aim now rather than 400 ms later.
+      const end = () => { this.drag = null; this.#sendViews(); };
       cv.addEventListener("pointerup", end);
       cv.addEventListener("pointercancel", end);
       cv.addEventListener("wheel", (e) => {
@@ -467,7 +476,15 @@ window.Dewarper = (() => {
 
     #emitViews() {
       clearTimeout(this.emitTimer);
-      this.emitTimer = setTimeout(() => this.onChange({ views: this.cfg.views, pano: this.cfg.pano }), 400);
+      this.aimPending = true;
+      this.emitTimer = setTimeout(() => this.#sendViews(), 400);
+    }
+
+    #sendViews() {
+      clearTimeout(this.emitTimer);
+      if (!this.aimPending || !this.cfg) return;
+      this.aimPending = false;
+      this.onChange({ views: this.cfg.views, pano: this.cfg.pano });
     }
 
     // ------------------------------------------------------------------ calibration
