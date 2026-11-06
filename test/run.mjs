@@ -2559,7 +2559,8 @@ async function e2eSuite() {
   console.log("\nEnd-to-end suite (fake UniFi OS consoles, real unifi-protect library)");
   const P = { building: 18443, garage: 18444, bad: 18445 };
   const servers = await Promise.all([
-    startConsole(P.building, "ok", "Building", { FAKE_FISHEYE: path.join(FIXTURES, "fisheye-ceiling.png") }),
+    // Building's cam0 ("drops") loses its socket once, 4 s after it opens, leaving the run time to recover.
+    startConsole(P.building, "ok", "Building", { FAKE_FISHEYE: path.join(FIXTURES, "fisheye-ceiling.png"), FAKE_DROP_MS: "4000" }),
     startConsole(P.garage, "ok", "Garage", { FAKE_ACCESS: "1" }), // plus a UniFi Access door reader
     startConsole(P.bad, "badauth", "Nope"),
   ]);
@@ -2664,7 +2665,9 @@ async function e2eSuite() {
       check(`${name}: live and decoding`, c?.status === "live" && c.decodedFrames >= 30, c && `status=${c.status} frames=${c.decodedFrames}`);
       check(`${name}: near live edge (lag < 1.5 s)`, c && c.lag < 1.5, c && `lag=${c.lag?.toFixed(2)}`);
     }
-    check("dropped livestream socket recovered", cams[keys.drops]?.rebuilds >= 2 && cams[keys.drops]?.resetRequests === 0, `rebuilds=${cams[keys.drops]?.rebuilds}`);
+    const dropAt = servers[0].output.find((l) => l.includes(`dropping livestream ${cam(P.building, 0)}`));
+    check("dropped livestream socket recovered", !!dropAt && cams[keys.drops]?.rebuilds >= 2 && cams[keys.drops]?.resetRequests === 0,
+      `dropped: ${!!dropAt}, rebuilds=${cams[keys.drops]?.rebuilds}`);
     check("bogus codec string fell back to codec from init segment", /avc1\./.test(cams[keys.bogusCodec]?.mime ?? "") && !/bogus/i.test(cams[keys.bogusCodec]?.mime ?? ""), cams[keys.bogusCodec]?.mime);
     check("offline camera shows offline", cams[keys.offline]?.status === "offline", cams[keys.offline]?.status);
     check("camera on wrong-password console shows an error", cams[keys.badLogin]?.status === "error", cams[keys.badLogin]?.status);

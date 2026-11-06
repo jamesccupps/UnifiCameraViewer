@@ -3,7 +3,8 @@
 //   node test/fake-console/server.mjs <port> <mode> <namePrefix>
 //
 // mode "ok":      login works (user "viewer" / "secret"), 4 cameras:
-//                   cam0  normal; its livestream socket is dropped every 10 s (forces reconnect + discontinuity)
+//                   cam0  normal; with FAKE_DROP_MS=<n>, its first livestream socket is cut n ms after it
+//                         opens, once (forces a reconnect + discontinuity)
 //                   cam1  normal; sends a bogus codec string (exercises the renderer's codec fallback)
 //                   cam2  offline (state DISCONNECTED)
 //                   cam3  AI 360 fisheye, ceiling mount, only when FAKE_FISHEYE=<png> is set
@@ -32,6 +33,11 @@ const mode = process.argv[3] || "ok";
 const prefix = process.argv[4] || "Fake";
 const FISHEYE = process.env.FAKE_FISHEYE || "";
 const ACCESS = process.env.FAKE_ACCESS === "1";
+// Once, early, and on one console only. It used to be every cam0 socket on every console, 10 s after
+// it opened: in a 16 s e2e run a slow runner (1.4.6's first release run) couldn't recover in time,
+// and the drop on Garage landed inside the window its Reconnect stream check counts negotiations in.
+const DROP_MS = Number(process.env.FAKE_DROP_MS || 0);
+let dropped = false;
 const USER = "viewer";
 const PASS = "secret";
 const log = (...a) => console.log(`[fake:${port}]`, ...a);
@@ -215,7 +221,10 @@ function streamTo(ws, camId, channel) {
     }
   });
   ws.on("close", () => proc.kill("SIGKILL"));
-  if (idx === 0 && mode === "ok") setTimeout(() => ws.terminate(), 10_000);
+  if (idx === 0 && mode === "ok" && DROP_MS > 0 && !dropped) {
+    dropped = true;
+    setTimeout(() => { log("dropping livestream", camId); ws.terminate(); }, DROP_MS);
+  }
 }
 
 server.listen(port, "127.0.0.1", () => log(`listening (${mode})`));
