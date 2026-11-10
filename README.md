@@ -101,7 +101,7 @@ Dewarping is done by the graphics chip on the one stream that's already being de
 
 ## Updating the app
 
-Installed copies (from `ProtectPanes-Setup.exe`, 1.3.0 on) and portable copies from 1.3.1 on can update themselves.
+Installed copies (from `ProtectPanes-Setup.exe`, 1.3.0 on) and portable copies from 1.3.1 on can update themselves. Copies installed with Scoop update with `scoop update protectpanes` instead: from 1.4.7 the app tells them about a new version but doesn't install it.
 
 1. The camera list's **Settings → Updates** shows the **update location**. By default it's this project's latest GitHub release. To update from your own copy instead, set it to a folder (for example `\\server\share\Protect Panes`) or web address holding `ProtectPanes-win32-x64.zip` plus `latest.json`. Clear it to turn update checks off.
 2. Click **Check for updates**. A newer version is downloaded and checked first: it has to carry the release signature this copy of the app trusts, and match its signed checksum. Anything else is refused.
