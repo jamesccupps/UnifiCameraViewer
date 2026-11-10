@@ -49,7 +49,9 @@ npm run test:grid         # grid windows: built in the editor, tiles live, tile/
 npm run test:transfer     # settings export/import: no passwords in the file, which passwords survive an import, this-PC settings, backup
 npm run test:cycle        # cycling grid tiles: order, per-camera settings, stops when hidden, no leftover streams, import and re-save; no blank tile on a switch or a quality change
 npm run test:e2e          # fake UniFi OS consoles over HTTPS/WSS through the real unifi-protect library (incl. snapshots, 1.3.x passwords)
+npm run test:release      # release.yml's rules (which jobs can sign, what runs in them) and the uninstaller swap; no app runs
 npm run build:win         # dist/Protect Panes-win32-x64/ + zip + ProtectPanes-Setup.exe + ProtectPanes-app.asar.gz + latest.json (signed)
+                          #   + ProtectPanes-uninstaller.exe; no Authenticode (the release workflow does that, see Releasing)
 ```
 
 **Run `npm test` after any change and before building.** It prints PASS/FAIL per check, and keeps screenshots of every window plus `result.json` (per-window playback stats) in the printed results folder. **Look at the screenshots** for anything visual. Tests use their own temp settings folder, so they never touch the real config and can run while the app is open.
@@ -417,24 +419,47 @@ Releases are built and published by `.github/workflows/release.yml` when a `vX.Y
 3. `npm test`, commit, push `main`.
 4. `git tag -a vX.Y.Z -m "Protect Panes X.Y.Z"` and `git push origin vX.Y.Z`.
 
-The workflow has two jobs, so the signing key never meets the build's dependencies. Until 1.4.3 the key sat in a file while `npm run build:win` ran the packager and electron-builder, and any compromised package could have read it and signed updates for every installed copy.
+A tag `vX.Y.Z-signtest.N` (X.Y.Z still package.json's version) runs every job except publish: for trying a change to signing without a release. Delete the tag afterwards (`git push origin :refs/tags/<tag>`, `git tag -d <tag>`).
+
+There are two signatures, and neither is ever made next to the build's dependencies (`npm ci`: the packager, electron-builder and everything they pull in):
+- **latest.json**, Ed25519, from the `UPDATE_SIGNING_KEY` secret: what installed copies check before an update runs. Until 1.4.3 the key sat in a file while `npm run build:win` ran the packager and electron-builder, and any compromised package could have read it and signed updates for every installed copy.
+- **Authenticode** on ProtectPanes.exe, the uninstaller and Setup.exe (since 1.4.8): what Windows shows as the publisher, for SmartScreen and Smart App Control. See Code signing below. Anything running in a job that's signed in to Azure could sign whatever it liked, so the jobs that sign run no npm code, no Node and never the app.
+
+electron-builder makes the uninstaller and packs it into Setup.exe in one run, and Setup.exe must carry the signed exe, so the files go back and forth between six jobs:
 
 **build** (Windows, read-only token, no secrets):
-1. Checks the tag matches package.json.
+1. Checks the tag matches package.json (or is its `-signtest.N`).
 2. Runs `npm ci`, then `npm test`.
-3. Builds the zip, Setup.exe and `ProtectPanes-app.asar.gz`, unsigned: there's no key on the runner.
-4. Runs the packaged app from two install folders (`scripts/check-packaged.mjs`), then smoke-tests that exact installer (install, version, uninstall).
-5. Uploads the three files as the `release-files` artifact.
+3. Runs `npm run build:win`: the zip, Setup.exe and `ProtectPanes-app.asar.gz`, all unsigned. `scripts/installer-sign-hook.js` keeps the uninstaller electron-builder made as `dist/ProtectPanes-uninstaller.exe`.
+4. Uploads the zip, that uninstaller and the .gz as the `build` artifact. This Setup.exe isn't used.
 
-**publish** (Ubuntu, `contents: write`, the only job that reads the `UPDATE_SIGNING_KEY` secret):
+**sign-app** (Windows, `release` environment, can sign; runs only pinned actions, Microsoft's ArtifactSigning module and `scripts/authenticode.ps1`):
+1. Unzips the app folder, signs ProtectPanes.exe and the uninstaller.
+2. Zips the folder again with PowerShell 7's Compress-Archive, as the build did (entries named with `/`, under `Protect Panes-win32-x64`).
+
+**installer** (Windows, read-only token, `npm ci --ignore-scripts`):
+1. Unzips the signed app folder into `dist/`.
+2. Runs `node scripts/build-win.js --installer --uninstaller <build's> <signed>`: Setup.exe around the signed folder. The hook puts the signed uninstaller in place of the one this run makes, but only if this run made the same file byte for byte, and otherwise stops the build. NSIS makes the same uninstaller every time for the same version and options, whatever the app folder holds: checked 2026-11-10 with three builds of 1.4.7, one with ProtectPanes.exe changed, all the same SHA-256. Checked with a stand-in signed uninstaller (50,000 random bytes added): Setup.exe grew by 50,015 bytes, and a mismatch exits 1 with no Setup.exe.
+
+**sign-setup** (like sign-app): signs Setup.exe.
+
+**verify** (Windows, read-only token, no `npm ci`):
+1. The zip has `Protect Panes-win32-x64/ProtectPanes.exe` (Scoop's layout), and Setup.exe and the zip's exe are signed by James Cupps and timestamped (`scripts/check-signatures.ps1`, which also writes each result as an annotation).
+2. Runs the packaged app from two install folders (`scripts/check-packaged.mjs`).
+3. Installs Setup.exe silently and checks the installed exe's version, its signature and the uninstaller's, and that the installed exe is the zip's, byte for byte. Then uninstalls.
+4. Uploads the files it checked as the `release-files` artifact.
+
+**publish** (Ubuntu, `contents: write`, the only job that reads the `UPDATE_SIGNING_KEY` secret; skipped for a signtest):
 1. Checks out the tag fresh, with no `npm ci`. Only Node's own modules and the repo's scripts run here.
-2. Downloads the three files.
+2. Downloads the release files.
 3. Writes the key to a temp file and signs `latest.json` (`scripts/sign-release.js`). The Electron version comes from package-lock.json, and the unpacked app.asar hash from gunzipping the .gz, so no node_modules or build folder is needed.
 4. Deletes the key.
 5. Runs `scripts/verify-release.mjs`: the signature against the public key built into the app, then each file's size and SHA-256. A wrong secret stops here.
 6. Runs `gh release create` with all four files (Setup.exe, the zip, `ProtectPanes-app.asar.gz`, `latest.json`).
 
-The limit: a compromised dependency can still tamper with what it builds, and publish signs that. It can't take the key and sign something else later. The split was checked by running publish's sign and verify steps in a copy of the repo with no node_modules, on a local build, with a throwaway key. It runs for real on the first release after it.
+The limit: a compromised dependency can still tamper with what it builds, and both signatures would cover that. It can't take either identity and sign something else. `npm run test:release` checks the workflow keeps these rules (which jobs can sign in to Azure, what runs in them, who reads the key) and tests the uninstaller swap.
+
+**Code signing** (Authenticode, from 1.4.8; earlier releases were unsigned): Azure Artifact Signing, the account and certificate Slate, NoteForge, PingerPlot and UniFi Stock Watcher use (account `SlateAccount`, profile `Slate`, endpoint `https://eus.codesigning.azure.net/`; subject `CN=James Cupps, O=James Cupps, ...`). The app registration "Slate signing" has a federated credential for `repo:jamesccupps@148652101/UnifiCameraViewer@1435835596:environment:release`. This repository's OIDC tokens carry GitHub's newer subject format, with the owner and repository IDs; the owner's older repositories send the classic `repo:jamesccupps/<repo>:...` (checked 2026-11-10 with a throwaway branch printing only the token's `sub`). The `release` environment admits `v*` tags only, and the `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID` secrets name the app registration. No password or key is stored. Three signatures a release. electron-builder's own `elevate.exe` (in `resources\`) and Electron's DLLs aren't ours and stay as their authors shipped them. Authenticode sits beside the Ed25519 update signature, not instead of it: the updater checks only the latter.
 
 Installed copies find the release through `releases/latest/download/latest.json`.
 

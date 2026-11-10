@@ -2951,8 +2951,66 @@ async function cycleSuite() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// The release workflow: which jobs can sign, and what runs in them (the header of release.yml says
+// why). And the uninstaller swap its installer job relies on (scripts/installer-sign-hook.js). No app runs.
+
+async function releaseSuite() {
+  console.log("\nRelease suite (who signs in release.yml, the uninstaller swap)");
+  const yml = fs.readFileSync(path.join(ROOT, ".github", "workflows", "release.yml"), "utf8").replace(/\r\n/g, "\n");
+  const jobs = {};
+  let job = null;
+  for (const line of yml.slice(yml.indexOf("\njobs:\n")).split("\n").slice(2)) {
+    const head = /^ {2}([a-z][\w-]*):\s*$/.exec(line);
+    if (head) jobs[(job = head[1])] = "";
+    else if (job) jobs[job] += `${line}\n`;
+  }
+  // What a job does, without its comments (which talk about npm and what doesn't run)
+  const code = (name) => (jobs[name] ?? "").split("\n").filter((l) => !/^\s*#/.test(l)).map((l) => l.replace(/\s+#\s.*$/, "")).join("\n");
+  const where = (re) => Object.keys(jobs).filter((name) => re.test(code(name)));
+
+  const signing = where(/id-token:\s*write/);
+  check("only sign-app and sign-setup can sign in to Azure", JSON.stringify(signing) === '["sign-app","sign-setup"]', JSON.stringify(signing));
+  check("both are in the release environment, and sign with scripts/authenticode.ps1",
+    signing.every((name) => /^\s*environment:\s*release\s*$/m.test(code(name)) && /\.\/scripts\/authenticode\.ps1 /.test(code(name))));
+  const ran = signing.filter((name) => /\bnpm\b|\bnpx\b|\bnode\b|setup-node|build-win|check-packaged|Start-Process|Invoke-Item|&\s*['"]/.test(code(name)));
+  check("they run no npm, no Node and never the app", ran.length === 0, ran.join());
+  check("the update key and write access are publish's alone",
+    JSON.stringify(where(/UPDATE_SIGNING_KEY/)) === '["publish"]' && JSON.stringify(where(/contents:\s*write/)) === '["publish"]' && !/\bnpm\b/.test(code("publish")));
+  check("publish waits for verify and skips signing tests",
+    /needs:\s*\[[^\]]*\bverify\b/.test(code("publish")) && /^\s*if:\s*needs\.build\.outputs\.signtest != 'true'\s*$/m.test(code("publish")));
+  check("Setup.exe is made with the signed uninstaller swapped in, then signed",
+    /build-win\.js --installer --uninstaller build\/ProtectPanes-uninstaller\.exe signed\/ProtectPanes-uninstaller\.exe/.test(code("installer"))
+      && /needs:\s*installer/.test(code("sign-setup")) && /authenticode\.ps1 -File dist\\ProtectPanes-Setup\.exe/.test(code("sign-setup")));
+  check("verify checks the signatures on what Setup.exe installs, the uninstaller too",
+    /check-signatures\.ps1 -Publisher \$env:PUBLISHER -Path \$exe, \$uninstaller\.FullName/.test(code("verify")));
+
+  const { installerSignHook } = await import(new URL("../scripts/installer-sign-hook.js", import.meta.url).href);
+  const dir = tmpDir("release");
+  const put = (name, body) => {
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, body);
+    return file;
+  };
+  const made = put("ProtectPanes-Setup.__uninstaller.exe", "uninstaller");
+  const kept = path.join(dir, "ProtectPanes-uninstaller.exe");
+  const keep = installerSignHook({ keepTo: kept });
+  for (const file of [put("elevate.exe", "electron-builder's"), made, put("ProtectPanes-Setup.exe", "setup")]) await keep({ path: file });
+  check("the build keeps its uninstaller, and nothing else", fs.readFileSync(kept, "utf8") === "uninstaller" && keep.uninstallers() === 1);
+
+  const signed = put("signed.exe", "uninstaller + signature");
+  const swap = installerSignHook({ swap: { unsigned: kept, signed } });
+  await swap({ path: made });
+  check("the installer build's identical uninstaller is replaced by the signed one", fs.readFileSync(made, "utf8") === "uninstaller + signature" && swap.uninstallers() === 1);
+  const other = put("Other.__uninstaller.exe", "a different uninstaller");
+  const err = await installerSignHook({ swap: { unsigned: kept, signed } })({ path: other }).then(() => null, (e) => e);
+  check("a different uninstaller stops the build instead of being swapped",
+    /isn't .* the one that was signed/.test(err?.message ?? "") && fs.readFileSync(other, "utf8") === "a different uninstaller", err?.message);
+}
+
+// ---------------------------------------------------------------------------------------------
 
 try {
+  if (suite === "release" || suite === "all") await runSuite(releaseSuite);
   if (suite === "mock" || suite === "all") await runSuite(mockSuite);
   if (suite === "hide" || suite === "all") await runSuite(hideSuite);
   if (suite === "bounds" || suite === "all") await runSuite(boundsSuite);

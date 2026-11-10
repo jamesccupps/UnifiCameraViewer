@@ -1,12 +1,31 @@
 # Push a tag vX.Y.Z (matching package.json) to build, sign, check and publish a release.
-# Two jobs, so the release key never meets the build's dependencies:
-# - build installs them (npm ci), tests, builds and smoke-tests the files, unsigned, with a read-only
-#   token and no secrets;
-# - publish starts from a fresh checkout with no node_modules, signs latest.json from the
-#   UPDATE_SIGNING_KEY secret with Node's own modules only, checks it against the public key built
-#   into the app, and publishes.
-# A compromised dependency could still tamper with what it builds, but it can't take the key and
-# sign whatever it likes later.
+# A tag vX.Y.Z-signtest.N (X.Y.Z still package.json's version) runs everything except publish: for
+# trying a change to signing without a release. Delete the tag afterwards.
+#
+# Two kinds of signing, and neither ever runs next to the build's dependencies (npm ci: the
+# packager, electron-builder and all they pull in):
+# - Authenticode, as James Cupps, in Azure Artifact Signing (the account and certificate profile
+#   Slate, NoteForge, PingerPlot and UniFi Stock Watcher sign with). Azure accepts GitHub's OIDC token
+#   for it only from this repository's "release" environment, which admits v* tags only, so there's
+#   no password or key to steal. But while a job is signed in, anything running in it could sign
+#   whatever it liked. So the two jobs that sign (sign-app, sign-setup) run only GitHub's and
+#   Microsoft's pinned actions, Microsoft's ArtifactSigning module and scripts/authenticode.ps1: no
+#   npm, no Node, and never the app.
+# - latest.json, the Ed25519-signed manifest installed copies update from: publish signs it from the
+#   UPDATE_SIGNING_KEY secret, with Node's own modules only.
+#
+# electron-builder makes the uninstaller and Setup.exe around the app in one run, so the files go
+# back and forth:
+#   build       npm ci, npm test, the whole build unsigned; keeps electron-builder's uninstaller
+#   sign-app    signs ProtectPanes.exe and that uninstaller, and zips the app folder again
+#   installer   npm ci; Setup.exe around the signed app folder, with the signed uninstaller swapped in
+#               (if this build made the same uninstaller, byte for byte: scripts/installer-sign-hook.js)
+#   sign-setup  signs Setup.exe
+#   verify      the files as they'll be published: signatures, the zip's layout, the packaged app from
+#               two folders, the installer (install, what it installed, uninstall)
+#   publish     signs latest.json, checks it and publishes; not for a -signtest tag
+# A compromised dependency could still tamper with what it builds, and that would be signed. It can't
+# take either signing identity and sign something else.
 name: Release
 
 on:
@@ -25,6 +44,9 @@ jobs:
     name: Build and test
     runs-on: windows-latest
     timeout-minutes: 45
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      signtest: ${{ steps.tag.outputs.signtest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,10 +58,20 @@ jobs:
           cache: npm
 
       - name: Tag must match package.json
+        id: tag
         shell: pwsh
         run: |
           $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ("v$v" -ne $env:GITHUB_REF_NAME) { throw "tag $env:GITHUB_REF_NAME, but package.json says $v" }
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "package.json's version isn't x.y.z: $v" }
+          $tag = $env:GITHUB_REF_NAME
+          if ($tag -ceq "v$v") { $signtest = 'false' }
+          elseif ($tag -cmatch "^v$([regex]::Escape($v))-signtest\.\d+$") {
+            $signtest = 'true'
+            "::notice::$tag is a signing test of $v`: built, signed and checked, never published"
+          }
+          else { throw "tag $tag, but package.json says $v" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "signtest=$signtest" >> $env:GITHUB_OUTPUT
 
       - run: npm ci
 
@@ -52,34 +84,249 @@ jobs:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
 
+      # This build's Setup.exe isn't published: installer makes that one around the signed app.
       - name: Build the zip, the installer and the small update (unsigned here)
         run: npm run build:win
+
+      # No small update (.gz) for a release with a release-notes/vX.Y.Z.full-update file. They're
+      # compressed already, so no compression here.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: build
+          path: |
+            dist/ProtectPanes-win32-x64.zip
+            dist/ProtectPanes-uninstaller.exe
+            dist/ProtectPanes-app.asar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  sign-app:
+    name: Sign the app and its uninstaller
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # the OIDC token Azure signs in with
+    steps:
+      # For scripts/authenticode.ps1. Nothing from npm is installed or run here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: build
+          path: build
+
+      - name: Unzip the app folder
+        shell: pwsh
+        run: |
+          Expand-Archive build\ProtectPanes-win32-x64.zip -DestinationPath dist
+          Copy-Item build\ProtectPanes-uninstaller.exe dist\
+
+      - name: Sign in to Azure (OIDC)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # The version scripts/authenticode.ps1 imports
+      - name: Install the ArtifactSigning module
+        shell: pwsh
+        run: Install-Module -Name ArtifactSigning -RequiredVersion 0.1.8 -Repository PSGallery -Scope CurrentUser -Force
+
+      - name: Sign ProtectPanes.exe and the uninstaller
+        shell: pwsh
+        run: ./scripts/authenticode.ps1 -File 'dist\Protect Panes-win32-x64\ProtectPanes.exe', dist\ProtectPanes-uninstaller.exe
+
+      # PowerShell 7's Compress-Archive, which made the zips before signing (build-win.js runs Windows
+      # PowerShell's from this runner's pwsh, and gets pwsh's module): entries named with "/" under
+      # "Protect Panes-win32-x64", the layout Scoop's manifest and verify expect.
+      - name: Zip the app folder again, around the signed exe
+        shell: pwsh
+        run: Compress-Archive -Path 'dist\Protect Panes-win32-x64' -DestinationPath dist\ProtectPanes-win32-x64.zip
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-app
+          path: |
+            dist/ProtectPanes-win32-x64.zip
+            dist/ProtectPanes-uninstaller.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  installer:
+    name: Make Setup.exe around the signed app
+    needs: sign-app
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.20.0
+          cache: npm
+
+      # electron-builder is all this needs: no install scripts (Electron's runtime, ffmpeg).
+      - run: npm ci --ignore-scripts
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: build
+          path: build
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-app
+          path: signed
+
+      - name: Unzip the signed app folder
+        shell: pwsh
+        run: Expand-Archive signed\ProtectPanes-win32-x64.zip -DestinationPath dist
+
+      - name: Make Setup.exe, with the signed uninstaller in it
+        run: node scripts/build-win.js --installer --uninstaller build/ProtectPanes-uninstaller.exe signed/ProtectPanes-uninstaller.exe
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unsigned-setup
+          path: dist/ProtectPanes-Setup.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  sign-setup:
+    name: Sign Setup.exe
+    needs: installer
+    runs-on: windows-latest
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # the OIDC token Azure signs in with
+    steps:
+      # For scripts/authenticode.ps1. Nothing from npm is installed or run here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: unsigned-setup
+          path: dist
+
+      - name: Sign in to Azure (OIDC)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # The version scripts/authenticode.ps1 imports
+      - name: Install the ArtifactSigning module
+        shell: pwsh
+        run: Install-Module -Name ArtifactSigning -RequiredVersion 0.1.8 -Repository PSGallery -Scope CurrentUser -Force
+
+      - name: Sign Setup.exe
+        shell: pwsh
+        run: ./scripts/authenticode.ps1 -File dist\ProtectPanes-Setup.exe
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-setup
+          path: dist/ProtectPanes-Setup.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  verify:
+    name: Check the signed downloads
+    needs: [build, sign-app, sign-setup]
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PUBLISHER: "CN=James Cupps, O=James Cupps"
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      # For the repository's own scripts; no npm ci, nothing here needs it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.20.0
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-app
+          path: signed
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-setup
+          path: signed
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: build
+          path: build
+
+      - name: Signatures, and the zip's layout
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Scoop's manifest: extract_dir "Protect Panes-win32-x64", the exe inside it
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z = [IO.Compression.ZipFile]::OpenRead((Resolve-Path signed\ProtectPanes-win32-x64.zip))
+          try { $names = @($z.Entries.FullName) } finally { $z.Dispose() }
+          if ($names -notcontains 'Protect Panes-win32-x64/ProtectPanes.exe') { throw "the zip has no Protect Panes-win32-x64/ProtectPanes.exe: $($names[0..4] -join ', ')" }
+          Expand-Archive signed\ProtectPanes-win32-x64.zip -DestinationPath portable
+          ./scripts/check-signatures.ps1 -Publisher $env:PUBLISHER -Path signed\ProtectPanes-Setup.exe, 'portable\Protect Panes-win32-x64\ProtectPanes.exe'
 
       # npm test runs the app from source; only the packaged app loads its pages from app.asar through
       # the install's own path. Run it from a plain folder and an awkward one and check its IPC works.
       - name: Run the packaged app from two install folders
-        run: node scripts/check-packaged.mjs "dist/Protect Panes-win32-x64"
+        run: node scripts/check-packaged.mjs "portable/Protect Panes-win32-x64"
 
-      - name: Install this installer, check its version, uninstall
+      - name: Install this installer, check what it installed, uninstall
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $p = Start-Process dist\ProtectPanes-Setup.exe -ArgumentList '/S' -Wait -PassThru
+          $p = Start-Process signed\ProtectPanes-Setup.exe -ArgumentList '/S' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "installer exited with $($p.ExitCode)" }
           $entry = Get-ChildItem HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall | Get-ItemProperty |
             Where-Object { $_.DisplayName -like 'Protect Panes*' } | Select-Object -First 1
           $dir = Split-Path ($entry.UninstallString -replace '^"([^"]+)".*$', '$1')
           $exe = Join-Path $dir 'ProtectPanes.exe'
           $v = (Get-Item $exe).VersionInfo.ProductVersion
-          if ("v$v" -ne $env:GITHUB_REF_NAME) { throw "installed $v, expected $env:GITHUB_REF_NAME" }
+          if ($v -ne $env:VERSION) { throw "installed $v, expected $env:VERSION" }
           $uninstaller = Get-ChildItem $dir -Filter 'Uninstall *.exe' | Select-Object -First 1
+          ./scripts/check-signatures.ps1 -Publisher $env:PUBLISHER -Path $exe, $uninstaller.FullName
+          $portable = 'portable\Protect Panes-win32-x64\ProtectPanes.exe'
+          if ((Get-FileHash $exe).Hash -ne (Get-FileHash $portable).Hash) { throw "Setup.exe installed a different ProtectPanes.exe from the zip's" }
           Start-Process $uninstaller.FullName -ArgumentList '/S' -Wait
           for ($i = 0; $i -lt 60 -and (Test-Path $exe); $i++) { Start-Sleep -Seconds 1 }
           if (Test-Path $exe) { throw "uninstall left $exe behind" }
           "installer ok: $v"
 
-      # The files exactly as tested above; no small update (.gz) for a release with a
-      # release-notes/vX.Y.Z.full-update file. They're compressed already, so no compression here.
+      # The files as checked above, for publish
+      - name: Gather the release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item signed\ProtectPanes-Setup.exe, signed\ProtectPanes-win32-x64.zip dist\
+          if (Test-Path build\ProtectPanes-app.asar.gz) { Copy-Item build\ProtectPanes-app.asar.gz dist\ }
+          Get-ChildItem dist | Format-Table Name, Length
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-files
@@ -92,8 +339,9 @@ jobs:
           retention-days: 7
 
   publish:
-    name: Sign and publish
-    needs: build
+    name: Sign latest.json and publish
+    needs: [build, verify]
+    if: needs.build.outputs.signtest != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

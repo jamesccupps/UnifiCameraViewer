@@ -34,6 +34,7 @@
     "test:grid": "node test/run.mjs grid",
     "test:cycle": "node test/run.mjs cycle",
     "test:e2e": "node test/run.mjs e2e",
+    "test:release": "node test/run.mjs release",
     "sign-release": "node scripts/sign-release.js"
   },
   "dependencies": {
