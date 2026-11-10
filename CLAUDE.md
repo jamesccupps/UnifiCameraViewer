@@ -7,7 +7,7 @@ Hard requirements, all deliberate:
 - **Direct login by IP** with a local account. No ui.com/cloud, no MFA.
 - **Low resource use.** Medium channel by default, GPU decode via MSE, minimized windows stop streaming, WebGL only for 360° windows.
 
-Current version: **1.4.7**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
+Current version: **1.4.8**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
 - **1.2.0:** color-range fix for crushed shadows, name label collapse and per-window hide, clock on 360° views, Apply to all, Hide / Show cameras, named layouts with Protect liveview import, signed in-place updates.
 - **1.3.0:** the Setup.exe installer, Arrange and Close all, the layout editor, the tabbed camera list with hover tips, 360° Single view, and undici patched for security.
 - **1.3.1:** portable copies' in-app update fixed (the helper's working folder blocked the swap); Arrange / "Use what's on screen" missing just-shown windows.
@@ -22,6 +22,7 @@ Current version: **1.4.7**, released through the GitHub Actions release workflow
 - **1.4.5:** security updates from a second review: Electron 45.0.0 → 45.2.3 (Chromium MediaSource and ffmpeg fixes among them), Electron fuses on the packaged exe, the update helper started by System32 paths, and undici 8.12.4. Grid → Layout asks before a smaller layout drops cameras. A full update for every copy, since the Electron version changed. Not taken from that review yet: B2/P3 (enlarging a tile restarts its stream; the real fix is starting the new stream before stopping the old), the smaller fixes B3, B4, B6, B7, U3 and U5, and unifi-protect 5.4.0 (wait for a 5.4.1, or a firmware update that breaks 5.3.1).
 - **1.4.6:** the rest of that review's smaller fixes: a 360° aim survives a settings refresh mid-drag (B3), a click's list refresh still renders during a poll's (B4), layouts drop removed consoles' cameras (B6), one camera-key check for the list's IPC (B7), a daily update check (U5), and doc drift (D1-D3). A small update for 1.4.5 copies. Still open: U3 (Win+↑ on a locked window, unverified: testing it means sending Win+↑ to the owner's foreground window), B2/P3, and unifi-protect 5.4.0.
 - **1.4.7:** make-before-break for grid tiles (B2/P3 for tiles, ROADMAP #5's pre-buffering): a cycle step, an Enlarge, a resize and a tile's Quality menu keep the old picture until the new stream's first frame. Copies installed with Scoop leave updates to `scoop update` (an in-app full update confused Scoop's records). Install with Scoop in the README and on the project page. A small update for 1.4.5 and 1.4.6 copies. Still open: U3, camera windows' quality changes (P3's other half), tiles resuming after Enlarge still show "Connecting…", and unifi-protect 5.4.0.
+- **1.4.8:** Authenticode-signed (James Cupps, Azure Artifact Signing): the exe, the uninstaller and Setup.exe, from release jobs that run no npm code (see Releasing). Nothing else changes. A full update for every copy (`release-notes/v1.4.8.full-update`), so each gets the signed exe.
 
 The owner ran 1.0 to 1.2 on the real consoles, and their installed copy updated itself from 1.3.1 to 1.4.0 in the app (the installer path). Later versions are tested against the real consoles only through runs from source on a copy of the config. For 1.4.3 the owner used such a run themselves before the release: liveview import, enlarge, reconnect and the Access reader.
 
@@ -276,7 +277,7 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
   - The editor keeps a cell's cycle when the camera is dragged to another tile. Dropping a camera onto a cycling tile replaces the cycle. Edit grid… gets cycles back from `mgr:state` (`editor.cells[i].cycle`), and saving keeps each member's record (matched by key).
   - `store.js` `loadTile()` drops a cycle with no valid members.
   - `npm run test:cycle` covers it.
-- **In-place updates (updater.js).** The exe is unsigned, so the Ed25519 signature on `latest.json` is the only gate before downloaded code runs. Keep these steps in this order:
+- **In-place updates (updater.js).** The updater doesn't check Authenticode (releases are signed since 1.4.8), so the Ed25519 signature on `latest.json` is the only gate before downloaded code runs. Keep these steps in this order:
   1. Verify the manifest signature against `UPDATE_PUBLIC_KEY`.
   2. Validate the payload: `app`, an x.y.z version, sha256, size, and a bare `.zip` file name.
   3. Require a newer version (no downgrades).
@@ -363,7 +364,7 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
   - The cause: `applyLoginItem()` called `setLoginItemSettings` on every launch. With the setting off, Electron deletes the `protect-panes` value (the AppUserModelId) under `HKCU\…\CurrentVersion\Run` and `…\Explorer\StartupApproved\Run`. A test suite launches the app dozens of times.
   - Now it reads `getLoginItemSettings()` and writes only when that differs from the setting (`syncLoginItem()`, util.js).
   - Test and scratch-config runs (`PANES_SELFTEST_DIR` / `PANES_USER_DATA`) never touch the real startup entries. A test config with `launchAtLogin: true` used to write `electron.exe` into Run.
-  - Still in the alert: the update helper's hidden, `-EncodedCommand`, `-ExecutionPolicy Bypass` PowerShell, once per update. That's deliberate (see In-place updates). Code signing would make both look far less suspicious.
+  - Still in the alert: the update helper's hidden, `-EncodedCommand`, `-ExecutionPolicy Bypass` PowerShell, once per update. That's deliberate (see In-place updates). Since 1.4.8 the exe that starts it is code-signed, which should make both look less suspicious; not checked against Defender.
 - **Windows never steal focus.** Use `showInactive()`, never `show()`/`focus()` for camera windows: exacqVision is in use on the same screen.
   - The catch, reported by the owner in 1.4.0: a camera or grid window opened from the camera list appears above it, while the list stays the active window underneath. On Windows, clicking a window that's already active doesn't raise it, so the list stayed covered until you clicked elsewhere and back. The list now sends `mgr:raise` (→ `managerWin.moveTop()`) on every pointerdown.
   - The list suite checks the real z-order with Win32 `GetWindow(GW_HWNDPREV)` through PowerShell (`sampleZOrder()`); Electron exposes no z-order. Without the fix the check fails.
@@ -486,7 +487,7 @@ The signing key:
 
 For a first install, or a copy older than 1.2.0, use the Setup.exe or replace the folder with the zip. Settings in `%APPDATA%` carry over.
 
-The exe is unsigned, so SmartScreen shows "Run anyway" on first launch.
+Releases before 1.4.8 are unsigned (SmartScreen's "Run anyway" on first launch). From 1.4.8 Windows names James Cupps as the publisher; SmartScreen can still warn about a new download until it has built a reputation.
 
 **Checking that a packaged build really updates itself** (done for 1.2.0, and for 1.4.0's small update; repeat when updater.js or the helper changes).
 

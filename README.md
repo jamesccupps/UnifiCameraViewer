@@ -17,7 +17,7 @@ UniFi Protect live view, one camera per window. Place each window anywhere on th
 **Installer (recommended):** download `ProtectPanes-Setup.exe` from the [latest release](https://github.com/jamesccupps/UnifiCameraViewer/releases/latest) and run it.
 - It installs for your Windows user only, with no admin prompt, into `%LOCALAPPDATA%\Programs\protect-panes`.
 - It adds Start menu and desktop shortcuts, and appears in **Settings → Apps** for uninstalling.
-- The app isn't code-signed, so Windows shows *Windows protected your PC*: click **More info**, then **Run anyway**.
+- Since 1.4.8 the installer and the app are code-signed by James Cupps. A new release may still get a SmartScreen warning until Windows has seen enough downloads of it: click **More info**, check the publisher is James Cupps, then **Run anyway**.
 
 **Portable:** download `ProtectPanes-win32-x64.zip` instead and unzip it somewhere permanent in your own profile, e.g. `%LOCALAPPDATA%\Programs\Protect Panes` (next to where Setup.exe installs). Avoid `C:\Program Files`, which in-place updates can't write to, and folders made at the root of `C:\` such as `C:\Tools`: Windows lets every account on the PC change those, so another user could swap the app for something that runs as you. Then run `ProtectPanes.exe`.
 

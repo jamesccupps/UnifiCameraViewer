@@ -10,8 +10,9 @@ import { pipeline } from "node:stream/promises";
  * In-place updates from a release folder: an https:// base URL or a folder path (LAN share).
  * The folder holds latest.json and the zip it names (scripts/build-win.js writes both).
  *
- * The exe isn't code-signed, so the Ed25519 signature on latest.json is the only thing between
- * this download path and running someone else's code. Order matters: verify the manifest's
+ * Nothing here checks Authenticode (releases are code-signed since 1.4.8, earlier ones weren't),
+ * so the Ed25519 signature on latest.json is the only thing between this download path and
+ * running someone else's code. Order matters: verify the manifest's
  * signature, only then download, check the zip's size and SHA-256 against the signed values, and
  * only then hand it to the swap helper. Older or equal versions are never installed, so a
  * replayed old manifest can't downgrade the app.

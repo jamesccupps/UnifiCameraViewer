@@ -1,0 +1,1 @@
+Authenticode signing changes ProtectPanes.exe, so every copy takes the full update and gets the signed exe.

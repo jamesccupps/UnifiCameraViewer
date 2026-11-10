@@ -105,6 +105,7 @@ Recommend (a) first, plus importing Protect liveviews as named layouts. Do (b) o
   - Tradeoff: an installed copy's Settings → Apps version lags until the next full update.
 - Default update location: this repo's latest GitHub release (`releases/latest/download`).
 - Portable copies of 1.2.0 and 1.3.0 started from Explorer or a shortcut could not install: the helper inherited the install folder as its working folder, which blocks renaming it. Fixed in 1.3.1. Installed copies were not affected.
+- Code signing: from 1.4.8 the exe, the uninstaller and Setup.exe are Authenticode-signed (Azure Artifact Signing, in release jobs that run no npm code; CLAUDE.md, Releasing). The updater still relies on the Ed25519 manifest alone. 1.4.8 is a full update, so every copy that takes it gets the signed exe.
 
 Original notes: releases were an unsigned portable zip (~159 MB), and the owner replaced the folder by hand.
 
