@@ -1226,7 +1226,7 @@ async function layoutsSuite() {
 
 async function updateSuite() {
   console.log("\nUpdate suite (signatures, verified download, swap helper, camera list)");
-  const { compareVersions, sourceKind, verifyManifest, Updater } = await import(new URL("../src/updater.js", import.meta.url).href);
+  const { compareVersions, scoopInstall, sourceKind, verifyManifest, Updater } = await import(new URL("../src/updater.js", import.meta.url).href);
   const { UPDATE_PUBLIC_KEY } = await import(new URL("../src/update-key.js", import.meta.url).href);
   const { signRelease } = await import(new URL("../scripts/sign-release.js", import.meta.url).href);
   const crypto = await import("node:crypto");
@@ -1291,6 +1291,33 @@ async function updateSuite() {
   const same = mk(good, "9.9.9");
   await same.check();
   check("same version isn't offered", same.state.status === "current", JSON.stringify(same.state));
+
+  // A copy Scoop installed: Scoop keeps install.json and manifest.json beside the app (scoop-*.json
+  // in newer Scoop) and runs it through apps\<app>\current, a junction to the version folder. The
+  // update is Scoop's: the app says there is one and downloads nothing, even on the button's click.
+  const scoopApp = path.join(dir, "scoop", "apps", "protectpanes");
+  const scoopVer = path.join(scoopApp, "1.4.6");
+  const scoopNew = path.join(dir, "scoop-new", "apps", "protectpanes", "1.4.6");
+  const plain = path.join(dir, "plain", "Protect Panes");
+  for (const d of [scoopVer, scoopNew, plain]) {
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, "ProtectPanes.exe"), "v1");
+  }
+  fs.writeFileSync(path.join(scoopVer, "manifest.json"), JSON.stringify({ version: "1.4.6" }));
+  fs.writeFileSync(path.join(scoopVer, "install.json"), JSON.stringify({ bucket: "jamesccupps", architecture: "64bit" }));
+  fs.writeFileSync(path.join(scoopNew, "scoop-manifest.json"), JSON.stringify({ version: "1.4.6" }));
+  fs.writeFileSync(path.join(scoopNew, "scoop-install.json"), JSON.stringify({ bucket: "jamesccupps", architecture: "64bit" }));
+  fs.writeFileSync(path.join(plain, "manifest.json"), "{}"); // one of the two isn't enough
+  fs.symlinkSync(scoopVer, path.join(scoopApp, "current"), "junction");
+  check("a Scoop copy is recognised from Scoop's files beside the exe, through its current junction too (old and new names); a plain folder isn't",
+    scoopInstall?.(path.join(scoopApp, "current")) === true && scoopInstall?.(scoopVer) === true && scoopInstall?.(scoopNew) === true && scoopInstall?.(plain) === false,
+    JSON.stringify([path.join(scoopApp, "current"), scoopVer, scoopNew, plain].map((d) => scoopInstall?.(d))));
+  const scoopU = mk(good, "1.2.0", { installKind: "scoop" });
+  await scoopU.check({ download: true });
+  check("a Scoop copy hears of a newer version, is pointed at scoop update, and downloads nothing",
+    scoopU.state.status === "available" && scoopU.state.version === "9.9.9" && scoopU.state.scoop === true && /scoop update protectpanes/.test(scoopU.state.message)
+      && !(fs.existsSync(scoopU.stageDir) && fs.readdirSync(scoopU.stageDir).length),
+    JSON.stringify({ state: scoopU.state, staged: fs.existsSync(scoopU.stageDir) ? fs.readdirSync(scoopU.stageDir) : [] }));
 
   // Tampered zip: the signed manifest is fine, the bytes aren't.
   const tampered = path.join(dir, "tampered");

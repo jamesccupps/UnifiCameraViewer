@@ -11,7 +11,7 @@ import { consoleKey, installCertPinning } from "./cert-pins.js";
 import { Previews } from "./previews.js";
 import { decryptPassword, DEFAULT_SETTINGS, encryptPassword, newId, Store } from "./store.js";
 import { UPDATE_PUBLIC_KEY } from "./update-key.js";
-import { sourceKind, Updater } from "./updater.js";
+import { scoopInstall, sourceKind, Updater } from "./updater.js";
 import { debounce, isFileUrlOf, normalizeHost, syncLoginItem, throttle } from "./util.js";
 import { placeWindow, windowBounds } from "./window-bounds.js";
 
@@ -1737,8 +1737,10 @@ function updateStageDir() {
 
 // ProtectPanes-Setup.exe (NSIS) leaves "Uninstall ProtectPanes.exe" next to the app. Such copies
 // update by running the new installer; swapping in the zip's folder would delete the uninstaller.
+// A copy Scoop installed is left to `scoop update` (scoopInstall() in updater.js).
 function installKind() {
   if (!app.isPackaged) return "folder";
+  if (scoopInstall(path.dirname(process.execPath))) return "scoop";
   try {
     return fs.readdirSync(path.dirname(process.execPath)).some((f) => /^Uninstall .+\.exe$/i.test(f)) ? "installer" : "folder";
   } catch {
@@ -1849,7 +1851,7 @@ function managerState() {
     screens: screensForEditor(),
     templates: TEMPLATES.map((t) => ({ id: t.id, label: t.label, cols: t.cols ?? null, rows: t.rows ?? null, cells: t.cells ?? null })),
     onScreenCount: onScreenWindows().length,
-    update: { status: updater?.state.status, version: updater?.state.version, message: updater?.state.message, current: app.getVersion() },
+    update: { status: updater?.state.status, version: updater?.state.version, message: updater?.state.message, scoop: !!updater?.state.scoop, current: app.getVersion() },
     consoles: store.data.consoles.map((c) => {
       const conn = connections.get(c.id);
       const live = conn?.cameras() ?? [];

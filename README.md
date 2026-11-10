@@ -32,7 +32,7 @@ scoop bucket add jamesccupps https://github.com/jamesccupps/scoop-bucket
 scoop install jamesccupps/protectpanes
 ```
 
-Scoop installs the portable zip into its own apps folder and adds a Start menu shortcut. `scoop update protectpanes` brings new versions.
+Scoop installs the portable zip into its own apps folder and adds a Start menu shortcut. `scoop update protectpanes` brings new versions. From 1.4.7 the app still tells you when there's a new version, but leaves installing it to Scoop.
 
 ## Set up each console
 

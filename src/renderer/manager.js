@@ -1041,7 +1041,8 @@ function renderUpdate() {
   if (document.activeElement !== updateSource) updateSource.value = state.settings.updateSource ?? "";
   const busy = u.status === "checking" || u.status === "downloading";
   checkBtn.disabled = busy;
-  checkBtn.textContent = u.status === "available" ? `Download ${u.version}` : "Check for updates";
+  // A copy Scoop installed is updated by Scoop: the status line says how, and there's nothing to download.
+  checkBtn.textContent = u.status === "available" && !u.scoop ? `Download ${u.version}` : "Check for updates";
   installBtn.classList.toggle("hidden", u.status !== "ready");
   installBtn.textContent = `Install ${u.version ?? ""} and restart`;
   updateStatus.textContent = updateError || (u.status && u.status !== "idle" ? u.message : `This is version ${u.current}.`);

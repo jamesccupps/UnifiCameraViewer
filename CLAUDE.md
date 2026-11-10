@@ -299,7 +299,7 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
 
   The install folder's parent must be writable; Program Files isn't.
 
-  **Two install kinds** (`installKind()` in main.js):
+  **Install kinds** (`installKind()` in main.js). A Scoop copy is a third kind that never installs an update itself (Releasing: Scoop copies don't update themselves). The other two:
   - **Installer installs:** ProtectPanes-Setup.exe is a per-user NSIS oneClick installer to `%LOCALAPPDATA%\Programs\protect-panes`, with an `Uninstall ProtectPanes.exe` beside the app. Both names were measured by the CI install job: electron-builder names the folder after the package name and the uninstaller after the exe. Its uninstall registry entry has no `InstallLocation`. These update by downloading `installer` from the manifest and running it as `/S --updated`, the same flags electron-updater uses. Swapping in the zip there would delete the uninstaller.
   - **Folder installs:** unzipped copies, and every 1.2.x, update by folder swap from the zip. `latest.json` keeps the zip fields at the top level so 1.2.x clients keep working; `installer` is an extra field they ignore.
   - The fake-installer test is a copy of node.exe preloading a script via `NODE_OPTIONS` (forward slashes: a backslash is an escape inside its quotes).
@@ -444,11 +444,13 @@ Installed copies find the release through `releases/latest/download/latest.json`
 - Sign files **before** publishing, and never replace a file on a release that's already out: Scoop and winget have recorded its hash. Fix with a new version. (The publish job already signs `latest.json` before `gh release create`. Moving a tag, as in a failed release run, is only for a release that never published.)
 - If a file name or the zip layout must change, update `bucket/protectpanes.json` in jamesccupps/scoop-bucket in the same change.
 
-Open: a Scoop copy and the in-app updater. Measured 2026-11-10 with the real helper on a scratch copy of Scoop's layout; Scoop's side read from its source, not run.
-- Scoop runs the app from `apps\protectpanes\current`, a read-only junction to the version folder, and Electron's `process.execPath` keeps the junction path. So the updater sees a folder install.
-- A small update writes app.asar into Scoop's version folder. That works; Scoop lists the old version until `scoop update`.
-- A full update (a new Electron) swaps the folder. `current` becomes a real folder without Scoop's `manifest.json`, and the old junction stays behind as `current.old-<ts>`: the helper's `Remove-Item` can't delete a read-only junction. That leftover shows Scoop's `install.json` through the link, so Scoop lists it as an installed version and may take it for the current one.
-- The bucket's note ("can also update itself; 'scoop update protectpanes' works either way") holds for small updates only.
+**Scoop copies don't update themselves (since 1.4.7).** Why, measured 2026-11-10 with the real helper on a scratch copy of Scoop's layout (Scoop's side read from its source, not run):
+- Scoop runs the app from `apps\protectpanes\current`, a read-only junction to the version folder, and Electron's `process.execPath` keeps the junction path. So until 1.4.7 the updater took it for a folder install.
+- A small update wrote app.asar into Scoop's version folder. That worked; Scoop listed the old version until `scoop update`.
+- A full update (a new Electron) swapped the folder. `current` became a real folder without Scoop's `manifest.json`, and the old junction stayed behind as `current.old-<ts>`: the helper's `Remove-Item` can't delete a read-only junction. That leftover shows Scoop's `install.json` through the link, so Scoop lists it as an installed version and may take it for the current one.
+- Now `scoopInstall()` (updater.js) recognises Scoop's files beside the exe (`install.json` + `manifest.json`, or `scoop-install.json` + `scoop-manifest.json`), and `installKind()` returns `"scoop"`. The updater still checks, but a newer version only shows as available, with `scoop update protectpanes` in its message; nothing is downloaded, even from the button. The update suite checks both on a junction layout; both fail on 1.4.6.
+- The cost: Scoop copies always download the full zip through Scoop, never the 1.4 MB app.asar.
+- 1.4.6 copies installed with Scoop still update themselves. 1.4.7 reaches them as a small update, which works, so release 1.4.7 before the next Electron bump.
 
 The signing key:
 - The private key is `%USERPROFILE%\.protect-panes\update-signing-key.pem` on the maintainer's PC, and the same content is in the repo secret `UPDATE_SIGNING_KEY`.

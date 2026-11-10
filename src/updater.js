@@ -155,7 +155,26 @@ async function fetchTo(source, name, dest, limit, fetchImpl, idleMs) {
 }
 
 /**
+ * Was this copy installed by Scoop (scoop.sh)? Scoop keeps its record of each app beside the app's
+ * files: install.json and manifest.json, or scoop-install.json and scoop-manifest.json in newer
+ * Scoop. Such a copy is Scoop's to update. Measured with this file's helper on Scoop's layout
+ * (2026-11-10): a folder swap turned Scoop's read-only `current` junction into a plain folder and
+ * left the old junction as `current.old-<ts>`, which Scoop lists as an installed version.
+ * @param {string} exeDir - the folder the app runs from (through `current` for a Scoop copy)
+ */
+export function scoopInstall(exeDir) {
+  try {
+    const files = new Set(fs.readdirSync(exeDir).map((f) => f.toLowerCase()));
+    const has = (...names) => names.some((n) => files.has(n));
+    return has("install.json", "scoop-install.json") && has("manifest.json", "scoop-manifest.json");
+  } catch {
+    return false;
+  }
+}
+
+/**
  * state.status: "idle" | "checking" | "current" | "available" | "downloading" | "ready" | "error"
+ * state.scoop: true on "available" when Scoop installed this copy: it updates through Scoop.
  * events: "state"
  */
 export class Updater extends EventEmitter {
@@ -169,8 +188,9 @@ export class Updater extends EventEmitter {
    * @param {() => string} opts.getSource
    * @param {string} opts.publicKey     - PEM
    * @param {string} opts.stageDir      - where downloads are kept until installed
-   * @param {"folder" | "installer"} [opts.installKind] - how this copy was installed: unzipped folder
-   *   (update = swap the folder) or Setup.exe (update = run the new installer, which keeps its uninstaller)
+   * @param {"folder" | "installer" | "scoop"} [opts.installKind] - how this copy was installed: unzipped
+   *   folder (update = swap the folder), Setup.exe (update = run the new installer, which keeps its
+   *   uninstaller) or Scoop (no download: the update is Scoop's, see scoopInstall())
    * @param {string} [opts.electronVersion] - the running Electron. A release built for the same one
    *   updates either kind by replacing resources\app.asar alone (a few MB instead of the zip).
    * @param {typeof fetch} [opts.fetch]
@@ -200,6 +220,10 @@ export class Updater extends EventEmitter {
       const manifest = verifyManifest(await readSmall(source, MANIFEST, this.#opts.fetch, this.#opts.timeouts.manifestMs), publicKey);
       if (compareVersions(manifest.version, currentVersion) <= 0) {
         this.#set("current", { version: manifest.version, message: `Up to date (${currentVersion}).` });
+        return this.state;
+      }
+      if (this.#opts.installKind === "scoop") {
+        this.#set("available", { version: manifest.version, scoop: true, message: `Version ${manifest.version} is available. Scoop installed this copy, so update it there: scoop update protectpanes` });
         return this.state;
       }
       if (!download) {
