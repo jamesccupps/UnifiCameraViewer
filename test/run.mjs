@@ -2687,9 +2687,16 @@ async function e2eSuite() {
     check("Garage console connected", conn[ids.G]?.state === "connected", JSON.stringify(conn[ids.G]));
     check("wrong password reported as login failure", conn[ids.X]?.state === "authfailed", JSON.stringify(conn[ids.X]));
     check("unreachable console reported and retrying", conn[ids.D]?.state === "error", JSON.stringify(conn[ids.D]));
+    // Garage's window gets Reconnect stream at 12 s (below), which starts its decoder's frame count
+    // again: by the end it had about 3 s of 1080p to reach 30 frames, and a slow release runner
+    // decoded 13 (v1.4.7's first run) or 28 (v1.4.6's). So its frames are judged on the last sample
+    // before the reconnect; the reconnect check covers the end.
+    const reconnectAt = result.actions.find((a) => a.act.label === "Reconnect stream")?.t ?? Infinity;
+    const beforeReconnect = result.samples.filter((s) => s.t < reconnectAt).at(-1)?.cams ?? {};
     for (const name of ["drops", "bogusCodec", "fisheye", "garage"]) {
       const c = cams[keys[name]];
-      check(`${name}: live and decoding`, c?.status === "live" && c.decodedFrames >= 30, c && `status=${c.status} frames=${c.decodedFrames}`);
+      const f = (name === "garage" ? beforeReconnect : cams)[keys[name]];
+      check(`${name}: live and decoding`, c?.status === "live" && f?.decodedFrames >= 30, c && `status=${c.status} frames=${f?.decodedFrames}`);
       check(`${name}: near live edge (lag < 1.5 s)`, c && c.lag < 1.5, c && `lag=${c.lag?.toFixed(2)}`);
     }
     const dropAt = servers[0].output.find((l) => l.includes(`dropping livestream ${cam(P.building, 0)}`));
@@ -2707,8 +2714,9 @@ async function e2eSuite() {
       kp && JSON.stringify({ status: kp.status, frames: kp.decodedFrames, size: `${kp.videoWidth}x${kp.videoHeight}`, mime: kp.mime, lag: kp.lag?.toFixed(2), resets: kp.resetRequests }));
     const reconnect = result.actions.find((a) => a.act.label === "Reconnect stream");
     check("Reconnect stream reconnects even while a grid tile shares the camera's stream",
-      reconnect?.ok && negotiatesBefore !== null && garageNegotiates() > negotiatesBefore && cams[keys.garage]?.status === "live" && cams["grid:E2E grid#0"]?.status === "live",
-      JSON.stringify({ act: reconnect?.error, before: negotiatesBefore, after: garageNegotiates(), window: cams[keys.garage]?.status, tile: cams["grid:E2E grid#0"]?.status }));
+      reconnect?.ok && negotiatesBefore !== null && garageNegotiates() > negotiatesBefore && cams[keys.garage]?.status === "live" && cams[keys.garage].decodedFrames > 0
+        && cams["grid:E2E grid#0"]?.status === "live",
+      JSON.stringify({ act: reconnect?.error, before: negotiatesBefore, after: garageNegotiates(), window: cams[keys.garage]?.status, frames: cams[keys.garage]?.decodedFrames, tile: cams["grid:E2E grid#0"]?.status }));
     const fd = config.windows[keys.fisheye]?.dewarp;
     check("fisheye detected from Protect flags -> quad view, ceiling mount", cams[keys.fisheye]?.dewarp?.active && fd?.mode === "quad" && fd?.mount === "ceiling", JSON.stringify({ mode: fd?.mode, mount: fd?.mount }));
     check("fisheye image circle auto-detected within 1%", near(fd?.circle, CEILING_TRUTH, 0.01), fmtCircle(fd?.circle));
