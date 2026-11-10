@@ -170,8 +170,9 @@ function rebuild(codec, initData) {
   mediaSource = ms;
   const url = URL.createObjectURL(ms);
   video.src = url;
-  // A frame on screen means the restarts worked.
+  // A frame on screen means the restarts worked, and that a grid tile's next page can take over.
   video.requestVideoFrameCallback(() => {
+    panes.send("cam:shown");
     if (!failedResets) return;
     failedResets = 0;
     if (streamState === "live" && !codecError) hideStatus();

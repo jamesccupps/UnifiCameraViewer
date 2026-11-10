@@ -78,8 +78,8 @@ Original notes: quality (`channel`), always-on-top and dewarp settings were per 
   - Importing a Protect liveview as a grid: built for 1.4.3 (the import fills in the layout editor).
   - Slot cycling: built for 1.4.3, from Protect liveviews only (`npm run test:cycle`).
     - It cycles on time only. Protect's `cycleMode` values aren't known, so a motion-triggered mode, if there is one, isn't reproduced.
-    - Each switch starts the next camera's stream from scratch, so a tile shows "Connecting…" for about a second.
-    - Not built: making or editing a cycle in the editor, and pre-buffering the next camera so a switch has no gap.
+    - Pre-buffering the next camera: built for 1.4.7. The next camera's page loads under the one on screen and takes over at its first frame, so a switch has no gap. A tile's quality change (Enlarge, a resize, its Quality menu) works the same way.
+    - Not built: making or editing a cycle in the editor.
 
 Original notes:
 

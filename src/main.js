@@ -880,6 +880,8 @@ function gridWindow(grid) {
     cameraPreload: path.join(__dirname, "preload-camera.cjs"),
     makePlayer: makeTilePlayer,
     dropPlayer: (cw) => { cw.stream.stop(); senders.delete(cw.wcId); },
+    refreshMeta: (cw) => setTimeout(() => refreshCameraMeta(cw), 50),
+    log: log.child("grid"),
     tilesResized: (g, rects) => {
       // A drag-resize sends a stream of these; only restart streams once it settles.
       clearTimeout(g.qualityTimer);
@@ -900,17 +902,23 @@ function gridWindow(grid) {
   return gw;
 }
 
-function makeTilePlayer({ gw, index, tile, wc, like = null }) {
+function makeTilePlayer({ gw, index, tile, wc, like = null, autoChannel }) {
   const [consoleId, cameraId] = tile.key.split("/");
   // A cycling tile's next camera takes over the tile's size-based quality, so it starts on the right
   // channel instead of Medium and a restart once tileQuality catches up.
-  const cw = { key: tile.key, consoleId, cameraId, win: gw.win, wc, wcId: wc.id, gw, tile, index, stream: null, aspect: null, autoChannel: like?.autoChannel ?? null };
+  const cw = { key: tile.key, consoleId, cameraId, win: gw.win, wc, wcId: wc.id, gw, tile, index, stream: null, aspect: null,
+    autoChannel: autoChannel !== undefined ? autoChannel : like?.autoChannel ?? null };
   cw.stream = new CameraStream({
     getConnection: () => connections.get(consoleId),
     cameraId,
     resolveChannel: (cam) => resolveChannel(cam, tile.channel ?? cw.autoChannel ?? undefined),
     getRange: () => tile.range ?? "auto",
-    send: (channel, payload) => { if (!wc.isDestroyed()) wc.send(channel, payload); },
+    send: (channel, payload) => {
+      if (!wc.isDestroyed()) wc.send(channel, payload);
+      // A page loading under a tile's (grid-window.js) whose stream gave up takes over at once: the
+      // tile should say the camera is offline, not keep showing the one before it.
+      if (channel === "cam:status" && (payload.state === "offline" || payload.state === "error")) gw.ready(cw, payload.state);
+    },
     log: log.child(`grid ${cameraId.slice(-6)}`),
   });
   senders.set(wc.id, cw);
@@ -926,12 +934,11 @@ function tileQuality(gw, rects) {
     const r = rects[cw.index];
     if (r && !r.width) continue; // hidden behind an enlarged tile: keep its quality for coming back
     const auto = store.settings.arrangeQuality && r ? channelForTile(r.width * scale) : null;
-    if (cw.autoChannel === auto) continue;
-    cw.autoChannel = auto;
-    if (cw.tile.channel == null && cw.stream.channel !== null) {
-      cw.stream.restart();
-      setTimeout(() => refreshCameraMeta(cw), 50);
-    }
+    const latest = gw.upcoming(cw.index) ?? cw; // a page still loading under this one counts
+    if (latest.autoChannel === auto) continue;
+    // Playing: a new page at that quality takes over at its first frame (make-before-break).
+    if (latest.tile.channel == null && cw.stream.channel !== null) gw.restream(cw.index, auto);
+    else cw.autoChannel = latest.autoChannel = auto; // a picked quality, or not started yet: kept for its next start
   }
 }
 
@@ -1012,8 +1019,7 @@ function setTileChannel(cw, channel) {
   if (channel === null) delete cw.tile.channel;
   else cw.tile.channel = channel;
   store.save();
-  cw.stream.restart();
-  setTimeout(() => refreshCameraMeta(cw), 50);
+  cw.gw.restream(cw.index); // the page at the new quality takes over at its first frame
 }
 
 function editGrid(id) {
@@ -2103,6 +2109,8 @@ function registerIpc() {
   ipcMain.on("cam:toggle-top", (e) => { const cw = fromCamera(e); if (cw) toggleOnTop(cw); });
   // Double-click on a grid tile: fill the grid window with it, or go back to the grid.
   ipcMain.on("cam:enlarge", (e) => { const cw = fromCamera(e); if (cw?.gw) cw.gw.enlarge(cw.index); });
+  // A page's first frame after an init: a grid tile's next page takes over from the one on screen.
+  ipcMain.on("cam:shown", (e) => { const cw = fromCamera(e); if (cw?.gw) cw.gw.ready(cw, "first frame"); });
   ipcMain.on("cam:close", (e) => {
     const cw = fromCamera(e);
     if (cw?.gw) setGridTile(cw.gw.grid, cw.index, null);

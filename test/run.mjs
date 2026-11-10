@@ -2789,9 +2789,11 @@ async function cycleSuite() {
     ],
     windows: {},
     // Lobby on Medium and Dock on Low: each camera of the cycle keeps its own tile settings.
+    // 1000 DIP wide: a tile's size-based quality goes up a step when it's enlarged, at any display
+    // scale from 100 % to 250 % (tiles ~500 DIP, enlarged ~1000).
     grids: [{
-      id: "g-cyc", name: "Cycle", templateId: "2x2", bounds: { x: 0, y: 0, width: 640, height: 400 }, open: true,
-      tiles: [{ key: keys.lobby, channel: 1, cycle: { seconds: 5, then: [{ key: keys.dock, channel: 2 }, { key: keys.stair }] } }, { key: keys.ramp }, null, null],
+      id: "g-cyc", name: "Cycle", templateId: "2x2", bounds: { x: 0, y: 0, width: 1000, height: 560 }, open: true,
+      tiles: [{ key: keys.lobby, channel: 1, cycle: { seconds: 5, then: [{ key: keys.dock, channel: 2 }, { key: keys.stair }] } }, { key: keys.ramp }, { key: keys.yard }, null],
     }, {
       // Hand-edited into nonsense: loading drops the cycle and keeps the tile.
       id: "g-bad", name: "Broken cycle", templateId: "1", bounds: { x: 700, y: 0, width: 320, height: 200 }, open: false,
@@ -2821,6 +2823,16 @@ async function cycleSuite() {
   // Each camera row's status line in the camera list.
   const rowsJs = `(() => Object.fromEntries([...document.querySelectorAll(".cams li")].map((li) => [li.querySelector(".cam-name b")?.textContent, li.querySelector(".cam-name small")?.textContent ?? ""])))()`;
   const ENLARGE_AT = 13500;
+  const QUALITY_AT = 7000;
+  // What a tile has on screen, every 150 ms: which page (a token it keeps), and whether it has shown
+  // a frame. Make-before-break means a tile's page never changes to one that hasn't (samples, 2 s
+  // apart, would miss a second of black).
+  const probeJs = `(() => {
+    window.__probe ??= Math.random().toString(36).slice(2);
+    const s = window.__panesStats();
+    return { page: window.__probe, frames: s.decodedFrames, width: s.videoWidth, status: s.status, rebuilds: s.rebuilds };
+  })()`;
+  const probes = (tile, from, to) => Array.from({ length: Math.floor((to - from) / 150) + 1 }, (_, i) => ({ at: from + i * 150, do: "camera-js", tile, js: probeJs }));
   const { result, config } = await runApp({
     userData, results, seconds: 20, extraArgs: ["--mock"],
     env: {
@@ -2831,11 +2843,37 @@ async function cycleSuite() {
         { at: 4000, do: "manager-js", js: resaveJs },
         // Tile 0 is hidden behind the enlarged tile 1 from here on: it should stop cycling.
         { at: ENLARGE_AT, do: "menu-click", tile: "Cycle#1", label: "Enlarge this tile" },
+        { at: QUALITY_AT, do: "menu-click", tile: "Cycle#2", label: "High · 1920×1080" },
+        ...probes("Cycle#0", 3000, 13400),
+        ...probes("Cycle#2", QUALITY_AT - 450, QUALITY_AT + 3000),
+        ...probes("Cycle#1", ENLARGE_AT - 450, ENLARGE_AT + 3000),
       ]),
     },
   });
+  // A tile's probes from its first frame on: every page it had on screen, any probe that found one
+  // with no frame yet, and pages that rebuilt their decoder while on screen (black until the next
+  // keyframe decodes: a fraction of a second with the mock, which a probe can miss; a second or two
+  // on real cameras).
+  const probed = (tile) => {
+    const seen = result.actions.filter((a) => a.act.js === probeJs && a.act.tile === tile).sort((a, b) => a.act.at - b.act.at).map((a) => a.value ?? { error: a.error });
+    const from = seen.findIndex((p) => p.frames > 0);
+    const shown = from < 0 ? [] : seen.slice(from);
+    const pages = [...new Set(shown.map((p) => p.page))];
+    const rebuiltOnScreen = pages.filter((pg) => new Set(shown.filter((p) => p.page === pg).map((p) => p.rebuilds)).size > 1);
+    return { pages, widths: [...new Set(shown.map((p) => p.width))], blank: shown.filter((p) => !(p.frames > 0)), rebuiltOnScreen, probes: seen.length };
+  };
+  const seamless = (p) => p.blank.length === 0 && p.rebuiltOnScreen.length === 0;
+  const cyc0 = probed("Cycle#0");
+  check("a cycling tile keeps the camera on screen until the next one has a frame (no blank tile between)",
+    cyc0.pages.length >= 3 && seamless(cyc0), JSON.stringify(cyc0));
+  const q2 = probed("Cycle#2");
+  check("a tile's Quality menu keeps the picture until the new quality has a frame",
+    q2.widths.length === 2 && q2.widths[1] === 1920 && seamless(q2), JSON.stringify(q2));
+  const e1 = probed("Cycle#1");
+  check("enlarging a tile moves it up a quality without a blank tile between",
+    e1.widths.length === 2 && e1.widths[1] > e1.widths[0] && seamless(e1), JSON.stringify(e1));
   const name = (key) => Object.entries(keys).find(([, v]) => v === key)?.[0] ?? key;
-  const enlargeAct = result.actions.find((a) => a.act.do === "menu-click");
+  const enlargeAct = result.actions.find((a) => a.act.label === "Enlarge this tile");
   const t0 = result.samples.map((s) => ({ t: s.t, ...s.cams["grid:Cycle#0"] })).filter((s) => s.key);
   const before = t0.filter((s) => s.t < (enlargeAct?.t ?? Infinity));
   const after = t0.filter((s) => s.t > (enlargeAct?.t ?? Infinity) + 1000);
