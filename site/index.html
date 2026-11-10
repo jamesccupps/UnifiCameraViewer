@@ -64,6 +64,11 @@
   .btn.ghost { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.45); font-weight: 500; font-size: 15px; padding: 10px 16px; }
   .btn.ghost:hover { background: rgba(255,255,255,.1); }
   .btn small { font-weight: 400; opacity: .75; font-size: 13px; }
+  .scoop { margin: 16px 0 0; max-width: 700px; color: #a9c3dd; font-size: 14px; }
+  .scoop p { margin: 0 0 6px; }
+  .scoop a { color: #d8e8f7; }
+  .scoop pre { margin: 0; padding: 10px 14px; border-radius: 8px; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.18);
+               color: #e6eef7; font: 14px/1.6 Consolas, "DejaVu Sans Mono", monospace; overflow-x: auto; }
   .sub { color: #a9c3dd; font-size: 14px; margin-top: 12px; }
   .sub a { color: #d8e8f7; }
   .demo { margin: 34px 0 0; }
@@ -103,6 +108,11 @@
       <a class="btn" id="primary" href="https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download/ProtectPanes-Setup.exe">Download for Windows <small id="primary-note">ProtectPanes-Setup.exe</small></a>
       <a class="btn ghost" id="secondary" href="https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download/ProtectPanes-win32-x64.zip">Portable zip</a>
       <a class="btn ghost" href="https://github.com/jamesccupps/UnifiCameraViewer">Source on GitHub</a>
+    </div>
+    <div class="scoop">
+      <p>Or with <a href="https://scoop.sh">Scoop</a> (new to it? install it from scoop.sh first):</p>
+      <pre>scoop bucket add jamesccupps https://github.com/jamesccupps/scoop-bucket
+scoop install jamesccupps/protectpanes</pre>
     </div>
     <p class="sub"><span id="version">Free and open source (MIT).</span> Windows 10 and 11 (64-bit). <a href="https://github.com/jamesccupps/UnifiCameraViewer/releases">All releases</a></p>
     <figure class="demo">

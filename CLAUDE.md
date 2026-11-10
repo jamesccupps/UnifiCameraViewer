@@ -429,6 +429,19 @@ The limit: a compromised dependency can still tamper with what it builds, and pu
 
 Installed copies find the release through `releases/latest/download/latest.json`.
 
+**Scoop bucket.** `bucket/protectpanes.json` in [jamesccupps/scoop-bucket](https://github.com/jamesccupps/scoop-bucket) updates itself from each GitHub release (checked every 4 hours), so a release needs no Scoop work as long as these hold:
+- Tag releases `vX.Y.Z` and publish them as the latest release, not a pre-release. The workflow's `gh release create` does both (no `--prerelease`).
+- Keep the release file names, and the folder layout inside the zip, unchanged. The bucket uses `ProtectPanes-win32-x64.zip` with `Protect Panes-win32-x64\ProtectPanes.exe` inside (its `extract_dir` and shortcut). That folder name is packager's (productName + platform + arch), so changing `productName` or `executableName` changes the layout.
+- Keep publishing the checksum file alongside, if there is one. This app has none: the manifest's autoupdate has no hash source, so Scoop hashes the zip it downloads. (`latest.json`'s signed hashes are for the app's own updater.)
+- Sign files **before** publishing, and never replace a file on a release that's already out: Scoop and winget have recorded its hash. Fix with a new version. (The publish job already signs `latest.json` before `gh release create`. Moving a tag, as in a failed release run, is only for a release that never published.)
+- If a file name or the zip layout must change, update `bucket/protectpanes.json` in jamesccupps/scoop-bucket in the same change.
+
+Open: a Scoop copy and the in-app updater. Measured 2026-11-10 with the real helper on a scratch copy of Scoop's layout; Scoop's side read from its source, not run.
+- Scoop runs the app from `apps\protectpanes\current`, a read-only junction to the version folder, and Electron's `process.execPath` keeps the junction path. So the updater sees a folder install.
+- A small update writes app.asar into Scoop's version folder. That works; Scoop lists the old version until `scoop update`.
+- A full update (a new Electron) swaps the folder. `current` becomes a real folder without Scoop's `manifest.json`, and the old junction stays behind as `current.old-<ts>`: the helper's `Remove-Item` can't delete a read-only junction. That leftover shows Scoop's `install.json` through the link, so Scoop lists it as an installed version and may take it for the current one.
+- The bucket's note ("can also update itself; 'scoop update protectpanes' works either way") holds for small updates only.
+
 The signing key:
 - The private key is `%USERPROFILE%\.protect-panes\update-signing-key.pem` on the maintainer's PC, and the same content is in the repo secret `UPDATE_SIGNING_KEY`.
 - Never commit it. Back it up: without it, installed copies can't update in place.

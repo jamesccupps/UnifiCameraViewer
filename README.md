@@ -23,6 +23,17 @@ UniFi Protect live view, one camera per window. Place each window anywhere on th
 
 Either way, you can turn on **Start with Windows** in the app.
 
+### Install with Scoop
+
+If you use [Scoop](https://scoop.sh) (new to it? install it from [scoop.sh](https://scoop.sh) first):
+
+```powershell
+scoop bucket add jamesccupps https://github.com/jamesccupps/scoop-bucket
+scoop install jamesccupps/protectpanes
+```
+
+Scoop installs the portable zip into its own apps folder and adds a Start menu shortcut. `scoop update protectpanes` brings new versions.
+
 ## Set up each console
 
 On each UniFi OS console (UDM / UNVR / Cloud Key), create a local account for this app:
