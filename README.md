@@ -145,6 +145,10 @@ The tests run the real app. Its windows stay invisible and click-through, and ne
 
 See `CLAUDE.md` for architecture, gotchas and the test harness, and `ROADMAP.md` for what's been asked for and how each item was investigated.
 
+## Security
+
+To report a vulnerability, use **[Report a vulnerability](https://github.com/jamesccupps/UnifiCameraViewer/security/advisories/new)** rather than a public issue. [SECURITY.md](SECURITY.md) says what the app protects, its known limits and what's in scope.
+
 ## License
 
 MIT. See `LICENSE`.

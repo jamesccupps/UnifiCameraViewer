@@ -26,6 +26,8 @@ Current version: **1.4.8**, released through the GitHub Actions release workflow
 
 The owner ran 1.0 to 1.2 on the real consoles, and their installed copy updated itself from 1.3.1 to 1.4.0 in the app (the installer path). Later versions are tested against the real consoles only through runs from source on a copy of the config. For 1.4.3 the owner used such a run themselves before the release: liveview import, enlarge, reconnect and the Access reader.
 
+`SECURITY.md` tells reporters what the app protects and what it doesn't: saved passwords, TLS pinning, pages that can't leave, the updater's checks, release signing and the fuses. Keep it in step when any of those change. Reports come in through GitHub's private vulnerability reporting (on since 2026-11-11).
+
 ## Commands
 
 ```
