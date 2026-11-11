@@ -416,7 +416,7 @@ Message boxes never show in self-test runs: a test can't click one, and it would
 
 Releases are built and published by `.github/workflows/release.yml` when a `vX.Y.Z` tag is pushed:
 1. Bump `version` in package.json (and the lockfile: `npm install --package-lock-only --ignore-scripts`).
-2. Write `release-notes/vX.Y.Z.md`, the release text. Without it the workflow falls back to GitHub's generated notes. If the release changes anything outside app.asar but not Electron (the icon, packager or builder options), also add `release-notes/vX.Y.Z.full-update` (see Small updates).
+2. Write `release-notes/vX.Y.Z.md`, the release text. Without it the workflow falls back to GitHub's generated notes. Its Files list names `SHA256SUMS.txt` too. If the release changes anything outside app.asar but not Electron (the icon, packager or builder options), also add `release-notes/vX.Y.Z.full-update` (see Small updates).
 3. `npm test`, commit, push `main`.
 4. `git tag -a vX.Y.Z -m "Protect Panes X.Y.Z"` and `git push origin vX.Y.Z`.
 
@@ -456,7 +456,8 @@ electron-builder makes the uninstaller and packs it into Setup.exe in one run, a
 3. Writes the key to a temp file and signs `latest.json` (`scripts/sign-release.js`). The Electron version comes from package-lock.json, and the unpacked app.asar hash from gunzipping the .gz, so no node_modules or build folder is needed.
 4. Deletes the key.
 5. Runs `scripts/verify-release.mjs`: the signature against the public key built into the app, then each file's size and SHA-256. A wrong secret stops here.
-6. Runs `gh release create` with all four files (Setup.exe, the zip, `ProtectPanes-app.asar.gz`, `latest.json`).
+6. Writes `SHA256SUMS.txt` over the files it publishes (Setup.exe, the zip, `ProtectPanes-app.asar.gz` when there is one, and the signed `latest.json`), so a download can be checked by hand too. Nothing reads it: the updater uses `latest.json`, and Scoop hashes what it downloads.
+7. Runs `gh release create` with those files and `SHA256SUMS.txt`.
 
 The limit: a compromised dependency can still tamper with what it builds, and both signatures would cover that. It can't take either identity and sign something else. `npm run test:release` checks the workflow keeps these rules (which jobs can sign in to Azure, what runs in them, who reads the key) and tests the uninstaller swap.
 
@@ -467,7 +468,7 @@ Installed copies find the release through `releases/latest/download/latest.json`
 **Scoop bucket.** `bucket/protectpanes.json` in [jamesccupps/scoop-bucket](https://github.com/jamesccupps/scoop-bucket) updates itself from each GitHub release (checked every 4 hours), so a release needs no Scoop work as long as these hold:
 - Tag releases `vX.Y.Z` and publish them as the latest release, not a pre-release. The workflow's `gh release create` does both (no `--prerelease`).
 - Keep the release file names, and the folder layout inside the zip, unchanged. The bucket uses `ProtectPanes-win32-x64.zip` with `Protect Panes-win32-x64\ProtectPanes.exe` inside (its `extract_dir` and shortcut). That folder name is packager's (productName + platform + arch), so changing `productName` or `executableName` changes the layout.
-- Keep publishing the checksum file alongside, if there is one. This app has none: the manifest's autoupdate has no hash source, so Scoop hashes the zip it downloads. (`latest.json`'s signed hashes are for the app's own updater.)
+- Keep publishing the checksum file alongside: `SHA256SUMS.txt`, from the first release after 1.4.8. The bucket doesn't read it (its autoupdate has no hash source, so Scoop hashes the zip it downloads), and `latest.json`'s signed hashes are for the app's own updater.
 - Sign files **before** publishing, and never replace a file on a release that's already out: Scoop and winget have recorded its hash. Fix with a new version. (The publish job already signs `latest.json` before `gh release create`. Moving a tag, as in a failed release run, is only for a release that never published.)
 - If a file name or the zip layout must change, update `bucket/protectpanes.json` in jamesccupps/scoop-bucket in the same change.
 
@@ -483,7 +484,7 @@ The signing key:
 - The private key is `%USERPROFILE%\.protect-panes\update-signing-key.pem` on the maintainer's PC, and the same content is in the repo secret `UPDATE_SIGNING_KEY`.
 - Never commit it. Back it up: without it, installed copies can't update in place.
 - `scripts/make-signing-key.js` refuses to replace an existing key.
-- A local `npm run build:win` signs with the file, so a release can still be built by hand if CI is down. Attach the same four files.
+- A local `npm run build:win` signs with the file, so a release can still be built by hand if CI is down. Attach the same files, plus a `SHA256SUMS.txt` made the way publish makes it (`sha256sum` over them, run in `dist/`). Such a build has no Authenticode signature.
 
 For a first install, or a copy older than 1.2.0, use the Setup.exe or replace the folder with the zip. Settings in `%APPDATA%` carry over.
 
