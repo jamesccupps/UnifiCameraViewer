@@ -1,5 +1,9 @@
 # Protect Panes
 
+[![Tests](https://github.com/jamesccupps/UnifiCameraViewer/actions/workflows/test.yml/badge.svg)](https://github.com/jamesccupps/UnifiCameraViewer/actions/workflows/test.yml)
+[![Latest release](https://img.shields.io/github/v/release/jamesccupps/UnifiCameraViewer?label=release)](https://github.com/jamesccupps/UnifiCameraViewer/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 UniFi Protect live view, one camera per window. Place each window anywhere on the screen, at any size, next to whatever else you run (exacqVision, etc.). Positions are remembered. Connects to several consoles at once (e.g. Building and Garage).
 
 **[⬇ Download for Windows](https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download/ProtectPanes-Setup.exe)** (installer, 64-bit Windows 10 or 11) · [Portable zip](https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download/ProtectPanes-win32-x64.zip) · [All releases](https://github.com/jamesccupps/UnifiCameraViewer/releases) · [Website](https://jamesccupps.github.io/UnifiCameraViewer/)
