@@ -195,6 +195,33 @@ Requested 2026-10-27: "a way to show a preview or screenshot in the camera selec
 - Settings → **Show camera previews** turns it off.
 - `npm run test:list` and the e2e suite cover it; e2e checks a real JPEG through the library.
 
+## 14. After an update, put the cameras back in front
+
+Requested 2026-11-12, for the next release: if the cameras were in front of everything when you pressed update, they should come back in front afterwards, with the camera list minimized or out of the way.
+
+**Status:** not built.
+
+Known from the code (1.4.9):
+- **Install and restart** (`installUpdate()`) quits at once. The helper then relaunches `ProtectPanes.exe` with no arguments, on both the folder and the installer paths (the last `Start-Process` in `HELPER_PS1`). So the new copy can't tell an update just started it. The silent installer doesn't start a second copy: electron-builder's one-click template (`installSection.nsh`) starts the app after a silent install only with `--force-run`, and the helper passes `/S --updated`.
+- At startup the camera and grid windows open with `showInactive()`. Then `showManager()` runs unless Start hidden is on (and there's a console and an open window). The list's `ready-to-show` calls `show()`, which activates it, so it lands on top of the cameras.
+- So after every in-app update, the camera list covers the cameras until it's closed or **Bring cameras to front** is used.
+- Nothing tells you afterwards whether the update worked. Only Settings → About shows the version, and a failure is only in the helper's `apply-update.log`.
+
+Proposed:
+1. Before quitting, `installUpdate()` writes a one-shot marker in the staging folder, `%LOCALAPPDATA%\Protect Panes\updates\after-update.json`. It holds the version being installed, the time, and whether any camera or grid window was on screen (open, not hidden, not minimized).
+2. At startup, if the marker is there, read it and delete it. Act on it only if it's recent (a few minutes), so it can never affect a later ordinary start.
+   - Open the windows as usual, then bring them to front the way Bring cameras to front does: `showInactive()` + `moveTop()`, with no focus taken (exacqVision runs on the same screen) and hidden windows left hidden.
+   - Open the camera list minimized, so it keeps its taskbar button, instead of shown.
+   - If `app.getVersion()` isn't the marker's version, the update failed and the helper relaunched the old copy. Show the list as today, with the failure in Settings → Updates.
+3. With no camera on screen before the update, start as today: the list shows.
+
+Open:
+- **Minimized, or tray only** (as Start hidden does)? Suggestion: minimized, since one click brings it back and it's easier to notice. The tray tooltip could say "Updated to X" either way.
+- **"In front of everything" can't be checked literally at Install time**: you click Install in the camera list, so the list is in front at that moment. Suggestion: the condition is "camera windows were on screen", not their z-order.
+- Should cameras set to **Always on top** need anything extra? They're above other windows already; `moveTop()` keeps the order among them.
+
+Testing: the list suite's `sampleZOrder()` (Win32 `GetWindow` through PowerShell) already checks the real z-order. A self-test start with a marker file in place can check that the cameras end up above a minimized list, and that a stale or mismatched marker starts as today. The update suite's real-helper run can check that the marker is written before the quit and is still there after the swap.
+
 ---
 
 ## Housekeeping found along the way
