@@ -422,7 +422,7 @@ Releases are built and published by `.github/workflows/release.yml` when a `vX.Y
 3. `npm test`, commit, push `main`.
 4. `git tag -a vX.Y.Z -m "Protect Panes X.Y.Z"` and `git push origin vX.Y.Z`.
 
-A tag `vX.Y.Z-signtest.N` (X.Y.Z still package.json's version) runs every job except publish: for trying a change to signing without a release. Delete the tag afterwards (`git push origin :refs/tags/<tag>`, `git tag -d <tag>`).
+A tag `vX.Y.Z-signtest.N` (X.Y.Z still package.json's version) runs every job except publish: for trying a change to signing without a release. Run one after any electron-builder upgrade, before releasing on it: the uninstaller swap relies on electron-builder making a byte-identical uninstaller every run and naming it `*__uninstaller.exe`. Delete the tag afterwards (`git push origin :refs/tags/<tag>`, `git tag -d <tag>`).
 
 There are two signatures, and neither is ever made next to the build's dependencies (`npm ci`: the packager, electron-builder and everything they pull in):
 - **latest.json**, Ed25519, from the `UPDATE_SIGNING_KEY` secret: what installed copies check before an update runs. Until 1.4.3 the key sat in a file while `npm run build:win` ran the packager and electron-builder, and any compromised package could have read it and signed updates for every installed copy.
