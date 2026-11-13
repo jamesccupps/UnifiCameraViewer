@@ -395,6 +395,7 @@ function openCameraWindow(key, { flash = true, raise = false } = {}) {
   // Arrange and the editor's "Use what's on screen" count only visible windows, per screen. The
   // notify at the end of openCamera comes before ready-to-show, so tell the list on each change.
   for (const ev of ["show", "hide", "minimize", "restore"]) win.on(ev, notifyManager);
+  win.on("maximize", () => undoLockedMaximize(win));
 
   const saveBounds = debounce(() => {
     if (win.isDestroyed() || win.isMinimized() || win.isMaximized() || displaysChanging()) return;
@@ -1642,6 +1643,14 @@ function tileOpenWindows() {
     if (gw.win.isMaximized()) gw.win.unmaximize();
     placeWindow(gw.win, { x: a.x + 40, y: a.y + 40, width: Math.round(a.width * 0.7), height: Math.round(a.height * 0.7) });
   }
+}
+
+// Lock layout makes windows neither movable nor resizable, but Windows still maximizes them: Win+↑,
+// the system menu, a double-click on a grid's title bar, another program's ShowWindow. Measured
+// (review U3): WM_SYSCOMMAND SC_MAXIMIZE and ShowWindow(SW_MAXIMIZE) both maximized a locked
+// window, and `maximizable: false` changed neither its style nor the outcome. Undoing it does.
+function undoLockedMaximize(win) {
+  if (store.settings.lockLayout && !win.isDestroyed()) win.unmaximize();
 }
 
 function bringAllToFront() {

@@ -1076,7 +1076,75 @@ async function boundsSuite() {
     JSON.stringify({ moved: movedSample, end: endLobby, saved: r4.config.windows[keys.lobby]?.bounds, grid: r4.config.grids[0]?.bounds }));
   const stairAt = last(r4.result)[stair]?.bounds;
   check("a window saved with its top edge off screen opens where it can be dragged", stairAt && stairAt.y >= 0, JSON.stringify(stairAt));
+
+  // Review U3: Lock layout, then Win+↑. Sent to the test windows themselves (invisible, click-through)
+  // as WM_SYSCOMMAND SC_MAXIMIZE, which is what Win+↑ and the system menu send, never as keys to
+  // whatever window has the focus. Unlocked, the same message maximizes them (so it did arrive).
+  if (process.platform === "win32") {
+    // Titles no real camera or grid on this PC can have: the message goes to windows found by title.
+    const LOCK_TITLES = ["U3 lock test Cam", "U3 lock test grid"];
+    const lockRun = async (locked) => {
+      const dir = tmpDir(`bounds-lock-${locked ? "on" : "off"}`);
+      fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({
+        version: 1,
+        consoles: [{ id: A, name: "U3 lock test", host: "mock-a", username: "m", password: null, mockCameras: ["Cam"] }],
+        windows: { [keys.lobby]: { open: true, bounds: start[keys.lobby], channel: 2 } },
+        grids: [{ id: "grid-1", name: "U3 lock test grid", templateId: "2x2", bounds: start.grid, open: true, tiles: [null, null, null, null] }],
+        settings: { startHidden: true, lockLayout: locked },
+      }, null, 2));
+      const sender = maximizeFromOutside(LOCK_TITLES, 30);
+      await sender.ready;
+      const run = await runApp({ userData: dir, results: path.join(dir, "results"), seconds: 7, extraArgs: ["--mock"] });
+      return { maximized: run.result.maximized, sent: await sender.done, saved: run.config.windows[keys.lobby]?.bounds };
+    };
+    const locked = await lockRun(true);
+    const unlocked = await lockRun(false);
+    check("Win+↑ (SC_MAXIMIZE) doesn't maximize a camera or grid window while the layout is locked",
+      locked.sent.length === 2 && locked.maximized?.length === 0 && sameBounds(locked.saved, start[keys.lobby]), JSON.stringify(locked));
+    check("...and does when it isn't (the message reached them)",
+      unlocked.sent.length === 2 && LOCK_TITLES.every((t) => unlocked.maximized?.includes(t)), JSON.stringify(unlocked));
+  }
   console.log(`  results: ${userData}`);
+}
+
+/**
+ * Windows only: post WM_SYSCOMMAND SC_MAXIMIZE (what Win+↑ and the system menu send) to the top-level
+ * windows titled `titles`, 2 s after all of them exist (waiting up to `timeoutSec`). Posted to those
+ * windows only, so give them titles nothing else on the PC can have. `ready` resolves when the shim
+ * has compiled; `done` to the titles it sent to.
+ */
+function maximizeFromOutside(titles, timeoutSec) {
+  const ps = `
+Add-Type @'
+using System; using System.Runtime.InteropServices;
+public static class MX {
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string cls, string title);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+}
+'@
+"ready"
+$titles = @(${titles.map((t) => JSON.stringify(t)).join(", ")})
+$end = (Get-Date).AddSeconds(${timeoutSec})
+while ((Get-Date) -lt $end) {
+  $found = @($titles | ForEach-Object { [MX]::FindWindow([NullString]::Value, $_) } | Where-Object { $_ -ne [IntPtr]::Zero })
+  if ($found.Count -eq $titles.Count) { break }
+  Start-Sleep -Milliseconds 200
+}
+Start-Sleep -Seconds 2
+foreach ($t in $titles) {
+  $h = [MX]::FindWindow([NullString]::Value, $t)
+  if ($h -ne [IntPtr]::Zero -and [MX]::PostMessage($h, 0x0112, [IntPtr]0xF030, [IntPtr]0)) { "sent $t" }
+}`;
+  const child = spawn("powershell", ["-NoProfile", "-Command", ps], { stdio: ["ignore", "pipe", "ignore"] });
+  let out = "";
+  let markReady;
+  const ready = new Promise((resolve) => { markReady = resolve; });
+  child.stdout.on("data", (d) => { out += d; if (/\bready\b/.test(out)) markReady(); });
+  const done = new Promise((resolve) => child.on("exit", () => {
+    markReady();
+    resolve(out.split(/\r?\n/).filter((l) => l.startsWith("sent ")).map((l) => l.slice(5).trim()));
+  }));
+  return { ready, done };
 }
 
 // ---------------------------------------------------------------------------------------------

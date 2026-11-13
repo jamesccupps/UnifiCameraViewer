@@ -110,6 +110,8 @@ export class GridWindow {
     win.on("resize", () => { this.#layout(); saveBounds(); });
     // Maximize and full screen change the content size; not every platform sends "resize" for them.
     for (const ev of ["maximize", "unmaximize", "enter-full-screen", "leave-full-screen"]) win.on(ev, () => this.#layout());
+    // Windows maximizes a locked window anyway (Win+↑, a title-bar double-click): see undoLockedMaximize() in main.js.
+    win.on("maximize", () => { if (d.settings().lockLayout) win.unmaximize(); });
     win.on("minimize", () => {
       this.#settle();
       for (const p of this.players) p.stream.pause();

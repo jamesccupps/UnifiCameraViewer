@@ -232,6 +232,7 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
       objectPrototype: Object.keys(Object.prototype), // anything here means something polluted it
       manager: (() => { const m = managerWindow(); return m ? { visible: m.isVisible(), minimized: m.isMinimized() } : null; })(),
       cameraWindows: [...camWins.values()].map((cw) => ({ title: cw.win.getTitle(), visible: cw.win.isVisible(), minimized: cw.win.isMinimized() })),
+      maximized: BrowserWindow.getAllWindows().filter((w) => w.isMaximized()).map((w) => w.getTitle()),
     };
     for (const [id, c] of connections) result.connections[id] = { state: c.state, message: c.message, cameras: c.cameras().length, snapshots: c.snapshotCount, subscriptions: c.subscriptionCounts, active: c.activeSubscriptions };
     if (process.env.PANES_SELFTEST_SHOWBAR) {
