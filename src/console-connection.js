@@ -104,11 +104,14 @@ export class ConsoleConnection extends EventEmitter {
         res.ensureOk();
         const body = res.json();
         if (typeof body?.url !== "string") throw new Error("the livestream endpoint sent no socket URL");
-        // Like the library since 5.4.2: through UniFi OS at the configured address, port included,
-        // with the minted path and query (the token). The minted URL names Protect's own listener,
-        // another port with another certificate, which the console's pin didn't cover.
-        const minted = new URL(body.url);
-        return `wss://${host}/proxy/protect${minted.pathname}${minted.search}`;
+        // Protect's own listener, at the port the console minted, with the console's address swapped
+        // in (the library's way up to 5.4.1). The library now goes through UniFi OS at the configured
+        // address instead, but that refuses a socket without the login cookie, which only the
+        // library holds (no public API): tried in 1.4.10 on a real UA G3 Pro, a socket error every
+        // 3 s. The cost: this socket isn't on the pinned host:port, so cert-pins.js doesn't check it.
+        const url = new URL(body.url);
+        url.hostname = new URL(`https://${host}`).hostname;
+        return url.toString();
       },
     });
   }

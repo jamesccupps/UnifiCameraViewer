@@ -2855,6 +2855,16 @@ async function e2eSuite() {
     check("an Access door reader plays: live, decoding, portrait, video only, near the live edge",
       kp?.status === "live" && kp.decodedFrames >= 30 && kp.videoWidth === 360 && kp.videoHeight === 480 && /avc1/.test(kp.mime) && !/mp4a/.test(kp.mime) && kp.lag < 1.5,
       kp && JSON.stringify({ status: kp.status, frames: kp.decodedFrames, size: `${kp.videoWidth}x${kp.videoHeight}`, mime: kp.mime, lag: kp.lag?.toFixed(2), resets: kp.resetRequests }));
+    // Which way each livestream socket went (the fake console logs it). The library's go through
+    // UniFi OS on the console's own address, the one its certificate pin covers; only the Access
+    // reader's own stream takes Protect's listener, since UniFi OS wants a cookie it can't send.
+    const sockets = (route) => servers.flatMap((s) => s.output.filter((l) => l.includes(`livestream socket via ${route}`)));
+    const viaOs = sockets("UniFi OS");
+    const viaListener = sockets("Protect's listener");
+    const reader = cam(P.garage, 4);
+    check("library livestreams go through UniFi OS on the pinned address; only the Access reader uses Protect's own listener",
+      viaOs.length >= 4 && !viaOs.some((l) => l.includes(reader)) && viaListener.length >= 1 && viaListener.every((l) => l.includes(reader)),
+      JSON.stringify({ viaOs: viaOs.length, viaListener }));
     const reconnect = result.actions.find((a) => a.act.label === "Reconnect stream");
     check("Reconnect stream reconnects even while a grid tile shares the camera's stream",
       reconnect?.ok && negotiatesBefore !== null && garageNegotiates() > negotiatesBefore && cams[keys.garage]?.status === "live" && cams[keys.garage].decodedFrames > 0

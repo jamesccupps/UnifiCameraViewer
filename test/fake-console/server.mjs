@@ -14,8 +14,9 @@
 // mode "badauth": every login gets 401.
 //
 // Speaks exactly what the unifi-protect library needs: POST /api/auth/login, GET /proxy/protect/api/bootstrap,
-// WSS /proxy/protect/ws/updates, GET /proxy/protect/api/ws/livestream (minting a URL on another address,
-// which the client dials through UniFi OS as WSS /proxy/protect/ws/livestream) -> WSS livestream framed as
+// WSS /proxy/protect/ws/updates, GET /proxy/protect/api/ws/livestream (minting a URL with a token on
+// Protect's own listener, port+1000, which the library dials through UniFi OS instead, as WSS
+// /proxy/protect/ws/livestream with the login cookie) -> WSS livestream framed as
 // [type:1][len:3][payload] (248 codec, 250 init, 249 begin, 251 moof, 254 mdat header, 252 video, 255 end),
 // and GET /proxy/protect/api/cameras/<id>/snapshot?w=<width> -> a JPEG (logged as "snapshot <id> w=<width>").
 // Video comes from ffmpeg (FFMPEG_PATH, the ffmpeg-static dev dependency, or ffmpeg on PATH).
@@ -138,12 +139,14 @@ const server = https.createServer({ key: fs.readFileSync(path.join(dir, "key.pem
     }
     if (url.pathname === "/proxy/protect/api/ws/livestream") {
       log("livestream negotiate", url.searchParams.get("camera"), "channel", url.searchParams.get("channel"));
-      // Like a real console, the URL it mints names another address and port than the one the client
-      // came in on (Protect's own listener). unifi-protect 5.4.2 and later dial the configured address
-      // instead, through UniFi OS (/proxy/protect + the minted path and query), so the socket goes to
-      // the console's own certificate, which the app pins. Nothing listens on the minted one here.
+      // Like a real console, the URL it mints names Protect's own listener: another address and port
+      // than the one the client came in on, authorized by the token in its query. unifi-protect 5.4.2
+      // and later dial the configured address instead, through UniFi OS (/proxy/protect + the minted
+      // path and query), which also wants the login cookie, so the socket goes to the console's own
+      // certificate, which the app pins. The Access reader's own stream (bare-livestream.js) can't
+      // send that cookie, so it dials the minted port, with its hostname swapped for the console's.
       res.writeHead(200, { "content-type": "application/json" })
-        .end(JSON.stringify({ url: `wss://192.0.2.1:7442/ws/livestream?camera=${url.searchParams.get("camera")}&channel=${url.searchParams.get("channel")}` }));
+        .end(JSON.stringify({ url: `wss://192.0.2.1:${LISTENER_PORT}/ws/livestream?camera=${url.searchParams.get("camera")}&channel=${url.searchParams.get("channel")}&token=${STREAM_TOKEN}` }));
       return;
     }
     res.writeHead(404).end();
@@ -153,12 +156,39 @@ const server = https.createServer({ key: fs.readFileSync(path.join(dir, "key.pem
 const wss = new WebSocketServer({ noServer: true });
 server.on("upgrade", (req, socket, head) => {
   const url = new URL(req.url, "https://x");
+  // UniFi OS refuses a socket upgrade without the login cookie (the 5.4.2 library sends it; a bare
+  // WebSocket doesn't), before the WebSocket handshake: the client sees an error with no message,
+  // as the app's Access reader stream did against a real console in a 1.4.10 trial.
+  if (url.pathname.startsWith("/proxy/protect/ws/") && !(req.headers.cookie || "").includes("TOKEN=faketoken")) {
+    log("socket refused: no login cookie", url.pathname);
+    socket.end("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n");
+    return;
+  }
   wss.handleUpgrade(req, socket, head, (ws) => {
     if (url.pathname === "/proxy/protect/ws/updates") return; // the library only needs it open
-    if (url.pathname === "/proxy/protect/ws/livestream") return streamTo(ws, url.searchParams.get("camera"), Number(url.searchParams.get("channel")));
+    if (url.pathname === "/proxy/protect/ws/livestream") {
+      log("livestream socket via UniFi OS", url.searchParams.get("camera"));
+      return streamTo(ws, url.searchParams.get("camera"), Number(url.searchParams.get("channel")));
+    }
     ws.close();
   });
 });
+// Protect's own listener, on the port the negotiation mints: its token is the only authorization.
+const LISTENER_PORT = port + 1000;
+const STREAM_TOKEN = "fakestreamtoken";
+const listener = https.createServer({ key: fs.readFileSync(path.join(dir, "key.pem")), cert: fs.readFileSync(path.join(dir, "cert.pem")) }, (_req, res) => res.writeHead(404).end());
+listener.on("upgrade", (req, socket, head) => {
+  const url = new URL(req.url, "https://x");
+  if (url.pathname !== "/ws/livestream" || url.searchParams.get("token") !== STREAM_TOKEN) {
+    socket.end("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n");
+    return;
+  }
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    log("livestream socket via Protect's listener", url.searchParams.get("camera"));
+    streamTo(ws, url.searchParams.get("camera"), Number(url.searchParams.get("channel")));
+  });
+});
+listener.listen(LISTENER_PORT, "127.0.0.1");
 
 function snapshotJpeg(w, h) {
   return new Promise((resolve, reject) => {
