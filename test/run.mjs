@@ -105,6 +105,13 @@ async function runSuite(fn) {
 }
 
 const last = (result) => result.samples[result.samples.length - 1]?.cams ?? {};
+// The windows as they were before an action at `t`. A sample's `t` is when it started, and it reads
+// the windows one at a time after that. Samples come every 2 s from the same start as the actions, so
+// an action on an even second lands on a sample: one stamped just before it could read the later
+// windows after it. That flaked "small window shows only the status dot" (the resize at 8 s; Ramp is
+// the fifth window read) and could flake e2e's garage frames (Reconnect stream at 12 s). Skip
+// samples started in the last second before the action.
+const sampleBefore = (result, t) => result.samples.filter((s) => s.t < t - 1_000).at(-1)?.cams ?? {};
 
 // What a camera page shows: a picture (the video's frame, the held last frame, or the 360° canvas)
 // and its status words. For the checks that a stream starting again (another quality, a resume
@@ -238,7 +245,7 @@ async function mockSuite() {
   check("360° view offers Quad, Single view, Panorama and Fisheye (panorama window: Panorama checked)",
     ["Quad view", "Single view", "[x] Panorama", "Fisheye (no dewarp)"].every((l) => views.includes(l)), JSON.stringify(views));
   const resizedAt = result.actions.find((a) => a.act.do === "resize")?.t ?? 0;
-  const before = result.samples.filter((s) => s.t < resizedAt).at(-1)?.cams ?? {};
+  const before = sampleBefore(result, resizedAt);
   const label = (c) => c && JSON.stringify(c.label);
   check("small window shows only the status dot", before[keys.ramp]?.label?.compact === true, label(before[keys.ramp]));
   check("normal-size window shows the full name label", cams[keys.lobby]?.label?.compact === false, label(cams[keys.lobby]));
@@ -2760,7 +2767,7 @@ async function e2eSuite() {
     // decoded 13 (v1.4.7's first run) or 28 (v1.4.6's). So its frames are judged on the last sample
     // before the reconnect; the reconnect check covers the end.
     const reconnectAt = result.actions.find((a) => a.act.label === "Reconnect stream")?.t ?? Infinity;
-    const beforeReconnect = result.samples.filter((s) => s.t < reconnectAt).at(-1)?.cams ?? {};
+    const beforeReconnect = sampleBefore(result, reconnectAt);
     for (const name of ["drops", "bogusCodec", "fisheye", "garage"]) {
       const c = cams[keys[name]];
       const f = (name === "garage" ? beforeReconnect : cams)[keys[name]];
