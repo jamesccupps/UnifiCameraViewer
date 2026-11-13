@@ -607,7 +607,9 @@ async function streamsSuite() {
   for (const [name, id] of [["window", keys2.stair], ["grid tile", "grid:G#0"]]) {
     const after = r2.samples.filter((s) => s.t > crashAt).map((s) => s.cams[id]);
     const live = after.filter((c) => c && !c.error && c.status === "live");
-    const before = r2.samples.filter((s) => s.t < crashAt).at(-1)?.cams[id]?.decodedFrames ?? 0;
+    // The crash is at 8 s, on a sample: one stamped just before it can read the crashed page (CI saw
+    // "error" there, and 0 frames "before" made the restart undetectable).
+    const before = sampleBefore(r2, crashAt)[id]?.decodedFrames ?? 0;
     check(`a crashed camera page (${name}) is reloaded and plays again`,
       r2.actions.filter((a) => a.act.do === "crash").every((a) => a.ok) && after.some((c) => !c || c.error || c.decodedFrames < before)
         && live.length >= 2 && live.at(-1).decodedFrames > live.at(-2).decodedFrames,
