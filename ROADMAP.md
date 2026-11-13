@@ -244,7 +244,7 @@ Built:
 
 ## 16. An "auto" setting for the cameras
 
-Requested 2026-11-13: "some sort of auto setting for the cameras". Read here as **Auto quality for camera windows**, to confirm with the owner; other readings are at the end.
+Requested 2026-11-13: "some sort of auto setting for the cameras". It means **Auto quality for camera windows** (the owner confirmed it, 2026-11-13).
 
 **Status:** not built.
 
@@ -265,7 +265,7 @@ Costs:
 - An enlarged window on High pulls the camera's top stream: more bandwidth and GPU decode than today's Medium. That's the point of enlarging, but it adds up on a weak PC.
 - The tiles' thresholds put a window up to 700 pixels wide on Low, below today's Medium default. Windows may want their own thresholds.
 
-Other readings of "auto setting" (to ask):
+Other readings of "auto setting" that were considered (not what was asked):
 - Picture: automatic brightness and contrast. Color range is already automatic.
 - Layout: Arrange running again by itself when cameras are opened or closed.
 - Cycling: a window stepping through several cameras, as grid tiles imported from a Protect liveview do.
