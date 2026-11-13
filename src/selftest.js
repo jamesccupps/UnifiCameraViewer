@@ -239,19 +239,21 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
       for (const cw of camWins.values()) await cw.win.webContents.executeJavaScript("document.getElementById('bar').style.opacity = 1").catch(() => {});
       await new Promise((r) => setTimeout(r, 300));
     }
+    // PANES_SELFTEST_NO_CAPTURE=1: no screenshots, for a run against the real consoles (their pictures
+    // stay off disk); result.json still has every window's stats.
+    const capture = process.env.PANES_SELFTEST_NO_CAPTURE !== "1";
     let i = 0;
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isVisible()) continue;
-      const img = await win.webContents.capturePage();
       const name = `${String(i++).padStart(2, "0")}-${win.getTitle().replace(/[^a-z0-9]+/gi, "_")}.png`;
-      fs.writeFileSync(path.join(dir, name), img.toPNG());
+      if (capture) fs.writeFileSync(path.join(dir, name), (await win.webContents.capturePage()).toPNG());
       result.windows[name] = win.getBounds();
     }
     // A grid window's capture is only its own page; each tile is a separate view.
     for (const { id, cw, bounds, visible } of gridTiles()) {
       if (!visible) continue;
       const name = `${id.replace(/[^a-z0-9]+/gi, "_")}.png`;
-      fs.writeFileSync(path.join(dir, name), (await cw.wc.capturePage()).toPNG());
+      if (capture) fs.writeFileSync(path.join(dir, name), (await cw.wc.capturePage()).toPNG());
       result.windows[name] = bounds;
     }
     fs.writeFileSync(path.join(dir, "result.json"), JSON.stringify(result, null, 2));

@@ -414,7 +414,13 @@ The owner's PC has the real config. To try a change live:
 2. Run `PANES_DEVTOOLS=1 npm start`.
 3. Check `%APPDATA%\Protect Panes\protect-panes.log` for connection errors.
 
-To experiment without disturbing the saved layout, copy `config.json` **and `Local State`** into a scratch folder and run with `PANES_USER_DATA` pointing at it. `safeStorage` encrypts with an AES key stored in `Local State` (`os_crypt.encrypted_key`, itself DPAPI-wrapped), so with `config.json` alone every console fails to decrypt its password (since 1.4.3 the console says "The saved password can't be read on this PC any more. Enter it again" and isn't retried; the log has safeStorage's own error). With both files the passwords decrypt for the same Windows user. Adding `PANES_SELFTEST_DIR` to that run gives `result.json` plus screenshots of the real cameras, then the app exits.
+To experiment without disturbing the saved layout, copy `config.json` **and `Local State`** into a scratch folder and run with `PANES_USER_DATA` pointing at it. `safeStorage` encrypts with an AES key stored in `Local State` (`os_crypt.encrypted_key`, itself DPAPI-wrapped), so with `config.json` alone every console fails to decrypt its password (since 1.4.3 the console says "The saved password can't be read on this PC any more. Enter it again" and isn't retried; the log has safeStorage's own error). With both files the passwords decrypt for the same Windows user. Adding `PANES_SELFTEST_DIR` to that run gives `result.json` plus screenshots of the real cameras, then the app exits. Add `PANES_SELFTEST_NO_CAPTURE=1` to keep the real cameras' pictures off disk; `result.json` still has every window's and tile's stats. The self-test's windows are invisible and take no focus, so this can run beside the installed app.
+
+The 1.4.10 run (2026-11-13), on such a copy:
+- Both consoles connected. Every online camera went live through unifi-protect 5.4.2's UniFi OS route, with the console pins in place: four windows, a 2×2 grid, and the Building door reader (UA G3 Pro, 360×480) on Protect's own listener.
+- A grid tile coming back after Enlarge went: dimmed last picture → held frame → live, with no blank probe and no "Connecting…".
+- No warnings in the log.
+- The owner's own run just before found the reader failing on the UniFi OS route (see TLS pinning).
 
 When adding a test, extend `test/run.mjs`. `PANES_SELFTEST_ACTIONS` (JSON) drives windows with real input:
 
