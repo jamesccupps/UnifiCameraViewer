@@ -242,6 +242,34 @@ Built:
 - It works with Lock layout on. So does the quad's view double-click, which Lock layout used to block along with aiming.
 - The bounds suite double-clicks a plain window and a Quad window, locked and unlocked: enlarged, then back to the same bounds, with the view focused and back. All four enlarge checks fail without the change.
 
+## 16. An "auto" setting for the cameras
+
+Requested 2026-11-13: "some sort of auto setting for the cameras". Read here as **Auto quality for camera windows**, to confirm with the owner; other readings are at the end.
+
+**Status:** not built.
+
+Known from the code (1.4.11):
+- A camera window has one fixed quality: High, Medium or Low (`windows[key].channel`, Protect's channel 0/1/2), Medium by default (`pickChannel()`).
+- Grid tiles already pick theirs. A tile with no quality of its own follows its size (`tileQuality()` → `channelForTile()`: Low up to 700 physical pixels wide, Medium up to 1400, High above that). It picks again 600 ms after a resize settles, and switches make-before-break.
+- Arrange, with **Match each camera's quality to its tile size** on (`arrangeQuality`, the default), sets each window's quality once from its tile's width. After that it's fixed again.
+- Since 1.4.11 a double-click enlarges a window to its whole screen. At Medium (1280×720), that's upscaled on a 1920-wide or 4K screen.
+
+Proposed:
+- A fourth choice, **Quality: Auto**, in the window's menu, Apply to all and the camera list's Quality for all. A window on Auto picks with the tiles' thresholds from its physical width: again when a resize settles, when it's enlarged (most likely High), and when it goes back.
+- Saved as `channel: "auto"`. Older copies would read that as Medium: `pickChannel()` treats anything that isn't an integer as 1.
+- Existing windows keep their quality. Whether new windows start on Auto is the owner's call.
+- The switch restarts the window's stream. Since 1.4.10 the page holds the last frame meanwhile, so the picture freezes for about a second rather than going blank. Tiles' make-before-break (two streams for that second) could follow for windows too.
+
+Costs:
+- Every change is a new stream negotiation and a second of frozen picture. A drag-resize waits until it settles, as tiles do.
+- An enlarged window on High pulls the camera's top stream: more bandwidth and GPU decode than today's Medium. That's the point of enlarging, but it adds up on a weak PC.
+- The tiles' thresholds put a window up to 700 pixels wide on Low, below today's Medium default. Windows may want their own thresholds.
+
+Other readings of "auto setting" (to ask):
+- Picture: automatic brightness and contrast. Color range is already automatic.
+- Layout: Arrange running again by itself when cameras are opened or closed.
+- Cycling: a window stepping through several cameras, as grid tiles imported from a Protect liveview do.
+
 ---
 
 ## Housekeeping found along the way
