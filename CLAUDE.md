@@ -7,7 +7,7 @@ Hard requirements, all deliberate:
 - **Direct login by IP** with a local account. No ui.com/cloud, no MFA.
 - **Low resource use.** Medium channel by default, GPU decode via MSE, minimized windows stop streaming, WebGL only for 360° windows.
 
-Current version: **1.4.9**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
+Current version: **1.4.10**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
 - **1.2.0:** color-range fix for crushed shadows, name label collapse and per-window hide, clock on 360° views, Apply to all, Hide / Show cameras, named layouts with Protect liveview import, signed in-place updates.
 - **1.3.0:** the Setup.exe installer, Arrange and Close all, the layout editor, the tabbed camera list with hover tips, 360° Single view, and undici patched for security.
 - **1.3.1:** portable copies' in-app update fixed (the helper's working folder blocked the swap); Arrange / "Use what's on screen" missing just-shown windows.
@@ -24,6 +24,15 @@ Current version: **1.4.9**, released through the GitHub Actions release workflow
 - **1.4.7:** make-before-break for grid tiles (B2/P3 for tiles, ROADMAP #5's pre-buffering): a cycle step, an Enlarge, a resize and a tile's Quality menu keep the old picture until the new stream's first frame. Copies installed with Scoop leave updates to `scoop update` (an in-app full update confused Scoop's records). Install with Scoop in the README and on the project page. A small update for 1.4.5 and 1.4.6 copies. Still open: U3, camera windows' quality changes (P3's other half), tiles resuming after Enlarge still show "Connecting…", and unifi-protect 5.4.0.
 - **1.4.8:** Authenticode-signed (James Cupps, Azure Artifact Signing): the exe, the uninstaller and Setup.exe, from release jobs that run no npm code (see Releasing). Nothing else changes. A full update for every copy (`release-notes/v1.4.8.full-update`), so each gets the signed exe.
 - **1.4.9:** Electron 45.2.3 → 45.3.1: Chromium 156.0.8078.96, backported Chromium/Dawn/V8 fixes, eMudhra's revoked intermediates no longer trusted, and a Windows fix for hidden owned windows that DWM drew as blank boxes (Electron #55630; Hide cameras / Hide all checked by the hide suite). Nothing else changes. electron-builder stays at 26.17.0: an upgrade goes in its own change, with a signtest tag, because the uninstaller swap needs it to make the same uninstaller every run. The first release with `SHA256SUMS.txt`. A full update for every copy, since the Electron version changed.
+- **1.4.10:**
+  - After an in-app update the cameras come back in front, with the camera list minimized (ROADMAP #14).
+  - The camera page holds its last frame while a stream starts again: a camera window's quality change (P3's other half, as a frozen frame rather than two streams), a resume, tiles back after Enlarge.
+  - Lock layout undoes a maximize (U3).
+  - unifi-protect 5.3.1 → 5.4.2: livestreams go through UniFi OS at the configured address, so the console's pin covers them. They very likely weren't covered from 1.4.3 to 1.4.9 (TLS pinning).
+  - electron-builder 26.18.1.
+  - A sample race behind the flaky "status dot" check fixed.
+  - A small update for 1.4.9 copies.
+  - Not checked yet: 5.4.2 (and the Access reader's new route) against the real consoles, and a real Win+↑ keypress.
 
 The owner ran 1.0 to 1.2 on the real consoles, and their installed copy updated itself from 1.3.1 to 1.4.0 in the app (the installer path). Later versions are tested against the real consoles only through runs from source on a copy of the config. For 1.4.3 the owner used such a run themselves before the release: liveview import, enlarge, reconnect and the Access reader.
 
