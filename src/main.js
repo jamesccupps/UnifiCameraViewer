@@ -11,7 +11,7 @@ import { consoleKey, installCertPinning } from "./cert-pins.js";
 import { Previews } from "./previews.js";
 import { decryptPassword, DEFAULT_SETTINGS, encryptPassword, newId, Store } from "./store.js";
 import { UPDATE_PUBLIC_KEY } from "./update-key.js";
-import { scoopInstall, sourceKind, Updater } from "./updater.js";
+import { scoopInstall, sourceKind, takeAfterUpdateNote, Updater, writeAfterUpdateNote } from "./updater.js";
 import { debounce, isFileUrlOf, normalizeHost, syncLoginItem, throttle } from "./util.js";
 import { placeWindow, windowBounds } from "./window-bounds.js";
 
@@ -38,6 +38,7 @@ let tray = null;
 let managerWin = null;
 let quitting = false;
 let updater = null;
+let failedUpdate = null; // the version an in-app update was installing, when this start shows it didn't
 let previews = null;
 
 const connections = new Map(); // consoleId -> ConsoleConnection
@@ -143,13 +144,26 @@ async function init() {
   const MockConnection = MOCK ? (await import("./mock.js")).MockConnection : null;
   for (const cfg of store.data.consoles) startConnection(cfg, MockConnection);
 
+  // Started by an update's helper? Install was clicked in the camera list, and showing the list now
+  // would put it over the cameras. If cameras were on screen, raise them instead (without taking the
+  // focus) and leave the list minimized. An update that didn't install starts as usual, and says so.
+  const note = takeAfterUpdateNote(updateStageDir());
+  const updated = note?.version === app.getVersion();
+  if (note && !updated) {
+    failedUpdate = note.version;
+    log.warn(`the update to ${note.version} didn't install; this is still ${app.getVersion()} (apply-update.log in ${updateStageDir()})`);
+  } else if (updated) {
+    log.info(`updated to ${note.version}${note.camerasOnScreen ? ": cameras back in front, camera list minimized" : ""}`);
+  }
+  const raise = !!(updated && note.camerasOnScreen);
+
   // Hidden windows ("Hide cameras") stay part of the layout but aren't created until shown.
   const openKeys = Object.entries(store.data.windows).filter(([, w]) => w.open && !w.hidden).map(([k]) => k);
-  for (const key of openKeys) openCameraWindow(key);
+  for (const key of openKeys) openCameraWindow(key, { raise });
   const openGrids = store.data.grids.filter((g) => g.open && !g.hidden);
-  for (const g of openGrids) gridWindow(g).open();
+  for (const g of openGrids) gridWindow(g).open({ raise });
 
-  if (!store.data.consoles.length || !(openKeys.length || openGrids.length) || !store.settings.startHidden) showManager();
+  if (!store.data.consoles.length || !(openKeys.length || openGrids.length) || !store.settings.startHidden) showManager({ minimized: raise });
 
   if (process.env.PANES_SELFTEST_DIR) {
     const openGridWins = () => [...gridWins.values()].filter((g) => g.isOpen);
@@ -305,7 +319,7 @@ function cameraKey(key) {
   return cameraId && !rest.length && store.data.consoles.some((c) => c.id === consoleId) ? k : null;
 }
 
-function openCameraWindow(key, { flash = true } = {}) {
+function openCameraWindow(key, { flash = true, raise = false } = {}) {
   const existing = camWins.get(key);
   if (existing) {
     const entry = store.data.windows[key];
@@ -375,8 +389,9 @@ function openCameraWindow(key, { flash = true } = {}) {
 
   win.loadFile(path.join(__dirname, "renderer", "camera.html"));
   if (process.env.PANES_DEVTOOLS === "1") win.webContents.openDevTools({ mode: "detach" });
-  // Never steal focus from whatever the operator is using (exacqVision etc.).
-  win.once("ready-to-show", () => win.showInactive());
+  // Never steal focus from whatever the operator is using (exacqVision etc.). `raise` (after an
+  // update) also puts it above other apps' windows, still without the focus.
+  win.once("ready-to-show", () => { win.showInactive(); if (raise) win.moveTop(); });
   // Arrange and the editor's "Use what's on screen" count only visible windows, per screen. The
   // notify at the end of openCamera comes before ready-to-show, so tell the list on each change.
   for (const ev of ["show", "hide", "minimize", "restore"]) win.on(ev, notifyManager);
@@ -1759,6 +1774,16 @@ function setUpdateSource(value) {
 function installUpdate() {
   if (!app.isPackaged) throw new Error("Updates install only into the packaged app, not when running from source.");
   updater.install({ installDir: path.dirname(process.execPath), exeName: path.basename(process.execPath), pid: process.pid });
+  // After install() only: if it throws, the app keeps running and no note may be left behind. The
+  // helper waits for this process to exit, so the note is there before the new copy starts.
+  const onScreen = (w) => w.isVisible() && !w.isMinimized();
+  const camerasOnScreen = [...camWins.values()].some((cw) => onScreen(cw.win))
+    || [...gridWins.values()].some((gw) => gw.isOpen && onScreen(gw.win));
+  try {
+    writeAfterUpdateNote(updateStageDir(), { version: updater.state.version, camerasOnScreen });
+  } catch (err) {
+    log.warn(`couldn't leave the after-update note: ${err.message}`);
+  }
   log.info(`installing update ${updater.state.version}; quitting so the helper can swap the folder`);
   quitting = true;
   app.quit();
@@ -1781,7 +1806,8 @@ function applyLoginItem() {
 // ---------------------------------------------------------------------------------------------
 // Manager window + tray
 
-function showManager() {
+/** `minimized` (startup after an update) creates the list minimized; an open list is just shown. */
+function showManager({ minimized = false } = {}) {
   if (managerWin && !managerWin.isDestroyed()) {
     if (managerWin.isMinimized()) managerWin.restore();
     managerWin.show();
@@ -1808,7 +1834,7 @@ function showManager() {
   });
   managerWin.loadFile(path.join(__dirname, "renderer", "manager.html"));
   if (process.env.PANES_DEVTOOLS === "1") managerWin.webContents.openDevTools({ mode: "detach" });
-  managerWin.once("ready-to-show", () => managerWin.show());
+  managerWin.once("ready-to-show", () => (minimized ? managerWin.minimize() : managerWin.show()));
   managerWin.on("close", (e) => {
     // Closing the list just hides it; the cameras keep running. Quit lives in the tray/menu.
     if (!quitting) {
@@ -1851,7 +1877,7 @@ function managerState() {
     screens: screensForEditor(),
     templates: TEMPLATES.map((t) => ({ id: t.id, label: t.label, cols: t.cols ?? null, rows: t.rows ?? null, cells: t.cells ?? null })),
     onScreenCount: onScreenWindows().length,
-    update: { status: updater?.state.status, version: updater?.state.version, message: updater?.state.message, scoop: !!updater?.state.scoop, current: app.getVersion() },
+    update: { status: updater?.state.status, version: updater?.state.version, message: updater?.state.message, scoop: !!updater?.state.scoop, failed: failedUpdate, current: app.getVersion() },
     consoles: store.data.consoles.map((c) => {
       const conn = connections.get(c.id);
       const live = conn?.cameras() ?? [];

@@ -69,7 +69,8 @@ export class GridWindow {
     return t?.cells ? t : templateById("2x2");
   }
 
-  open() {
+  /** `raise` (after an update) also puts the window above other apps' windows, without the focus. */
+  open({ raise = false } = {}) {
     if (this.isOpen) return;
     const d = this.#deps;
     const s = d.settings();
@@ -94,7 +95,11 @@ export class GridWindow {
     win.loadFile(d.gridPage);
     win.on("page-title-updated", (e) => e.preventDefault()); // the window is called what the grid is
     // Like camera windows: never take the focus from whatever the operator is using.
-    win.once("ready-to-show", () => { if (!this.grid.hidden) win.showInactive(); });
+    win.once("ready-to-show", () => {
+      if (this.grid.hidden) return;
+      win.showInactive();
+      if (raise) win.moveTop();
+    });
     win.webContents.on("did-finish-load", () => this.#layout());
     const saveBounds = debounce(() => {
       if (!this.isOpen || win.isMinimized() || win.isMaximized() || win.isFullScreen() || d.boundsFrozen?.()) return;

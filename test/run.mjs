@@ -1542,6 +1542,46 @@ async function updateSuite() {
   check("with its real key the app refuses a release signed by another key", /signature doesn't match/.test(real?.status) && !fs.existsSync(path.join(app2.userData, "updates", "ProtectPanes-9.9.9.zip")), JSON.stringify(real));
   const checks = (fs.readFileSync(path.join(app2.userData, "protect-panes.log"), "utf8").match(/update check: /g) ?? []).length;
   check("a long-running copy checks for updates again on a timer (once a day; 2 s in this run)", checks >= 3, `${checks} checks logged in 8 s`);
+
+  // ROADMAP #14: Install leaves a note for the copy the helper starts next, so it can put the
+  // cameras back in front and keep the camera list (where Install was clicked) minimized.
+  const { AFTER_UPDATE_FILE, AFTER_UPDATE_MAX_MS, takeAfterUpdateNote, writeAfterUpdateNote } = await import(new URL("../src/updater.js", import.meta.url).href);
+  const noteDir = path.join(dir, "note");
+  const noteFile = path.join(noteDir, AFTER_UPDATE_FILE);
+  writeAfterUpdateNote(noteDir, { version: "9.9.9", camerasOnScreen: true }, 1_000);
+  const note = takeAfterUpdateNote(noteDir, 2_000);
+  check("the after-update note is read once, then it's gone",
+    note?.version === "9.9.9" && note.camerasOnScreen === true && takeAfterUpdateNote(noteDir, 2_000) === null && !fs.existsSync(noteFile), JSON.stringify(note));
+  writeAfterUpdateNote(noteDir, { version: "9.9.9", camerasOnScreen: true }, 1_000);
+  check("a note older than the limit is ignored and deleted", takeAfterUpdateNote(noteDir, 1_000 + AFTER_UPDATE_MAX_MS + 1) === null && !fs.existsSync(noteFile));
+  fs.writeFileSync(noteFile, "{ not json");
+  check("a damaged note is ignored and deleted", takeAfterUpdateNote(noteDir) === null && !fs.existsSync(noteFile));
+
+  const thisVersion = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
+  const afterUpdate = async (label, noteVersion) => {
+    const userData = tmpDir(`update-after-${label}`);
+    fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
+      version: 1,
+      consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby"] }],
+      windows: { [`${A}/aaaaaaaa-cam0`]: { open: true, bounds: { x: 120, y: 120, width: 480, height: 270 }, channel: null, onTop: false, name: "" } },
+      settings: { startHidden: false },
+    }, null, 2));
+    writeAfterUpdateNote(path.join(userData, "updates"), { version: noteVersion, camerasOnScreen: true });
+    const run = await runApp({ userData, results: path.join(userData, "results"), seconds: 6, extraArgs: ["--mock"], env: { PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 4000, do: "manager-js", js: read }]) } });
+    const appLog = fs.readFileSync(path.join(userData, "protect-panes.log"), "utf8");
+    return { ...run, appLog, noteLeft: fs.existsSync(path.join(userData, "updates", AFTER_UPDATE_FILE)) };
+  };
+  const done = await afterUpdate("ok", thisVersion);
+  const lobby = done.result.cameraWindows?.find((w) => w.title === "Building Lobby");
+  check("after an update the cameras come back in front and the camera list starts minimized",
+    done.result.manager?.minimized === true && lobby?.visible === true && !lobby.minimized && /cameras back in front, camera list minimized/.test(done.appLog) && !done.noteLeft,
+    JSON.stringify({ manager: done.result.manager, lobby, noteLeft: done.noteLeft }));
+  const failedRun = await afterUpdate("failed", "9.9.9");
+  const failedStatus = failedRun.result.actions[0]?.value?.status;
+  check("an update that didn't install shows the camera list, which says so",
+    failedRun.result.manager?.visible === true && failedRun.result.manager.minimized === false
+      && new RegExp(`update to 9\\.9\\.9 didn't install, so this is still ${thisVersion.replace(/\./g, "\\.")}`).test(failedStatus ?? "") && !failedRun.noteLeft,
+    JSON.stringify({ manager: failedRun.result.manager, status: failedStatus }));
   console.log(`  results: ${dir}`);
 }
 

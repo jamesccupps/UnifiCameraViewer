@@ -1045,8 +1045,10 @@ function renderUpdate() {
   checkBtn.textContent = u.status === "available" && !u.scoop ? `Download ${u.version}` : "Check for updates";
   installBtn.classList.toggle("hidden", u.status !== "ready");
   installBtn.textContent = `Install ${u.version ?? ""} and restart`;
-  updateStatus.textContent = updateError || (u.status && u.status !== "idle" ? u.message : `This is version ${u.current}.`);
-  updateStatus.classList.toggle("bad", !!updateError || u.status === "error");
+  // An in-app update that didn't install: the helper relaunched the old copy (main read its note).
+  const failed = u.failed ? `The update to ${u.failed} didn't install, so this is still ${u.current}. apply-update.log in %LOCALAPPDATA%\\Protect Panes\\updates says why. ` : "";
+  updateStatus.textContent = updateError || failed + (u.status && u.status !== "idle" ? u.message : `This is version ${u.current}.`);
+  updateStatus.classList.toggle("bad", !!updateError || !!u.failed || u.status === "error");
 }
 
 updateSource.addEventListener("change", async () => {

@@ -299,6 +299,10 @@ Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tie
     - renames the old folder to `.old-<ts>` (10 tries for in-use files), moves the new one in, and rolls back on failure;
     - relaunches whichever version ended up in place;
     - logs to `apply-update.log` and ends with "update: done".
+  - **The after-update note (ROADMAP #14).** The relaunch has no arguments, so `installUpdate()` leaves `after-update.json` in the updates folder after `install()` returns: the version being installed and whether camera or grid windows were on screen. The next start reads it once and deletes it (`takeAfterUpdateNote()`), and ignores it after 10 minutes.
+    - The version matches and cameras were on screen: windows open with `raise` (`showInactive()` + `moveTop()`, no focus), and the camera list is created minimized.
+    - The version doesn't match: the update didn't install. The list shows as usual, and its Updates line says so (`failedUpdate`).
+    - Before this, the list's `show()` put it over the cameras after every update.
 
   Launching the helper (measured): a `detached` powershell.exe never runs, because it gets no console. A non-detached one dies with the app (libuv's kill-on-close job). So it goes `cmd /c start /min powershell -EncodedCommand <base64>`. The only path on cmd's line is PowerShell's own under `SystemRoot`, because `&` and `%` are legal in user and folder names. The test installs into `Tools & 100% O'Brien\` on purpose. It also starts with `cwd` set to the updates folder. Launched from Explorer or a shortcut, the app's working folder is the install folder, and Windows refuses to rename a folder that is any process's working folder. 1.2.0 and 1.3.0 passed that working folder down to the helper, so their own helper blocked the swap. That's why the test runs `install()` from inside the install folder.
 

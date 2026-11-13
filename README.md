@@ -109,7 +109,7 @@ Installed copies (from `ProtectPanes-Setup.exe`, 1.3.0 on) and portable copies f
 
 1. The camera list's **Settings → Updates** shows the **update location**. By default it's this project's latest GitHub release. To update from your own copy instead, set it to a folder (for example `\\server\share\Protect Panes`) or web address holding `ProtectPanes-win32-x64.zip` plus `latest.json`. Clear it to turn update checks off.
 2. Click **Check for updates**. A newer version is downloaded and checked first: it has to carry the release signature this copy of the app trusts, and match its signed checksum. Anything else is refused.
-3. Click **Install … and restart**. The app closes, installs the new version and opens again. Installer copies run the new installer silently; portable copies swap their folder. Settings and layouts carry over.
+3. Click **Install … and restart**. The app closes, installs the new version and opens again. Installer copies run the new installer silently; portable copies swap their folder. Settings and layouts carry over. If cameras were on screen, they come back in front and the camera list opens minimized; if the update didn't install, the camera list opens and says so.
 
 The app also checks by itself when it starts and once a day after that, so a PC that runs for weeks still hears about a release. It only says so in **Settings → Updates**; nothing is downloaded until you click.
 

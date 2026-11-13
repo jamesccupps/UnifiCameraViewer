@@ -173,6 +173,35 @@ export function scoopInstall(exeDir) {
   }
 }
 
+/*
+ * The note Install leaves for the copy the helper starts next. The helper relaunches the exe with no
+ * arguments, so this is the only way that copy knows an update just started it (ROADMAP #14). It
+ * holds the version being installed and whether camera windows were on screen. It's read once and
+ * deleted, and ignored when older than AFTER_UPDATE_MAX_MS, so it can't change a later normal start.
+ */
+export const AFTER_UPDATE_FILE = "after-update.json";
+export const AFTER_UPDATE_MAX_MS = 10 * 60_000;
+
+export function writeAfterUpdateNote(stageDir, { version, camerasOnScreen }, now = Date.now()) {
+  fs.mkdirSync(stageDir, { recursive: true });
+  fs.writeFileSync(path.join(stageDir, AFTER_UPDATE_FILE), JSON.stringify({ version, camerasOnScreen: !!camerasOnScreen, at: now }));
+}
+
+/** The note, once: { version, camerasOnScreen } or null. The file is gone afterwards either way. */
+export function takeAfterUpdateNote(stageDir, now = Date.now()) {
+  const file = path.join(stageDir, AFTER_UPDATE_FILE);
+  let note;
+  try {
+    note = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    note = null;
+  }
+  fs.rmSync(file, { force: true });
+  if (!note || typeof note !== "object" || typeof note.version !== "string" || !Number.isFinite(note.at)) return null;
+  if (now - note.at > AFTER_UPDATE_MAX_MS || note.at - now > 60_000) return null; // stale, or a clock that jumped
+  return { version: note.version, camerasOnScreen: note.camerasOnScreen === true };
+}
+
 /**
  * state.status: "idle" | "checking" | "current" | "available" | "downloading" | "ready" | "error"
  * state.scoop: true on "available" when Scoop installed this copy: it updates through Scoop.

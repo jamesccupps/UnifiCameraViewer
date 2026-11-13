@@ -199,7 +199,7 @@ Requested 2026-10-27: "a way to show a preview or screenshot in the camera selec
 
 Requested 2026-11-12, for the next release: if the cameras were in front of everything when you pressed update, they should come back in front afterwards, with the camera list minimized or out of the way.
 
-**Status:** not built.
+**Status:** built (2026-11-13) as proposed below, for the next release. The choices made: minimized rather than tray only, and "camera or grid windows on screen" as the condition. `npm run test:update` covers the note (read once, stale, damaged) and two starts with a note in place: a done update (list minimized, camera shown) and one that didn't install (the list shows and says so). Both start checks fail without the change. Not checkable in a test: whether `moveTop()` puts the cameras above another app's window, since test windows are invisible. It's the call Bring cameras to front makes.
 
 Known from the code (1.4.9):
 - **Install and restart** (`installUpdate()`) quits at once. The helper then relaunches `ProtectPanes.exe` with no arguments, on both the folder and the installer paths (the last `Start-Process` in `HELPER_PS1`). So the new copy can't tell an update just started it. The silent installer doesn't start a second copy: electron-builder's one-click template (`installSection.nsh`) starts the app after a silent install only with `--force-run`, and the helper passes `/S --updated`.
