@@ -30,6 +30,16 @@ video {
   background: #000;
 }
 
+/* The last frame, held over the video while a restarted stream rebuilds its decoder (camera.js). */
+.hold {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
 /* 360° dewarp canvas sits on top of the (still playing) video */
 .dewarp, .calib {
   position: absolute;
@@ -226,6 +236,8 @@ body.no-names .label { display: none; }
 #status-text { max-width: 90%; padding: 4px 10px; border-radius: 6px; background: rgba(0, 0, 0, 0.65); font-size: 13px; line-height: 1.35; }
 #status-text:empty { display: none; }
 .status.error .spinner { display: none; }
+/* A resumed stream under its last (older) picture: dimmed, but no "Connecting…" yet (camera.js). */
+.status.quiet .spinner, .status.quiet #status-text { display: none; }
 .spinner {
   width: 22px;
   height: 22px;

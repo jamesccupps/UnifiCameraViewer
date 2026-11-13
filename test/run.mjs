@@ -105,6 +105,24 @@ async function runSuite(fn) {
 }
 
 const last = (result) => result.samples[result.samples.length - 1]?.cams ?? {};
+
+// What a camera page shows: a picture (the video's frame, the held last frame, or the 360° canvas)
+// and its status words. For the checks that a stream starting again (another quality, a resume
+// after Enlarge) never leaves a blank picture or says "Connecting…" at once. Reads the page itself,
+// not __panesStats(), so it runs the same on code from before the held frame.
+const PICTURE_PROBE = `(() => {
+  const v = document.getElementById("video"), h = document.getElementById("hold"), d = document.getElementById("dewarp"), st = document.getElementById("status");
+  const held = !!h && !h.classList.contains("hidden");
+  return { shown: held || (v.readyState >= 2 && v.videoWidth > 0) || !d.classList.contains("hidden"), held,
+    text: st.classList.contains("hidden") ? "" : document.getElementById("status-text").textContent, width: v.videoWidth };
+})()`;
+const pictureProbes = (from, to, target) => {
+  const out = [];
+  for (let at = from; at <= to; at += 100) out.push({ at, do: "camera-js", js: PICTURE_PROBE, ...target });
+  return out;
+};
+const probed = (result, match) => result.actions.filter((a) => a.act.js === PICTURE_PROBE && match(a.act)).map((a) => ({ t: a.t, ...(a.value ?? { error: a.error }) }));
+const fmtProbes = (ps) => ps.map((p) => p.error ?? `${p.shown ? (p.held ? "held" : "pic") : "BLANK"}${p.text ? `:${p.text}` : ""}/${p.width}`).join(" ");
 const near = (a, b, tol) => a && b && Math.abs(a.x - b.x) < tol && Math.abs(a.y - b.y) < tol && Math.abs(a.r - b.r) < tol;
 const fmtCircle = (c) => (c ? `x=${c.x.toFixed(4)} y=${c.y.toFixed(4)} r=${c.r.toFixed(4)}` : "none");
 
@@ -190,6 +208,7 @@ async function mockSuite() {
     { at: 11500, do: "menu-click", win: 2, label: "Picture: 130% brightness, 110% contrast" },
     { at: 12000, do: "menu-click", win: 2, label: "4:3" },
     { at: 12500, do: "menu-click", win: 3, label: "Any shape (no lock)" },
+    ...pictureProbes(10100, 13100, { win: 1 }), // Dock, which the Quality: Medium at 10.5 s restarts
   ];
   const { result, config } = await runApp({
     // 20 s: the Apply-to-all quality change at 10.5 s restarts two streams, and a runner without a
@@ -254,6 +273,9 @@ async function mockSuite() {
     JSON.stringify([...Object.values(keys), stair].map((k) => config.windows[k]?.channel)));
   check("Apply to all: open windows switched to the Medium stream", Object.values(keys).every((k) => cams[k]?.videoWidth === 1280 && cams[k]?.status === "live"),
     JSON.stringify(Object.values(keys).map((k) => `${cams[k]?.videoWidth}/${cams[k]?.status}`)));
+  const dockProbes = probed(result, (a) => a.win === 1);
+  check("a window's quality change keeps its last picture until the new stream's first frame, with no \"Connecting…\"",
+    dockProbes.length >= 25 && dockProbes[0].width === 640 && dockProbes.every((p) => p.shown && !p.text), fmtProbes(dockProbes));
   check("Apply to all: Show time on for every window", Object.values(keys).every((k) => cams[k]?.clock?.wanted === true && config.windows[k]?.clock === true));
   const pic = "brightness(1.3) contrast(1.1)";
   check("Apply to all: the 360 window's picture setting reached every camera, including one never opened",
@@ -2036,6 +2058,8 @@ async function gridSuite() {
         { at: 6000, do: "menu-click", tile: "Big#1", label: "Show all tiles" },
         { at: 9500, do: "dblclick", tile: "Big#0", pos: [80, 60] },
         { at: 13000, do: "dblclick", tile: "Big#0", pos: [80, 60] },
+        ...pictureProbes(5600, 8600, { tile: "Big#0" }), // the two tiles that come back at 6 s
+        ...pictureProbes(5650, 8650, { tile: "Big#2" }),
       ]),
     },
   });
@@ -2052,6 +2076,10 @@ async function gridSuite() {
     JSON.stringify(view(enlargedM)));
   check("\"Show all tiles\" goes back to the grid, all live", [0, 1, 2].every((i) => t4(backM, i)?.visible && t4(backM, i).bounds.width < 400),
     JSON.stringify(view(backM)));
+  const showAllAt = run4.result.actions.find((a) => a.act.label === "Show all tiles")?.t ?? Infinity;
+  const back = ["Big#0", "Big#2"].map((tile) => probed(run4.result, (a) => a.tile === tile).filter((p) => p.t > showAllAt + 50));
+  check("tiles coming back after Enlarge show their last picture, not a blank tile or \"Connecting…\"",
+    back.every((ps) => ps.length >= 20 && ps.every((p) => p.shown && !p.text)), back.map(fmtProbes).join(" || "));
   check("double-click enlarges a tile, and double-click again goes back",
     t4(enlargedD, 0)?.visible && t4(enlargedD, 0).bounds.width > 500 && !t4(enlargedD, 1)?.visible
       && [0, 1, 2].every((i) => t4(endD, i)?.visible && t4(endD, i).status === "live" && t4(endD, i).bounds.width < 400),

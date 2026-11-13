@@ -7,6 +7,7 @@
  */
 
 const video = document.getElementById("video");
+const holdCanvas = document.getElementById("hold");
 const statusEl = document.getElementById("status");
 const statusText = document.getElementById("status-text");
 const labelEl = document.getElementById("label");
@@ -37,6 +38,7 @@ const DECODE_HELP_AFTER = 3;  // failed restarts in a row before saying it's thi
 const DECODE_HELP = "This PC couldn't decode this stream. Try Medium or Low quality from the right-click menu.";
 const STUCK_MS = 5_000;       // fragments arriving but no new frame this long => restart the stream
 const CLOCK_FRESH_MS = 1_500; // the clock shows only if a new frame came this recently
+const QUIET_MS = 4_000;       // a restart under a picture says "Connecting…" only after this
 
 let mediaSource = null;
 let sourceBuffer = null;
@@ -76,6 +78,8 @@ window.__panesStats = () => {
     status: streamState,
     failedResets,
     statusText: statusEl.classList.contains("hidden") ? "" : statusText.textContent,
+    held: !holdCanvas.classList.contains("hidden"),
+    quiet: !statusEl.classList.contains("hidden") && statusEl.classList.contains("quiet"),
     label: { shown: !document.body.classList.contains("no-names"), compact: labelEl.classList.contains("compact") },
     clock: { wanted: clockWanted, shown: !clockEl.classList.contains("hidden"), text: clockEl.textContent },
     picture: { filter: video.style.filter, canvasFilter: dewarpCanvas.style.filter, panel: !pictureEl.classList.contains("hidden") },
@@ -148,11 +152,34 @@ function pickMime(codec, initData) {
   return { mime: "", tried: candidates };
 }
 
+// Every new stream (another quality, a resume after a pause, a reconnect) rebuilds the decoder, and
+// the <video> went black until the new stream's first frame: a second or more of blank picture, and
+// a blank tile after Enlarge. The last frame stays on a canvas over it until then. A 360° view needs
+// none: the Dewarper draws only when the video has a frame, so its canvas keeps the last view.
+function holdLastFrame() {
+  if (!dewarpCanvas.classList.contains("hidden") || video.readyState < 2 || !video.videoWidth) return;
+  try {
+    holdCanvas.width = video.videoWidth;
+    holdCanvas.height = video.videoHeight;
+    holdCanvas.getContext("2d").drawImage(video, 0, 0);
+    holdCanvas.classList.remove("hidden");
+  } catch {
+    releaseHold();
+  }
+}
+function releaseHold() {
+  holdCanvas.classList.add("hidden");
+  holdCanvas.width = 1; // a 4K frame is about 33 MB of GPU memory
+  holdCanvas.height = 1;
+}
+
 function rebuild(codec, initData) {
+  holdLastFrame();
   teardown();
   const pick = pickMime(codec, initData);
   mime = pick.mime;
   if (!mime) {
+    releaseHold(); // this stream can't play here: don't leave the old one's picture under the error
     const hevc = pick.tried.some((c) => /^(hvc1|hev1)/i.test(c));
     codec = pick.tried.join(" / ") || codec;
     codecError = hevc
@@ -172,6 +199,7 @@ function rebuild(codec, initData) {
   video.src = url;
   // A frame on screen means the restarts worked, and that a grid tile's next page can take over.
   video.requestVideoFrameCallback(() => {
+    releaseHold();
     panes.send("cam:shown");
     if (!failedResets) return;
     failedResets = 0;
@@ -272,6 +300,7 @@ function requestReset(reason) {
   stats.errors.push(String(reason));
   if (stats.errors.length > 20) stats.errors.shift();
   if (resetTimer) return; // one is already waiting
+  holdLastFrame(); // under "Reconnecting…", which dims it
   teardown();
   if (failedResets >= DECODE_HELP_AFTER) showStatus("error", DECODE_HELP);
   else showStatus("reconnecting", "Reconnecting…");
@@ -350,12 +379,27 @@ panes.on("cam:media", (data) => {
   pump();
 });
 
+// A stream starting again under a picture (another quality, a resume) keeps that picture until its
+// first frame, with no "Connecting…" for QUIET_MS. After a live stream the picture is current, so
+// it's left as it is; after a pause it's older, so it's dimmed, without words. Not after a failed
+// decode (failedResets): that one says what's happening at once.
+let quietTimer = null;
+function pictureShown() {
+  return !holdCanvas.classList.contains("hidden") || (video.readyState >= 2 && video.videoWidth > 0)
+    || (!dewarpCanvas.classList.contains("hidden") && dewarper.stats().hasFrame);
+}
 panes.on("cam:status", ({ state, text }) => {
+  const was = streamState;
   streamState = state;
+  clearTimeout(quietTimer);
   if ((state === "live" || state === "error") && codecError) showStatus("error", codecError); // the detailed advice wins
   else if (state === "live" && failedResets >= DECODE_HELP_AFTER) showStatus("error", DECODE_HELP);
   else if (state === "live") hideStatus();
-  else showStatus(state, text);
+  else if (state === "connecting" && !codecError && !failedResets && !resetTimer && pictureShown()) {
+    if (was === "live") hideStatus();
+    else showStatus(state, "", { quiet: true });
+    quietTimer = setTimeout(() => { if (streamState === "connecting") showStatus(state, text); }, QUIET_MS);
+  } else showStatus(state, text);
   updateDot();
   updateClock();
 });
@@ -401,6 +445,7 @@ function applyPicture() {
   const filter = b === 1 && c === 1 ? "" : `brightness(${b}) contrast(${c})`;
   video.style.filter = filter;
   dewarpCanvas.style.filter = filter;
+  holdCanvas.style.filter = filter;
   for (const [k, input] of Object.entries(picInputs)) {
     input.value = String(Math.round(picture[k] * 100));
     document.getElementById(`pic-${k}-val`).textContent = `${input.value}%`;
@@ -443,7 +488,8 @@ panes.on("cam:highlight", () => {
 
 const spinner = statusEl.querySelector(".spinner");
 let shownStatus = "";
-function showStatus(state, text) {
+function showStatus(state, text, { quiet = false } = {}) {
+  statusEl.classList.toggle("quiet", quiet);
   // A new status gets a fresh ~20 s of spinning (the CSS stops it after that).
   if (`${state}|${text}` !== shownStatus || statusEl.classList.contains("hidden")) {
     shownStatus = `${state}|${text}`;
