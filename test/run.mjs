@@ -203,7 +203,8 @@ async function mockSuite() {
 
   const actions = [
     { at: 4000, do: "drag", win: 2, from: [240, 135], to: [340, 175] },
-    { at: 5500, do: "dblclick", win: 2, pos: [720, 405] },
+    { at: 5500, do: "dblclick", win: 2, pos: [720, 405] }, // view 4 fills the screen (since 1.4.11 the window too)...
+    { at: 7000, do: "dblclick", win: 2, pos: [200, 200] }, // ...and back, before the menu changes below
     { at: 6500, do: "menu", win: 3 },
     { at: 8000, do: "resize", win: 1, size: [200, 113] },
     { at: 8000, do: "resize", win: 4, size: [480, 270] },
@@ -238,7 +239,12 @@ async function mockSuite() {
   check("image circle auto-detected within 1%", near(qd?.circle, CEILING_TRUTH, 0.01), `${fmtCircle(qd?.circle)} vs truth ${fmtCircle(CEILING_TRUTH)}`);
   check("default quad directions 0/90/-90/180", JSON.stringify(qd?.views?.slice(1).map((v) => v.pan)) === "[90,-90,180]", JSON.stringify(qd?.views?.map((v) => v.pan)));
   check("drag panned + tilted view 1 and it was saved", qd && qd.views[0].pan < -15 && qd.views[0].tilt > -30, qd && JSON.stringify(qd.views[0]));
-  check("double-click enlarged view 4 and it was saved", qd?.focus === 3, `focus=${qd?.focus}`);
+  // Between the two double-clicks (the 6 s sample): view 4 enlarged, the window filling the screen. After the second,
+  // the four views are back in the window's own place, and that is what was saved.
+  const quadBig = result.samples.find((s) => s.t > (result.actions.find((a) => a.act.do === "dblclick")?.t ?? Infinity))?.cams[keys.quad];
+  check("double-click enlarged view 4 and filled the screen, and the next went back and was saved",
+    quadBig?.dewarp?.focus === 3 && quadBig.maximized === true && qd?.focus === -1 && cams[keys.quad]?.maximized === false,
+    JSON.stringify({ between: quadBig && { focus: quadBig.dewarp?.focus, maximized: quadBig.maximized }, saved: qd?.focus, end: cams[keys.quad]?.maximized }));
   const menu = result.actions.find((a) => a.act.do === "menu");
   check("context menu builds with 360° submenu", !!menu?.menu?.some((i) => typeof i === "object" && i["360° view"]), menu?.error);
   const views = menu?.menu?.find((i) => typeof i === "object" && i["360° view"])?.["360° view"] ?? [];
@@ -1103,6 +1109,52 @@ async function boundsSuite() {
       locked.sent.length === 2 && locked.maximized?.length === 0 && sameBounds(locked.saved, start[keys.lobby]), JSON.stringify(locked));
     check("...and does when it isn't (the message reached them)",
       unlocked.sent.length === 2 && LOCK_TITLES.every((t) => unlocked.maximized?.includes(t)), JSON.stringify(unlocked));
+  }
+
+  // Double-click a camera window: it fills its screen, and the next double-click puts it back where
+  // it was. A 360° Quad window follows its views: double-click a view and the window fills the
+  // screen with it; double-click again and the four views come back in the window's own place.
+  // Locked too: it's the owner's own click. Actions on odd seconds, samples on even ones.
+  const quadKey = `${A}/aaaaaaaa-cam360`;
+  const dblRun = async (locked) => {
+    const dir = tmpDir(`bounds-dblclick-${locked ? "locked" : "unlocked"}`);
+    const at = { [keys.lobby]: { x: 40, y: 30, width: 480, height: 270 }, [quadKey]: { x: 560, y: 30, width: 640, height: 360 } };
+    fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({
+      version: 1,
+      consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby"] }],
+      windows: { [keys.lobby]: { open: true, bounds: at[keys.lobby], channel: 2 }, [quadKey]: { open: true, bounds: at[quadKey], channel: 2 } },
+      settings: { startHidden: true, lockLayout: locked, lockAspect: false },
+    }, null, 2));
+    const run = await runApp({
+      userData: dir, results: path.join(dir, "results"), seconds: 12, extraArgs: ["--mock"],
+      env: {
+        PANES_MOCK_FISHEYE: path.join(FIXTURES, "fisheye-ceiling.png"),
+        PANES_SELFTEST_ACTIONS: JSON.stringify([
+          { at: 3000, do: "dblclick", win: 0, pos: [240, 135] },
+          { at: 5000, do: "dblclick", win: 0, pos: [240, 135] },
+          { at: 7000, do: "dblclick", win: 1, pos: [480, 90] }, // the top-right view
+          { at: 9000, do: "dblclick", win: 1, pos: [240, 135] },
+        ]),
+      },
+    });
+    const s = (sec) => run.result.samples.find((x) => Math.abs(x.t - run.result.samples[0].t - (sec - 2) * 1000) < 600)?.cams ?? {};
+    const st = (sec, k) => { const c = s(sec)[k]; return c && { maximized: c.maximized, bounds: c.bounds, focus: c.dewarp?.focus }; };
+    return { run, before: { lobby: st(2, keys.lobby), quad: st(2, quadKey) }, lobbyBig: st(4, keys.lobby), lobbyBack: st(6, keys.lobby), quadBig: st(8, quadKey), quadBack: st(10, quadKey), saved: run.config.windows, at };
+  };
+  const big = (c) => c?.maximized === true && c.bounds.width > 900;
+  for (const locked of [true, false]) {
+    const d = await dblRun(locked);
+    const lockName = locked ? "locked" : "unlocked";
+    check(`double-click enlarges a camera window and double-click again puts it back (${lockName})`,
+      big(d.lobbyBig) && d.lobbyBack?.maximized === false && sameBounds(d.lobbyBack.bounds, d.before.lobby?.bounds),
+      JSON.stringify({ before: d.before.lobby, big: d.lobbyBig, back: d.lobbyBack }));
+    check(`double-click a 360° Quad view: the window fills the screen with it, and back to the four in place (${lockName})`,
+      d.before.quad?.focus === -1 && big(d.quadBig) && d.quadBig.focus === 1
+        && d.quadBack?.maximized === false && d.quadBack.focus === -1 && sameBounds(d.quadBack.bounds, d.before.quad?.bounds),
+      JSON.stringify({ before: d.before.quad, big: d.quadBig, back: d.quadBack }));
+    check(`the enlarged size is never saved as a window's place (${lockName})`,
+      sameBounds(d.saved[keys.lobby]?.bounds, d.at[keys.lobby]) && sameBounds(d.saved[quadKey]?.bounds, d.at[quadKey]),
+      JSON.stringify({ lobby: d.saved[keys.lobby]?.bounds, quad: d.saved[quadKey]?.bounds }));
   }
   console.log(`  results: ${userData}`);
 }

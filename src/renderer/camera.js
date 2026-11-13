@@ -573,10 +573,19 @@ window.addEventListener("contextmenu", (e) => {
   e.preventDefault();
   panes.send("cam:context-menu");
 });
-// In a grid, double-click fills the grid window with this tile (and back), unless a 360° Quad view
-// used it to enlarge one of its views.
+// Double-click: in a grid, this tile fills the grid window (and back), unless a 360° Quad view used
+// it to enlarge one of its views. A window fills its screen (and goes back where it was). In a Quad
+// window the Dewarper has just enlarged or restored the clicked view, and the window follows it: one
+// double-click looks closer at that view, the next goes back to the four. Not on the title bar,
+// the picture sliders, or while lining up the image circle (its double-click auto-detects).
 window.addEventListener("dblclick", (e) => {
-  if (document.body.classList.contains("tile") && !e.defaultPrevented) panes.send("cam:enlarge");
+  if (e.target.closest?.("#bar, #picture, #calib-hint, button, input") || dewarper.calibrating) return;
+  const quadFocus = e.defaultPrevented ? dewarper.stats().focus : null;
+  if (document.body.classList.contains("tile")) {
+    if (quadFocus === null) panes.send("cam:enlarge");
+    return;
+  }
+  panes.send("cam:enlarge", typeof quadFocus === "number" ? { enlarged: quadFocus >= 0 } : {});
 });
 
 showStatus("connecting", "Connecting…");

@@ -395,7 +395,9 @@ function openCameraWindow(key, { flash = true, raise = false } = {}) {
   // Arrange and the editor's "Use what's on screen" count only visible windows, per screen. The
   // notify at the end of openCamera comes before ready-to-show, so tell the list on each change.
   for (const ev of ["show", "hide", "minimize", "restore"]) win.on(ev, notifyManager);
-  win.on("maximize", () => undoLockedMaximize(win));
+  win.on("maximize", () => { if (!cw.enlarging) undoLockedMaximize(win); });
+  // A locked window was made resizable only to be enlarged (enlargeWindow()).
+  win.on("unmaximize", () => { if (store.settings.lockLayout && !win.isDestroyed()) win.setResizable(false); });
 
   const saveBounds = debounce(() => {
     if (win.isDestroyed() || win.isMinimized() || win.isMaximized() || displaysChanging()) return;
@@ -1653,6 +1655,26 @@ function undoLockedMaximize(win) {
   if (store.settings.lockLayout && !win.isDestroyed()) win.unmaximize();
 }
 
+// Double-click a camera window: it fills its screen's work area, and the next double-click puts it
+// back where it was. It's the system maximize, so Windows keeps the place to go back to, and what
+// already leaves a maximized window's bounds alone (saving them, layouts, Arrange) does here too.
+// Lock layout allows it, being the owner's own click on a window that then goes back. A window that
+// can't be resized doesn't grow when maximized (seen in the U3 probe), so a locked one is resizable
+// while enlarged ("unmaximize" in openCameraWindow locks it again).
+function enlargeWindow(cw, want = !cw.win.isMaximized()) {
+  const { win } = cw;
+  if (win.isDestroyed() || win.isMinimized() || want === win.isMaximized()) return;
+  if (!want) {
+    win.unmaximize();
+    return;
+  }
+  cw.enlarging = true; // not a Win+↑ for undoLockedMaximize() to undo
+  setTimeout(() => { cw.enlarging = false; }, 1_000);
+  if (store.settings.lockLayout) win.setResizable(true);
+  win.maximize();
+  win.moveTop();
+}
+
 function bringAllToFront() {
   for (const cw of camWins.values()) {
     if (store.data.windows[cw.key]?.hidden) continue; // hidden stays hidden until Show cameras
@@ -2145,7 +2167,12 @@ function registerIpc() {
   ipcMain.on("cam:picture", (e, patch) => { const cw = fromCamera(e); if (cw) savePictureFromRenderer(cw, patch); });
   ipcMain.on("cam:toggle-top", (e) => { const cw = fromCamera(e); if (cw) toggleOnTop(cw); });
   // Double-click on a grid tile: fill the grid window with it, or go back to the grid.
-  ipcMain.on("cam:enlarge", (e) => { const cw = fromCamera(e); if (cw?.gw) cw.gw.enlarge(cw.index); });
+  ipcMain.on("cam:enlarge", (e, opts) => {
+    const cw = fromCamera(e);
+    if (!cw) return;
+    if (cw.gw) cw.gw.enlarge(cw.index);
+    else enlargeWindow(cw, typeof opts?.enlarged === "boolean" ? opts.enlarged : undefined);
+  });
   // A page's first frame after an init: a grid tile's next page takes over from the one on screen.
   ipcMain.on("cam:shown", (e) => { const cw = fromCamera(e); if (cw?.gw) cw.gw.ready(cw, "first frame"); });
   ipcMain.on("cam:close", (e) => {

@@ -463,8 +463,10 @@ window.Dewarper = (() => {
         this.#draw();
         this.#emitViews();
       }, { passive: false });
+      // Not stopped by Lock layout (unlike drag and scroll, which aim): it only looks closer at a
+      // view, and a window follows it to fill the screen (camera.js) until the next double-click.
       cv.addEventListener("dblclick", (e) => {
-        if (!this.active || !this.interactive || this.cfg.mode !== "quad") return;
+        if (!this.active || this.cfg.mode !== "quad") return;
         const vp = this.#hit(e.clientX, e.clientY);
         if (!vp) return;
         e.preventDefault(); // used here: a grid tile doesn't also enlarge

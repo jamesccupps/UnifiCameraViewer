@@ -222,6 +222,26 @@ Open:
 
 Testing: the list suite's `sampleZOrder()` (Win32 `GetWindow` through PowerShell) already checks the real z-order. A self-test start with a marker file in place can check that the cameras end up above a minimized list, and that a stale or mismatched marker starts as today. The update suite's real-helper run can check that the marker is written before the quit and is still there after the swap.
 
+## 15. Double-click any camera to enlarge it, and again to go back
+
+Requested 2026-11-13: "any camera should be able to be double clicked to enlarge and double clicked again to go back to where it was". The owner wasn't sure how it would work with the 360° quads, whose views can be dragged.
+
+**Status:** built (2026-11-13) for 1.4.11. CLAUDE.md (Gotchas, double-click to enlarge) has the detail.
+
+Known before:
+- Grid tiles already did this inside their grid window (double-click, or **Enlarge this tile**).
+- A camera window's double-click did nothing, except in a 360° Quad view, where it enlarged one view to the whole window and back.
+- Dragging a view aims it. A double-click isn't a drag, so the two don't conflict.
+
+The two options for quads:
+- **A (chosen):** double-click a view, and the window fills the screen with that view. Double-click again brings the four back, with the window back in its place. One gesture for "look closer".
+- **B:** keep the quad's double-click as it was, and put "Enlarge window" in the right-click menu.
+
+Built:
+- A window enlarges by the system maximize, so it returns to the exact rect, and the saved place never changes.
+- It works with Lock layout on. So does the quad's view double-click, which Lock layout used to block along with aiming.
+- The bounds suite double-clicks a plain window and a Quad window, locked and unlocked: enlarged, then back to the same bounds, with the view focused and back. All four enlarge checks fail without the change.
+
 ---
 
 ## Housekeeping found along the way
