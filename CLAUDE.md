@@ -567,6 +567,7 @@ The pictures in `site/images/` are from demo mode, never the real cameras (they'
 - The hero, the grid window and the social preview (1280×640) are put together from those captures in an offscreen Electron window, at the captures' own positions.
 - A hand-written `dewarp` with only `mode` and `mount` shows a blank panorama: give it the full record (`views`, `pano`, `lensFov`, `focus`), as the app writes it.
 - The page itself was checked as full-page offscreen captures at 1280 and 390 px wide, in light and dark.
+- Retaken 2026-11-13 (1.4.11), the same five pictures plus the social preview, at the same sizes. The consoles now show documentation-range addresses (`192.0.2.20` / `.21`; the first set showed 192.168.1.x). The SourceForge listing uses the same pictures. The capture and composition scripts are kept outside the repo, with the SourceForge kit.
 
 ## Known limitations / not built
 
