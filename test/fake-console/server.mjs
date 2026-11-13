@@ -14,7 +14,8 @@
 // mode "badauth": every login gets 401.
 //
 // Speaks exactly what the unifi-protect library needs: POST /api/auth/login, GET /proxy/protect/api/bootstrap,
-// WSS /proxy/protect/ws/updates, GET /proxy/protect/api/ws/livestream -> WSS livestream framed as
+// WSS /proxy/protect/ws/updates, GET /proxy/protect/api/ws/livestream (minting a URL on another address,
+// which the client dials through UniFi OS as WSS /proxy/protect/ws/livestream) -> WSS livestream framed as
 // [type:1][len:3][payload] (248 codec, 250 init, 249 begin, 251 moof, 254 mdat header, 252 video, 255 end),
 // and GET /proxy/protect/api/cameras/<id>/snapshot?w=<width> -> a JPEG (logged as "snapshot <id> w=<width>").
 // Video comes from ffmpeg (FFMPEG_PATH, the ffmpeg-static dev dependency, or ffmpeg on PATH).
@@ -137,8 +138,12 @@ const server = https.createServer({ key: fs.readFileSync(path.join(dir, "key.pem
     }
     if (url.pathname === "/proxy/protect/api/ws/livestream") {
       log("livestream negotiate", url.searchParams.get("camera"), "channel", url.searchParams.get("channel"));
+      // Like a real console, the URL it mints names another address and port than the one the client
+      // came in on (Protect's own listener). unifi-protect 5.4.2 and later dial the configured address
+      // instead, through UniFi OS (/proxy/protect + the minted path and query), so the socket goes to
+      // the console's own certificate, which the app pins. Nothing listens on the minted one here.
       res.writeHead(200, { "content-type": "application/json" })
-        .end(JSON.stringify({ url: `wss://127.0.0.1:${port}/live?camera=${url.searchParams.get("camera")}&channel=${url.searchParams.get("channel")}` }));
+        .end(JSON.stringify({ url: `wss://192.0.2.1:7442/ws/livestream?camera=${url.searchParams.get("camera")}&channel=${url.searchParams.get("channel")}` }));
       return;
     }
     res.writeHead(404).end();
@@ -150,7 +155,7 @@ server.on("upgrade", (req, socket, head) => {
   const url = new URL(req.url, "https://x");
   wss.handleUpgrade(req, socket, head, (ws) => {
     if (url.pathname === "/proxy/protect/ws/updates") return; // the library only needs it open
-    if (url.pathname === "/live") return streamTo(ws, url.searchParams.get("camera"), Number(url.searchParams.get("channel")));
+    if (url.pathname === "/proxy/protect/ws/livestream") return streamTo(ws, url.searchParams.get("camera"), Number(url.searchParams.get("channel")));
     ws.close();
   });
 });

@@ -104,9 +104,11 @@ export class ConsoleConnection extends EventEmitter {
         res.ensureOk();
         const body = res.json();
         if (typeof body?.url !== "string") throw new Error("the livestream endpoint sent no socket URL");
-        const url = new URL(body.url);
-        url.hostname = new URL(`https://${host}`).hostname; // like the library: the console's address, not the one it reports
-        return url.toString();
+        // Like the library since 5.4.2: through UniFi OS at the configured address, port included,
+        // with the minted path and query (the token). The minted URL names Protect's own listener,
+        // another port with another certificate, which the console's pin didn't cover.
+        const minted = new URL(body.url);
+        return `wss://${host}/proxy/protect${minted.pathname}${minted.search}`;
       },
     });
   }

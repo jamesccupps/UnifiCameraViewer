@@ -38,7 +38,7 @@
     "sign-release": "node scripts/sign-release.js"
   },
   "dependencies": {
-    "unifi-protect": "5.3.1"
+    "unifi-protect": "5.4.2"
   },
   "devDependencies": {
     "@electron/fuses": "2.1.3",
