@@ -270,6 +270,20 @@ Other readings of "auto setting" that were considered (not what was asked):
 - Layout: Arrange running again by itself when cameras are opened or closed.
 - Cycling: a window stepping through several cameras, as grid tiles imported from a Protect liveview do.
 
+## 17. Check door readers' video against a remembered certificate
+
+From the review of 2026-11-15 (finding 1), which noted that this one stream type is outside the certificate pin. SECURITY.md lists it as a known limit since 1.4.12.
+
+**Status:** not built.
+
+Known:
+- Cameras on UniFi Access door readers (UA G3 Pro) stream through `bareLivestream()`, which dials Protect's own listener at the port the console minted. Going through UniFi OS on the pinned address needs the login cookie, which only the library holds: tried on the real reader in a 1.4.10 trial run, and it failed. So that socket isn't on the console's pinned host:port, and cert-pins.js leaves it alone.
+- The exposure: someone who can answer at the console's address on that port can show false video for those cameras, and sees that stream's token. The login and every other camera's video go through the checked connection.
+
+Options:
+- **Trust on first use for the listener:** a second remembered certificate per console (say `streamCertSha256`), saved the first time that port is seen. cert-pins.js's `lookup` would answer for host:<that port> too. A change would need the same "Trust the new certificate…" step as the console's own.
+- **Compare with the console's own pin,** if Protect's listener presents the same certificate as UniFi OS. That's worth one read-only check against a real console: a TLS handshake to each port, comparing fingerprints. If they match, no second pin is needed.
+
 ---
 
 ## Housekeeping found along the way
