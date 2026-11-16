@@ -826,6 +826,20 @@ async function configSuite() {
   check("a config.json deleted while the app runs is written again by the next save",
     r5.config?.windows?.[lockKey]?.hidden === true && !failed.length,
     JSON.stringify({ hidden: r5.config?.windows?.[lockKey]?.hidden ?? null, files: files(), failed: failed[0] ?? null }));
+
+  // 6. Settings of the wrong type (a hand edit) fall back to their defaults, a setting this version
+  // doesn't know is kept, and a console whose address isn't text is left out (review 2026-11-15).
+  // updateSource stays "" here: a wrong one would fall back to GitHub and take the run online.
+  const typed = JSON.parse(good);
+  typed.settings = { ...typed.settings, lockLayout: "yes", showNames: 0, aSettingFromLater: "kept" };
+  typed.consoles.push({ id: "cccccccc-0000-4000-8000-000000000003", name: "Numeric", host: 1234, username: "m", password: null });
+  fs.writeFileSync(file, JSON.stringify(typed, null, 2));
+  const r6 = await runApp({ userData, results: path.join(userData, "results-6"), seconds: 4, extraArgs: ["--mock"] });
+  const s6 = r6.config?.settings ?? {};
+  check("settings of the wrong type fall back to their defaults, unknown ones are kept, and a console with a numeric address is left out",
+    loaded(r6) && s6.lockLayout === false && s6.showNames === true && s6.aSettingFromLater === "kept"
+      && r6.config.consoles.length === 1 && /setting lockLayout was "yes", not a boolean/.test(logOf()) && /isn't text \("Numeric"\)/.test(logOf()),
+    JSON.stringify({ settings: { lockLayout: s6.lockLayout, showNames: s6.showNames, later: s6.aSettingFromLater }, consoles: r6.config?.consoles?.length }));
   console.log(`  results: ${userData}`);
 }
 

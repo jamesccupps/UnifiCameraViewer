@@ -120,10 +120,14 @@ export class Store {
     return {
       ...raw, // keys a newer version wrote survive a downgrade and upgrade
       version: 1,
-      consoles: Array.isArray(raw.consoles) ? this.#oneConsolePerId(raw.consoles.filter((c) => c && c.id && c.host)) : [],
+      consoles: Array.isArray(raw.consoles) ? this.#oneConsolePerId(raw.consoles.filter((c) => {
+        if (c && typeof c.id === "string" && c.id && typeof c.host === "string" && c.host.trim()) return true;
+        if (c && (c.id || c.host)) this.#problem(`left out a console whose id or address isn't text (${JSON.stringify(c.name ?? c.host ?? c.id)})`);
+        return false;
+      })) : [],
       // A hand-edited or future-version entry that isn't an object used to crash startup, every launch.
       windows: isObject(raw.windows) ? Object.fromEntries(Object.entries(raw.windows).filter(([, w]) => isObject(w))) : {},
-      settings: { ...d.settings, ...(raw.settings ?? {}) },
+      settings: this.#settings(isObject(raw.settings) ? raw.settings : {}, d.settings),
       layouts: Array.isArray(raw.layouts)
         ? raw.layouts.filter((l) => l && l.id && l.name && isObject(l.windows))
           .map((l) => ({ ...l, windows: Object.fromEntries(Object.entries(l.windows).filter(([, w]) => isObject(w))) }))
@@ -133,6 +137,24 @@ export class Store {
           .map((g) => ({ ...g, tiles: g.tiles.map(loadTile) }))
         : [],
     };
+  }
+
+  // Each known setting keeps its stored value only when it has the default's type. They were merged
+  // as they came: "settings": "x" spread into a key "0", and a string lockLayout or a numeric
+  // updateSource reached every reader as is (review 2026-11-15, finding 2; settings imports were
+  // already type-checked, so this was a hand edit or a damaged file). Keys this version doesn't know
+  // are kept untouched, so a newer version's settings survive a downgrade.
+  #settings(stored, defaults) {
+    const out = { ...stored };
+    for (const [key, value] of Object.entries(defaults)) {
+      if (!Object.hasOwn(stored, key)) {
+        out[key] = value;
+      } else if (typeof stored[key] !== typeof value) {
+        this.#problem(`setting ${key} was ${JSON.stringify(stored[key])}, not a ${typeof value}; using the default`);
+        out[key] = value;
+      }
+    }
+    return out;
   }
 
   // A second console with the same id (a hand edit, an edited export) started a connection of its own
