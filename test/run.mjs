@@ -1383,6 +1383,30 @@ async function layoutsSuite() {
     afterRemove?.count === 1 && JSON.stringify(afterRemove.cells) === JSON.stringify([[keys.lobby, []], null, null, null])
       && JSON.stringify(Object.keys(saved?.windows ?? {})) === JSON.stringify([keys.lobby]) && JSON.stringify(saved?.editor?.cells) === JSON.stringify([{ key: keys.lobby, mode: "quad" }, null, null, null]),
     JSON.stringify({ afterRemove, saved }));
+
+  // Layout "Day" edited in the editor and saved as "night" (another layout's name, other case): Day
+  // takes the name and Night goes, as saving under an existing name replaces it. Both used to stay,
+  // two layouts called Night (review 2026-11-15, finding 4).
+  const renameDir = tmpDir("layouts-rename");
+  const lay = (id, name, key) => ({ id, name, windows: { [key]: { bounds: { x: 0, y: 0, width: 480, height: 270 } } },
+    editor: { displayId: 0, templateId: "2x2", cells: [{ key, mode: "quad" }, null, null, null] } });
+  fs.writeFileSync(path.join(renameDir, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock"] }],
+    windows: {},
+    layouts: [lay("lay-day", "Day", keys.lobby), lay("lay-night", "Night", keys.dock)],
+    settings: { startHidden: false },
+  }, null, 2));
+  const renamed = await runApp({
+    userData: renameDir, results: path.join(renameDir, "results"), seconds: 5, extraArgs: ["--mock"],
+    env: {
+      PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 2500, do: "manager-js", js: `panes.invoke("mgr:save-editor-layout", { id: "lay-day", as: "windows", name: "night", templateId: "2x2", cells: [{ key: ${JSON.stringify(keys.lobby)}, mode: "quad" }, null, null, null], apply: false })` }]),
+    },
+  });
+  const layoutNames = (renamed.config?.layouts ?? []).map((l) => `${l.id}:${l.name}`);
+  check("saving a layout from the editor under another layout's name replaces that one, so no two share a name",
+    renamed.result.actions[0]?.value === "lay-day" && JSON.stringify(layoutNames) === JSON.stringify(["lay-day:night"]),
+    JSON.stringify({ saved: renamed.result.actions[0]?.value ?? renamed.result.actions[0]?.error, names: layoutNames }));
 }
 
 // ---------------------------------------------------------------------------------------------

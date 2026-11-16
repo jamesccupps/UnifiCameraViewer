@@ -610,8 +610,13 @@ function putLayout(name, windows, { editor = undefined, replaceId = null } = {})
   const clean = String(name ?? "").trim().slice(0, 60);
   if (!clean) throw new Error("Give the layout a name.");
   if (!Object.keys(windows).length) throw new Error("There are no camera windows on screen to save.");
-  const existing = store.data.layouts.find((l) => l.id === replaceId)
-    ?? store.data.layouts.find((l) => l.name.toLowerCase() === clean.toLowerCase());
+  const byId = replaceId ? store.data.layouts.find((l) => l.id === replaceId) : null;
+  const byName = store.data.layouts.find((l) => l.name.toLowerCase() === clean.toLowerCase());
+  const existing = byId ?? byName;
+  // Layout A edited in the editor and saved under layout B's name: A takes the name and B goes, as
+  // saving under an existing name always replaces it. Both used to stay, two entries with one name
+  // in the Layouts tab and the tray (review 2026-11-15, finding 4).
+  if (byId && byName && byName !== byId) store.data.layouts.splice(store.data.layouts.indexOf(byName), 1);
   if (existing) {
     Object.assign(existing, { name: clean, windows });
     if (editor) existing.editor = editor;
