@@ -1,0 +1,28 @@
+# The workflows' actions are pinned to commits (the version in a comment), and every npm package to an
+# exact version: Dependabot opens a pull request when a new version comes out, once a month.
+# - Actions in one pull request, and the build and test tools in another.
+# - electron, electron-builder and unifi-protect each in a pull request of their own, never grouped:
+#   - electron: a new version makes every installed copy take the full update (120-160 MB) instead
+#     of a couple of MB, so it wants a release of its own;
+#   - electron-builder: the release's uninstaller swap needs a vX.Y.Z-signtest.N tag run before a
+#     release uses a new version (CLAUDE.md, Releasing);
+#   - unifi-protect: pinned on purpose, and a new version wants a run against the real consoles
+#     (CLAUDE.md, Gotchas). Its undici comes through the override in package.json.
+# Nothing merges by itself.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      build-tools:
+        dependency-type: development
+        exclude-patterns: ["electron", "electron-builder"]

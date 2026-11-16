@@ -510,6 +510,8 @@ The limit: a compromised dependency can still tamper with what it builds, and bo
 
 Installed copies find the release through `releases/latest/download/latest.json`.
 
+**Dependabot** (`.github/dependabot.yml`, since 2026-11-16) opens monthly pull requests: one for the workflows' pinned actions, one for the build and test tools. electron, electron-builder and unifi-protect each get their own, for the reasons in the file's header: a full update for every copy, the signtest tag, the real-console run. Nothing merges by itself, and a pull request is a proposal: the change still lands through `main` and a release as usual.
+
 **Scoop bucket.** `bucket/protectpanes.json` in [jamesccupps/scoop-bucket](https://github.com/jamesccupps/scoop-bucket) updates itself from each GitHub release (checked every 4 hours), so a release needs no Scoop work as long as these hold:
 - Tag releases `vX.Y.Z` and publish them as the latest release, not a pre-release. The workflow's `gh release create` does both (no `--prerelease`).
 - Keep the release file names, and the folder layout inside the zip, unchanged. The bucket uses `ProtectPanes-win32-x64.zip` with `Protect Panes-win32-x64\ProtectPanes.exe` inside (its `extract_dir` and shortcut). That folder name is packager's (productName + platform + arch), so changing `productName` or `executableName` changes the layout.
