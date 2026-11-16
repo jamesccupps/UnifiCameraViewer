@@ -339,6 +339,35 @@ async function mockSuite() {
   check("a settings refresh during or just after a 360° drag keeps the aim (both drags count)",
     v0 && v0.pan < -40 && v0.pan > -52 && v0.tilt > -20 && v0.tilt < -12 && aim.result.actions.filter((a) => a.act.do === "menu-click").every((a) => a.ok),
     JSON.stringify({ v0, clicks: aim.result.actions.filter((a) => a.act.do === "menu-click").map((a) => a.ok ?? a.error) }));
+
+  // Apply to all → All of the above from an untouched 360° window copies the time as that window has
+  // it set (nothing), not as it shows (on, a quad's default): normal cameras keep no clock. It used to
+  // put the app's clock on every normal camera (review 2026-11-15, finding 4).
+  const allDir = tmpDir("mock-applyall");
+  fs.writeFileSync(path.join(allDir, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock"] }],
+    windows: {
+      [keys.lobby]: { open: true, bounds: { x: 0, y: 0, width: 480, height: 270 }, channel: 2 },
+      [keys.quad]: { open: true, bounds: { x: 500, y: 0, width: 640, height: 360 }, channel: 2 },
+      [keys.dock]: { open: false, bounds: null, channel: 2, clock: true }, // an explicit choice it had goes too
+    },
+    settings: { startHidden: true },
+  }, null, 2));
+  const all = await runApp({
+    userData: allDir, results: path.join(allDir, "results"), seconds: 7, extraArgs: ["--mock"],
+    env: {
+      PANES_MOCK_FISHEYE: path.join(FIXTURES, "fisheye-ceiling.png"),
+      PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 3500, do: "menu-click", win: 1, label: "All of the above" }]),
+    },
+  });
+  const allEnd = last(all.result);
+  const cfgAll = all.config.windows;
+  check("Apply to all → All of the above from an untouched 360° window leaves each camera its own time default",
+    all.result.actions[0]?.ok && !("clock" in cfgAll[keys.lobby]) && !("clock" in cfgAll[keys.quad]) && !("clock" in cfgAll[keys.dock])
+      && allEnd[keys.lobby]?.clock?.wanted === false && allEnd[keys.quad]?.clock?.wanted === true,
+    JSON.stringify({ act: all.result.actions[0]?.error, lobby: cfgAll[keys.lobby]?.clock, quad: cfgAll[keys.quad]?.clock, dock: cfgAll[keys.dock]?.clock,
+      shown: { lobby: allEnd[keys.lobby]?.clock?.wanted, quad: allEnd[keys.quad]?.clock?.wanted } }));
 }
 
 // ---------------------------------------------------------------------------------------------

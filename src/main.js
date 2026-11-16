@@ -1448,6 +1448,7 @@ function cleanChanges(c) {
   const out = {};
   if (Number.isInteger(c?.channel) && c.channel >= 0 && c.channel < 10) out.channel = c.channel;
   for (const k of ["onTop", "hideName", "clock"]) if (typeof c?.[k] === "boolean") out[k] = c[k];
+  if (c?.clock === null) out.clock = null; // each camera's own default (on in quad and panorama views)
   if (RANGES.includes(c?.range)) out.range = c.range;
   if (c && "picture" in c) {
     const pic = c.picture === null ? null : cleanPicture(c.picture);
@@ -1476,7 +1477,10 @@ function applyToAll(changes, consoleId = null) {
       if (changes.hideName) entry.hideName = true;
       else delete entry.hideName;
     }
-    if ("clock" in changes) entry.clock = changes.clock;
+    if ("clock" in changes) {
+      if (changes.clock === null) delete entry.clock;
+      else entry.clock = changes.clock;
+    }
     if ("picture" in changes) {
       if (changes.picture) entry.picture = { ...changes.picture };
       else delete entry.picture;
@@ -1533,7 +1537,10 @@ function applyAllMenu(cw) {
     item(`Color range: ${RANGE_LABELS[values.range].replace(" (recommended)", "")}`, { range: values.range }),
     item(`Picture: ${pictureLabel(values.picture)}`, { picture: values.picture }),
     { type: "separator" },
-    item("All of the above", values),
+    // The time as this window has it set, not as it shows: an untouched 360° window shows it by
+    // default, and copying that put the app's clock on every normal camera, over the camera's own
+    // timestamp (review 2026-11-15, finding 4). With nothing set, each camera keeps its own default.
+    item("All of the above", { ...values, clock: typeof entry.clock === "boolean" ? entry.clock : null }),
   ];
 }
 
