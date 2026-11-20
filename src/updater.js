@@ -413,7 +413,11 @@ try {
     Remove-Item -LiteralPath $bak -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $AsarGz -Force -ErrorAction SilentlyContinue
   } else {
-    Expand-Archive -LiteralPath $Zip -DestinationPath $work -Force
+    # .NET, not Expand-Archive, for the same reason as Get-FileHash above: Windows PowerShell then loads
+    # pwsh's Archive module, and 1.2.7 (pwsh 7.6.10) calls an ExtractToDirectory overload only .NET Core
+    # has, so the zip swap failed (measured in CI, 2026-11-20). $work is new, so nothing to overwrite.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::ExtractToDirectory($Zip, $work)
     $new = Get-ChildItem -LiteralPath $work -Directory | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName $Exe) } | Select-Object -First 1
     if ($new) { $new = $new.FullName } elseif (Test-Path -LiteralPath (Join-Path $work $Exe)) { $new = $work } else { throw "the update has no $Exe" }
     $moved = $false

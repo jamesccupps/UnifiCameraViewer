@@ -1603,13 +1603,29 @@ async function updateSuite() {
     fs.copyFileSync(process.execPath, planted);
     const cwdSearch = process.env.NoDefaultCurrentDirectoryInExePath;
     delete process.env.NoDefaultCurrentDirectoryInExePath;
+    // Started from PowerShell 7 (GitHub's runners, or a user's pwsh window), the helper's Windows
+    // PowerShell inherits pwsh's PSModulePath and autoloads pwsh's modules; Archive 1.2.7's
+    // Expand-Archive fails there (CI, 2026-11-20). This PC has no pwsh, so a decoy Archive module
+    // goes first on the path: if the helper leans on Expand-Archive again, the swap fails here too.
+    const decoyMods = path.join(dir, "psmodules");
+    const decoy = path.join(decoyMods, "Microsoft.PowerShell.Archive", "9.9.9");
+    fs.mkdirSync(decoy, { recursive: true });
+    fs.writeFileSync(path.join(decoy, "Microsoft.PowerShell.Archive.psd1"),
+      "@{ ModuleVersion = '9.9.9'; RootModule = 'Microsoft.PowerShell.Archive.psm1'; FunctionsToExport = @('Expand-Archive') }\n");
+    fs.writeFileSync(path.join(decoy, "Microsoft.PowerShell.Archive.psm1"),
+      "function Expand-Archive { throw 'the decoy Expand-Archive on PSModulePath ran' }\n");
+    const modulePath = process.env.PSModulePath;
+    process.env.PSModulePath = modulePath ? `${decoyMods};${modulePath}` : decoyMods;
     let log1;
     try { log1 = await runHelper(u1, installDir); }
     finally {
       if (cwdSearch !== undefined) process.env.NoDefaultCurrentDirectoryInExePath = cwdSearch;
+      if (modulePath !== undefined) process.env.PSModulePath = modulePath; else delete process.env.PSModulePath;
       fs.rmSync(planted, { force: true });
     }
     check("the helper runs System32's PowerShell, not a powershell.exe in the updates folder", /update: done/.test(log1), log1.trim() || "no helper log: the planted powershell.exe ran");
+    check("the helper unpacks the zip with .NET, not an Expand-Archive from PSModulePath (pwsh's Archive 1.2.7 fails in Windows PowerShell)",
+      !/decoy/.test(log1) && /installed/.test(log1), log1.trim());
     check("swap helper replaced the install folder with the new version",
       fs.readFileSync(path.join(installDir, "ProtectPanes.exe"), "utf8") === "v2" && fs.readFileSync(path.join(installDir, "resources", "app.asar"), "utf8") === "v2" && /installed/.test(log1),
       log1.trim());
