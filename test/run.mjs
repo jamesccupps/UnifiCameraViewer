@@ -1792,7 +1792,7 @@ async function updateSuite() {
   check("a damaged note is ignored and deleted", takeAfterUpdateNote(noteDir) === null && !fs.existsSync(noteFile));
 
   const thisVersion = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
-  const afterUpdate = async (label, noteVersion) => {
+  const afterUpdate = async (label, noteVersion, actions = []) => {
     const userData = tmpDir(`update-after-${label}`);
     fs.writeFileSync(path.join(userData, "config.json"), JSON.stringify({
       version: 1,
@@ -1801,7 +1801,7 @@ async function updateSuite() {
       settings: { startHidden: false },
     }, null, 2));
     writeAfterUpdateNote(path.join(userData, "updates"), { version: noteVersion, camerasOnScreen: true });
-    const run = await runApp({ userData, results: path.join(userData, "results"), seconds: 6, extraArgs: ["--mock"], env: { PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 4000, do: "manager-js", js: read }]) } });
+    const run = await runApp({ userData, results: path.join(userData, "results"), seconds: 6, extraArgs: ["--mock"], env: { PANES_SELFTEST_ACTIONS: JSON.stringify([{ at: 4000, do: "manager-js", js: read }, ...actions]) } });
     const appLog = fs.readFileSync(path.join(userData, "protect-panes.log"), "utf8");
     return { ...run, appLog, noteLeft: fs.existsSync(path.join(userData, "updates", AFTER_UPDATE_FILE)) };
   };
@@ -1816,6 +1816,17 @@ async function updateSuite() {
     failedRun.result.manager?.visible === true && failedRun.result.manager.minimized === false
       && new RegExp(`update to 9\\.9\\.9 didn't install, so this is still ${thisVersion.replace(/\./g, "\\.")}`).test(failedStatus ?? "") && !failedRun.noteLeft,
     JSON.stringify({ manager: failedRun.result.manager, status: failedStatus }));
+  // The owner waited for 1.4.13, saw nothing change, and opened the tray to check: say it's done.
+  const notices = done.result.trayNotices ?? [];
+  check("after an update a tray notification says it finished and where the camera list is; none after one that didn't install",
+    notices.length === 1 && notices[0].title === `Protect Panes updated to ${thisVersion}` && /camera list is minimized/.test(notices[0].content)
+      && failedRun.result.trayNotices?.length === 0,
+    JSON.stringify({ ok: notices, failed: failedRun.result.trayNotices }));
+  const clicked = await afterUpdate("click", thisVersion, [{ at: 4500, do: "tray-balloon-click" }]);
+  const click = clicked.result.actions.find((a) => a.act.do === "tray-balloon-click");
+  check("clicking that notification opens the camera list",
+    click?.ok === true && clicked.result.manager?.visible === true && clicked.result.manager.minimized === false,
+    JSON.stringify({ click, manager: clicked.result.manager }));
   console.log(`  results: ${dir}`);
 }
 

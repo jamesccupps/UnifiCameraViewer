@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, screen } from "electron";
+import { app, BrowserWindow, dialog, screen, Tray } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -40,6 +40,20 @@ export function answerDialogs() {
     return { response, checkboxChecked: false };
   };
 }
+/**
+ * A tray notification would show on the screen of whoever runs the tests too. In self-test runs
+ * each one goes into result.json as `trayNotices` instead, and the tray-balloon-click action clicks
+ * the last one.
+ */
+const notices = [];
+let noticeTray = null;
+export function recordTrayNotices() {
+  Tray.prototype.displayBalloon = function (options) {
+    noticeTray = this;
+    notices.push({ t: Date.now(), title: options.title, content: options.content });
+  };
+}
+
 export function runSelfTest({ camWins, log, connections, hooks }) {
   const dir = process.env.PANES_SELFTEST_DIR;
   const waitMs = Number(process.env.PANES_SELFTEST_SEC || 20) * 1000;
@@ -104,7 +118,7 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
   // `tile: "<grid name>#<index>"` instead of `win` drives a grid tile. tray-click, manager-js and
   // grid-menu-click (a grid window's own menu, { grid, index, label }) don't need a camera.
   const results = [];
-  const APP_ACTIONS = new Set(["tray-click", "manager-js", "grid-menu-click", "screen-event"]);
+  const APP_ACTIONS = new Set(["tray-click", "tray-balloon-click", "manager-js", "grid-menu-click", "screen-event"]);
   for (const act of JSON.parse(process.env.PANES_SELFTEST_ACTIONS || "[]")) {
     setTimeout(async () => {
       let value;
@@ -114,6 +128,9 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
             const item = findItem(hooks.trayMenuTemplate(), act.label);
             if (!item?.click) throw new Error(`no tray item "${act.label}"`);
             item.click(item);
+          } else if (act.do === "tray-balloon-click") {
+            if (!noticeTray) throw new Error("no tray notification was shown");
+            noticeTray.emit("balloon-click");
           } else if (act.do === "screen-event") {
             // A monitor can't be unplugged from a test: fire the event Electron would.
             screen.emit(act.event, {}, screen.getPrimaryDisplay(), []);
@@ -228,6 +245,7 @@ export function runSelfTest({ camWins, log, connections, hooks }) {
       samples,
       actions: results,
       dialogs: asked,
+      trayNotices: notices,
       displays: screen.getAllDisplays().map((d) => ({ id: d.id, bounds: d.bounds, workArea: d.workArea, scaleFactor: d.scaleFactor })),
       objectPrototype: Object.keys(Object.prototype), // anything here means something polluted it
       manager: (() => { const m = managerWindow(); return m ? { visible: m.isVisible(), minimized: m.isMinimized() } : null; })(),

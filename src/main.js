@@ -89,6 +89,7 @@ async function init() {
     const selftest = await import("./selftest.js");
     selftest.keepWindowsOutOfTheWay();
     selftest.answerDialogs();
+    selftest.recordTrayNotices();
   }
   store = new Store();
   log = createLogger(path.join(app.getPath("userData"), "protect-panes.log"));
@@ -156,6 +157,17 @@ async function init() {
     log.info(`updated to ${note.version}${note.camerasOnScreen ? ": cameras back in front, camera list minimized" : ""}`);
   }
   const raise = !!(updated && note.camerasOnScreen);
+  // Otherwise a finished update looks like nothing happened: the cameras come back as they were and
+  // the list where Install was clicked stays minimized (the owner waited, then opened the tray to
+  // check). Windows shows this as a notification, without the focus; clicking it opens the list.
+  if (updated) {
+    tray.displayBalloon({
+      iconType: "info",
+      title: `Protect Panes updated to ${note.version}`,
+      content: raise ? "Your cameras are back. The camera list is minimized on the taskbar." : "The update installed.",
+      noSound: true,
+    });
+  }
 
   // Hidden windows ("Hide cameras") stay part of the layout but aren't created until shown.
   const openKeys = Object.entries(store.data.windows).filter(([, w]) => w.open && !w.hidden).map(([k]) => k);
@@ -1972,6 +1984,7 @@ function createTray() {
   tray.setToolTip("Protect Panes");
   tray.on("click", () => showManager());
   tray.on("double-click", () => showManager());
+  tray.on("balloon-click", () => showManager());
   updateTrayMenu();
 }
 
