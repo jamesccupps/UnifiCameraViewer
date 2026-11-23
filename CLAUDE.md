@@ -449,7 +449,9 @@ The 1.4.10 run (2026-11-13), on such a copy:
 - Exit 1 on any failure.
 - An installed copy can keep running meanwhile, since the scratch copy has its own instance lock.
 
-First run (2026-11-23, 1.4.13 code, unifi-protect 5.4.2): both consoles, all 34 online cameras OK, door reader included (UA G3 Pro, 360×480). No log warnings. Low runs 640×360, or 640×640 for the G6 Pro 360s. The G3 Flex decoded about 2 fps at Low against 25-30 for the rest.
+First run (2026-11-23, 1.4.13 code, unifi-protect 5.4.2): both consoles, all 34 online cameras OK, door reader included (UA G3 Pro, 360×480). No log warnings. Low runs 640×360, or 640×640 for the G6 Pro 360s. The G3 Flex decoded about 2 fps at Low against 25-30 for the rest. Same result on unifi-protect 5.5.0 that day.
+
+The `overrides` entry that pinned unifi-protect's undici to 8.12.4 (from 1.4.5, when the library lagged a security fix) is gone with 5.5.0. 5.4.2 already pinned 8.12.4 itself, and 5.5.0 pins 8.13.1, which the override would have held back. The library pins undici exactly, so a lagging version shows up in `npm audit`; add an override back only then.
 
 ### Keeping up with UniFi (owner's routine, 2026-11-23)
 
