@@ -2934,10 +2934,14 @@ async function e2eSuite() {
       sel.dispatchEvent(new Event("change"));
       return options;
     })()`;
-    // Save the imported draft the way it opens: as one grid window.
-    const saveDraftJs = `(() => {
+    // Save the imported draft the way it opens: as one grid window. The draft comes back from main
+    // (mgr:liveview-draft) before the editor switches to it; 800 ms after the pick wasn't always
+    // enough on CI (2026-11-23: saved while still "windows"), so wait for it, up to 4 s.
+    const saveDraftJs = `(async () => {
+      const as = document.getElementById("editor-as");
+      for (let i = 0; i < 40 && as.value !== "grid"; i++) await new Promise((r) => setTimeout(r, 100));
       document.getElementById("editor-form").requestSubmit(document.getElementById("editor-save"));
-      return document.getElementById("editor-as").value;
+      return as.value;
     })()`;
     // A console added through the dialog: its password goes through encryptStringAsync.
     const addJs = `(() => {
