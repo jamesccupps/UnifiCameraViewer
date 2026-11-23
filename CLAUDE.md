@@ -7,7 +7,7 @@ Hard requirements, all deliberate:
 - **Direct login by IP** with a local account. No ui.com/cloud, no MFA.
 - **Low resource use.** Medium channel by default, GPU decode via MSE, minimized windows stop streaming, WebGL only for 360° windows.
 
-Current version: **1.4.14**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
+Current version: **1.4.15**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
 - **1.2.0:** color-range fix for crushed shadows, name label collapse and per-window hide, clock on 360° views, Apply to all, Hide / Show cameras, named layouts with Protect liveview import, signed in-place updates.
 - **1.3.0:** the Setup.exe installer, Arrange and Close all, the layout editor, the tabbed camera list with hover tips, 360° Single view, and undici patched for security.
 - **1.3.1:** portable copies' in-app update fixed (the helper's working folder blocked the swap); Arrange / "Use what's on screen" missing just-shown windows.
@@ -48,6 +48,10 @@ Current version: **1.4.14**, released through the GitHub Actions release workflo
   - unifi-protect 5.5.0, with its own undici 8.13.1; the 8.12.4 override is dropped.
   - Maintenance, no app change: `npm run check:real`, `npm run check:upstream`, and Dependabot on npm weekly. See "Keeping up with UniFi".
   - A small update for 1.4.13 copies (Electron 45.4.1).
+- **1.4.15:** diagnostics for a PC that slows down over days. The owner's camera PC (14 windows, 10 in 360° Quad view, on a 35 W i3) went from about 360 % of a core after a start to about 650 %, all 8 threads pegged, over 1-3 days. It logged thousands of stream restarts a day, and exacqVision beside it kept dropping its server. Its log couldn't show which process grew or when.
+  - An hourly `[load]` line in the log: CPU and RAM by process kind, streams by quality, video in (total, Mbps, busiest cameras), the PC's free RAM, and stream restarts by reason (`load-log.js`).
+  - Settings → **Show stream info**: quality · size · fps · Mbps at the top right of each camera.
+  - A small update for 1.4.13 and 1.4.14 copies (Electron 45.4.1).
 
 The owner ran 1.0 to 1.2 on the real consoles, and their installed copy updated itself from 1.3.1 to 1.4.0 in the app (the installer path). Later versions are tested against the real consoles only through runs from source on a copy of the config. For 1.4.3 the owner used such a run themselves before the release: liveview import, enlarge, reconnect and the Access reader.
 
