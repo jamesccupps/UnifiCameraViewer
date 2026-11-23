@@ -174,6 +174,14 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
 - `config.json.bak`: the config.json from before the last save. Each save writes `config.json.tmp`, fsyncs it, moves config.json to `.bak`, then moves the new one in. NTFS journals renames but not data, so before 1.4.3 a power cut just after a save could leave config.json full of zeros, and the app started empty without a word. Loading falls back to `.bak` when config.json is missing (a save cut off between the two moves) or unreadable. An unreadable file is kept as `config.json.corrupt-<time>`, and it never becomes the next `.bak`. A config.json deleted while the app runs (a sync tool, antivirus) is written again by the next save, and the `.bak` stays as it was. Before, the move to `.bak` threw first, and every save failed until a restart. Load and save problems go to the log (`store.setLogger()`; the store exists before the logger).
 - Loading drops window and layout entries that aren't objects, and a grid on a template without fixed cells (`auto`, or an unknown id) shows as 2×2. Either one used to crash startup on every launch. Top-level keys this version doesn't know are carried through, so a downgrade and upgrade keeps them. A startup failure goes to the log and, outside test runs, a `showErrorBox`; before, it exited with nothing shown.
 - `protect-panes.log`: connection log. Rolls to `.log.1` at 2 MB.
+  - **The load line** (`[load] last 60 min: …`, hourly, `load-log.js`). It gives:
+    - CPU as % of one core, from each process's cumulative CPU time. The kinds are main, GPU, pages (each camera page, plus the camera list and grid windows while they're loaded; with the busiest page) and other.
+    - Working-set RAM per kind.
+    - Live streams by quality, and how many are in a 360° view.
+    - The PC's free RAM.
+    - The page-asked stream restarts since the last line, by reason.
+
+    Why: the owner's camera PC (2026-11: 14 windows, 10 of them 360° Quad views, on a 35 W i3) slowed over days, and its log held only thousands of single restart lines. Tests set `PANES_LOAD_LOG_MS` (test runs only), and the streams suite checks the line against the restarts it logged.
 
 Passwords are DPAPI-encrypted (`safeStorage`, the async API since 1.4.0) and tied to the Windows user. `enc: "plain"` is base64 and only exists in tests and on Linux without a keyring. **Never print or log decrypted passwords.**
 

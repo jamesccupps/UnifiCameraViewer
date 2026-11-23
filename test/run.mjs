@@ -551,7 +551,8 @@ async function streamsSuite() {
     windows: { [keys.lobby]: win(0, 0), [keys.dock]: win(500, 0), [keys.broken]: win(0, 300), [keys.rewind]: win(500, 300, { clock: true }) },
     settings: { startHidden: true },
   }, null, 2));
-  const { result } = await runApp({ userData, results: path.join(userData, "results"), seconds: 34, extraArgs: ["--mock"] });
+  // The hourly load line every 15 s instead, so this run writes two of them (at 15 s and 30 s).
+  const { result } = await runApp({ userData, results: path.join(userData, "results"), seconds: 34, extraArgs: ["--mock"], env: { PANES_LOAD_LOG_MS: "15000" } });
   const dock = runs(states(result, keys.dock));
   const reconnectingSamples = states(result, keys.dock).filter((s) => s === "reconnecting").length;
   check("a camera that goes offline while viewed reads \"offline\", not \"reconnecting\" for the whole outage",
@@ -585,6 +586,24 @@ async function streamsSuite() {
   const frozen = rw.filter((c, i) => i > 0 && c.status === "live" && c.decodedFrames === rw[i - 1].decodedFrames && c.decodedFrames > 0);
   check("no clock over the frozen picture", frozen.length >= 1 && frozen.every((c) => !c.clock.shown) && rwEnd?.clock?.shown,
     JSON.stringify(rw.map((c) => [c.decodedFrames, c.clock.shown])));
+
+  // The load line: CPU and RAM by process kind, the streams, and the restarts since the last line,
+  // which must add up to the restart lines logged before it (Broken's back-off and Rewind's freeze).
+  const logLines = fs.readFileSync(path.join(userData, "protect-panes.log"), "utf8").split(/\r?\n/);
+  const loadAt = logLines.map((l, i) => (/\[load\] last /.test(l) ? i : -1)).filter((i) => i >= 0);
+  const loads = loadAt.map((i) => logLines[i]);
+  const first = loads[0] ?? "";
+  const cpuOf = (name) => Number(new RegExp(`[(,] ?${name} (\\d+)`).exec(first.replace(/^.*CPU \(% of one core\)/, "("))?.[1]);
+  const ramOf = (name) => Number(new RegExp(`RAM .*?${name} (\\d+) MB`).exec(first)?.[1]);
+  check("the load line comes on its interval: two in 34 s at 15 s", loads.length === 2, loads.join("\n    "));
+  check("it gives CPU by process kind, counting each camera page", cpuOf("main") > 0 && cpuOf("GPU") >= 0 && /CPU \(% of one core\) .*4 pages \d+ \(busiest \d+\)/.test(first), first);
+  check("and RAM in MB (Electron's KB converted)", ramOf("main") > 20 && ramOf("main") < 2000 && ramOf("pages") > 20, first);
+  // Dock is offline at 15 s and Broken may be between restarts, so not every stream is live.
+  check("and the streams by quality", /\d of 4 streams live \(Low 4\)/.test(first), first);
+  const logged = loadAt.at(-1) === undefined ? 0 : logLines.slice(0, loadAt.at(-1)).filter((l) => /renderer requested reset/.test(l)).length;
+  const counted = loads.reduce((n, l) => n + Number(/page restarts (\d+)/.exec(l)?.[1] ?? 0), 0);
+  check("its restart counts add up to the restarts logged, by reason", logged >= 3 && counted === logged && loads.some((l) => /no new frames \d/.test(l)),
+    `logged ${logged}, counted ${counted}: ${loads.map((l) => l.replace(/^.*; (page restarts|no page)/, "$1")).join(" | ")}`);
   console.log(`  results: ${userData}`);
 
   // 2. Pages and the GPU. Stair's window and a grid tile of Lobby have their renderers crashed 8 s in.

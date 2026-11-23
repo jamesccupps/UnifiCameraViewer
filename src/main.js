@@ -7,6 +7,7 @@ import { ConsoleConnection, channelList, fisheyeInfo, pickChannel, resolveChanne
 import { autoGrid, cellRects, channelForTile, fitAspect, readingOrder, templateById, TEMPLATES } from "./grid.js";
 import { cycleSeconds, GridWindow, MAX_CYCLE, tileMembers } from "./grid-window.js";
 import { createLogger } from "./log.js";
+import { LoadLog } from "./load-log.js";
 import { consoleKey, installCertPinning } from "./cert-pins.js";
 import { Previews } from "./previews.js";
 import { decryptPassword, DEFAULT_SETTINGS, encryptPassword, newId, Store } from "./store.js";
@@ -40,6 +41,7 @@ let quitting = false;
 let updater = null;
 let failedUpdate = null; // the version an in-app update was installing, when this start shows it didn't
 let previews = null;
+let loadLog = null;
 
 const connections = new Map(); // consoleId -> ConsoleConnection
 const camWins = new Map();     // key "<consoleId>/<cameraId>" -> player of that camera's window
@@ -124,6 +126,14 @@ async function init() {
     getCamera: (key) => { const [consoleId, cameraId] = key.split("/"); return connections.get(consoleId)?.camera(cameraId); },
     log: log.child("preview"),
   });
+  // What the app costs, hourly, so a slow PC's log shows the trend (load-log.js says why).
+  // PANES_LOAD_LOG_MS is for test runs only.
+  loadLog = new LoadLog({
+    getMetrics: () => app.getAppMetrics(),
+    getStreams: () => players().map((cw) => ({ state: cw.stream?.status.state, channel: cw.stream?.channel, view: entryOf(cw)?.dewarp?.mode })),
+    log: log.child("load"),
+  });
+  loadLog.start((process.env.PANES_SELFTEST_DIR && Number(process.env.PANES_LOAD_LOG_MS)) || 60 * 60_000);
 
   createTray();
   applyLoginItem();
@@ -2176,6 +2186,7 @@ function registerIpc() {
     const cw = fromCamera(e);
     if (!cw) return;
     log.info(`renderer requested reset for ${cw.cameraId}: ${String(reason).slice(0, 80)}`);
+    loadLog?.restart(reason);
     cw.stream.restart();
   });
   // The page can't decode this stream at all (no codec it supports, e.g. H.265 without hardware
