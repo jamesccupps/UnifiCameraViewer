@@ -1,5 +1,8 @@
 # The workflows' actions are pinned to commits (the version in a comment), and every npm package to an
-# exact version: Dependabot opens a pull request when a new version comes out, once a month.
+# exact version: Dependabot opens a pull request when a new version comes out, monthly for actions
+# and weekly for npm. Weekly is for unifi-protect, the one package tied to Protect's firmware; a
+# schedule can't be set per package (one entry per ecosystem and directory), so all npm goes weekly.
+# An open pull request is refreshed rather than joined by another, so that's still at most four.
 # - Actions in one pull request, and the build and test tools in another.
 # - electron, electron-builder and unifi-protect each in a pull request of their own, never grouped:
 #   - electron: a new version makes every installed copy take the full update (120-160 MB) instead
@@ -21,7 +24,7 @@ updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: monthly
+      interval: weekly
     groups:
       build-tools:
         dependency-type: development

@@ -439,6 +439,32 @@ The 1.4.10 run (2026-11-13), on such a copy:
 - No warnings in the log.
 - The owner's own run just before found the reader failing on the UniFi OS route (see TLS pinning).
 
+`npm run check:real` (scripts/check-real-consoles.mjs) does this for every camera.
+- It copies `config.json` and `Local State` into a scratch folder and deletes it afterwards.
+- Phase 1 reads each console's camera list from the hidden camera list (`mgr:state`).
+- Phase 2 puts every online camera in hidden 4×4 grids at Low for 30 s.
+- A camera passes if it's live, has a picture, and its decoded-frame count changed over the last 5+ s.
+- Self-test mode with `PANES_SELFTEST_NO_CAPTURE`: invisible windows, no pictures on disk.
+- Output: console names and camera models, not camera names or addresses (`--names` adds them).
+- Exit 1 on any failure.
+- An installed copy can keep running meanwhile, since the scratch copy has its own instance lock.
+
+First run (2026-11-23, 1.4.13 code, unifi-protect 5.4.2): both consoles, all 34 online cameras OK, door reader included (UA G3 Pro, 360×480). No log warnings. Low runs 640×360, or 640×640 for the G6 Pro 360s. The G3 Flex decoded about 2 fps at Low against 25-30 for the rest.
+
+### Keeping up with UniFi (owner's routine, 2026-11-23)
+
+unifi-protect talks to Protect's undocumented API, so a Protect or UniFi OS update can break streaming until the library follows. It's actively maintained: 14 releases in 2026, hjdhjd alone. homebridge-unifi-protect, on the same library, has thousands of users on new firmware.
+
+Ubiquiti's official Integration API (developer.ui.com/protect, local at `https://<console>/proxy/protect/integration/v1/...`) was considered and set aside. Its only live video is RTSPS with SRTP (`POST /v1/cameras/{id}/rtsps-stream`), which needs an RTSP client the app doesn't have. Creating streams changes camera settings. Its key's scope isn't documented, and the same API arms alarms and fires relays.
+
+The routine:
+1. After a Protect or UniFi OS update on a console: `npm run check:real`. The owner keeps console auto-updates off, or updates one console first and checks before the other.
+2. Dependabot checks npm weekly (it can't schedule one package alone). A unifi-protect pull request needs `npm test` and `npm run check:real` before merging.
+3. `npm run check:upstream` (scripts/check-upstream.mjs) shows:
+   - our pin against the newest unifi-protect, with the release notes between them;
+   - the last 30 days of homebridge-unifi-protect issues, starred when the title mentions video or firmware.
+   Run it weekly and after a Protect release.
+
 When adding a test, extend `test/run.mjs`. `PANES_SELFTEST_ACTIONS` (JSON) drives windows with real input:
 
 - `drag` `{win, from, to}`

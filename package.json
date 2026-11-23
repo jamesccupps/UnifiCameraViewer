@@ -35,6 +35,8 @@
     "test:cycle": "node test/run.mjs cycle",
     "test:e2e": "node test/run.mjs e2e",
     "test:release": "node test/run.mjs release",
+    "check:real": "node scripts/check-real-consoles.mjs",
+    "check:upstream": "node scripts/check-upstream.mjs",
     "sign-release": "node scripts/sign-release.js"
   },
   "dependencies": {
