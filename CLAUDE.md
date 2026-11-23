@@ -7,7 +7,7 @@ Hard requirements, all deliberate:
 - **Direct login by IP** with a local account. No ui.com/cloud, no MFA.
 - **Low resource use.** Medium channel by default, GPU decode via MSE, minimized windows stop streaming, WebGL only for 360° windows.
 
-Current version: **1.4.13**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
+Current version: **1.4.14**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
 - **1.2.0:** color-range fix for crushed shadows, name label collapse and per-window hide, clock on 360° views, Apply to all, Hide / Show cameras, named layouts with Protect liveview import, signed in-place updates.
 - **1.3.0:** the Setup.exe installer, Arrange and Close all, the layout editor, the tabbed camera list with hover tips, 360° Single view, and undici patched for security.
 - **1.3.1:** portable copies' in-app update fixed (the helper's working folder blocked the swap); Arrange / "Use what's on screen" missing just-shown windows.
@@ -44,6 +44,10 @@ Current version: **1.4.13**, released through the GitHub Actions release workflo
   - Not taken: Show all / Close all with no console id, which is harmless (the list always sends one).
   - A small update for 1.4.9 to 1.4.11 copies.
 - **1.4.13:** Electron 45.3.1 → 45.4.1 (Chromium 156.0.8078.100, Node 24.22.3, backported Chromium/V8/ANGLE/Dawn/Skia/FFmpeg fixes, and 45.3.4's fix for right-clicked elements kept in memory), and ws 8.23.0 for the tests' fake console. These were Dependabot's first two pull requests (#2 had 45.3.2; 45.4.1 superseded it). The zip swap helper unpacks with `[IO.Compression.ZipFile]::ExtractToDirectory`, not `Expand-Archive`: main's CI failed on the runner's pwsh 7.6.10, whose Archive 1.2.7 doesn't work in Windows PowerShell (see the helper notes below). A full update for every copy, since the Electron version changed.
+- **1.4.14:** the start after an in-app update shows a tray notification, "Protect Panes updated to X", and clicking it opens the camera list. The first real #14 update (to 1.4.13) worked, but with nothing changing on screen the owner thought it hadn't loaded.
+  - unifi-protect 5.5.0, with its own undici 8.13.1; the 8.12.4 override is dropped.
+  - Maintenance, no app change: `npm run check:real`, `npm run check:upstream`, and Dependabot on npm weekly. See "Keeping up with UniFi".
+  - A small update for 1.4.13 copies (Electron 45.4.1).
 
 The owner ran 1.0 to 1.2 on the real consoles, and their installed copy updated itself from 1.3.1 to 1.4.0 in the app (the installer path). Later versions are tested against the real consoles only through runs from source on a copy of the config. For 1.4.3 the owner used such a run themselves before the release: liveview import, enlarge, reconnect and the Access reader.
 
