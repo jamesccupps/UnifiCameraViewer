@@ -10,7 +10,7 @@ import path from "node:path";
  *   version: 1,
  *   consoles: [{ id, name, host, username, password: { enc: "safe" | "plain", data: base64 }, certSha256? }],
  *   windows:  { "<consoleId>/<cameraId>": { open, hidden, listHidden, bounds: {x,y,width,height}, channel, onTop, name, hideName, clock, range, picture, dewarp } },
- *   settings: { lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin, arrangeQuality, showPreviews, updateSource },
+ *   settings: { lockLayout, showNames, lockAspect, hideFromTaskbar, startHidden, launchAtLogin, arrangeQuality, showPreviews, showStreamInfo, updateSource },
  *   layouts:  [{ id, name, windows: { "<consoleId>/<cameraId>": { bounds, channel, onTop, hideName, clock, range, picture, dewarp } }, editor? }],
  *   grids:    [{ id, name, templateId, bounds, open, hidden, onTop, editor?, tiles: [{ key, channel, range, picture, hideName, clock, dewarp, cycle? } | null] }]
  * }
@@ -29,6 +29,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   launchAtLogin: false,
   arrangeQuality: true, // Arrange / layouts pick each camera's stream quality from its tile size
   showPreviews: true,   // snapshot thumbnails in the camera list (src/previews.js)
+  showStreamInfo: false, // quality, picture size, fps and bitrate in a corner of each camera page
   // https:// base URL or folder holding latest.json + the release zip (see updater.js). The default is
   // this project's latest GitHub release; blank turns update checks off.
   updateSource: "https://github.com/jamesccupps/UnifiCameraViewer/releases/latest/download",

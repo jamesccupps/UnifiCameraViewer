@@ -13,6 +13,7 @@ const statusText = document.getElementById("status-text");
 const labelEl = document.getElementById("label");
 const labelText = document.getElementById("label-text");
 const clockEl = document.getElementById("clock");
+const infoEl = document.getElementById("info");
 const dot = document.getElementById("dot");
 const barTitle = document.getElementById("bar-title");
 const barConsole = document.getElementById("bar-console");
@@ -82,6 +83,7 @@ window.__panesStats = () => {
     quiet: !statusEl.classList.contains("hidden") && statusEl.classList.contains("quiet"),
     label: { shown: !document.body.classList.contains("no-names"), compact: labelEl.classList.contains("compact") },
     clock: { wanted: clockWanted, shown: !clockEl.classList.contains("hidden"), text: clockEl.textContent },
+    info: { ...streamInfo, shown: !infoEl.classList.contains("hidden"), text: infoEl.textContent },
     picture: { filter: video.style.filter, canvasFilter: dewarpCanvas.style.filter, panel: !pictureEl.classList.contains("hidden") },
     dewarp: dewarper.stats(),
   };
@@ -344,6 +346,37 @@ setInterval(() => {
 }, 1_000);
 video.addEventListener("resize", reportAspect);
 
+// Stream info (Settings > Show stream info), like a recorder's overlay: the quality, the picture's
+// size, frames decoded per second and the bitrate arriving, over the last 2 s. Measured always (the
+// self-test reads it), shown only when the setting is on. The hourly log line has the totals.
+const INFO_MS = 2_000;
+let infoWanted = false;
+let infoBytes = 0;
+let infoFrames = 0;
+let infoAt = performance.now();
+let streamInfo = { fps: null, mbps: null };
+setInterval(() => {
+  const now = performance.now();
+  const frames = decodedFrames();
+  const secs = (now - infoAt) / 1000;
+  // A rebuild starts the frame count over: no figure for that stretch.
+  streamInfo = { fps: frames >= infoFrames ? (frames - infoFrames) / secs : null, mbps: (infoBytes * 8) / secs / 1e6 };
+  infoAt = now;
+  infoFrames = frames;
+  infoBytes = 0;
+  showStreamInfo();
+}, INFO_MS);
+
+function showStreamInfo() {
+  infoEl.classList.toggle("hidden", !infoWanted);
+  if (!infoWanted) return;
+  const quality = (meta.channels ?? []).find((c) => c.id === meta.channel)?.label.split(" · ")[0] ?? "";
+  const size = video.videoWidth ? `${video.videoWidth}×${video.videoHeight}` : "";
+  const fps = streamInfo.fps === null ? "–" : Math.round(streamInfo.fps);
+  const mbps = streamInfo.mbps === null ? "–" : streamInfo.mbps.toFixed(1);
+  infoEl.textContent = [quality, size, `${fps} fps`, `${mbps} Mbps`].filter(Boolean).join(" · ");
+}
+
 // Dewarped layouts keep their chosen shape (16:9 by default, 0x0 = any shape) whatever the
 // fisheye's own; otherwise follow the video.
 function reportAspect() {
@@ -370,6 +403,7 @@ panes.on("cam:init", ({ codec, data, reset }) => {
 });
 
 panes.on("cam:media", (data) => {
+  infoBytes += data.byteLength;
   if (!mediaSource) return; // waiting for an init segment
   queue.push(data);
   if (queue.length > MAX_QUEUE) {
@@ -411,6 +445,8 @@ panes.on("cam:meta", (m) => {
   barTitle.textContent = m.title;
   barConsole.textContent = m.consoleName || "";
   document.body.classList.toggle("no-names", !m.showNames);
+  infoWanted = !!m.streamInfo;
+  showStreamInfo();
   document.body.classList.toggle("locked", !!m.locked);
   btnTop.classList.toggle("active", !!m.onTop);
   fitLabel();

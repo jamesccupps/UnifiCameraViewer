@@ -233,6 +233,7 @@ async function mockSuite() {
     check(`${name}: no renderer errors`, c && c.errors.length === 0 && c.resetRequests === 0, c && JSON.stringify(c.errors));
   }
   check("forced reconnect rebuilt the decoder and recovered", cams[keys.lobby]?.rebuilds >= 2, `rebuilds=${cams[keys.lobby]?.rebuilds}`);
+  check("stream info is off by default", cams[keys.dock]?.info && !cams[keys.dock].info.shown && cams[keys.dock].info.mbps > 0, JSON.stringify(cams[keys.dock]?.info));
   check("360 camera auto-switched to quad view", cams[keys.quad]?.dewarp?.active && cams[keys.quad]?.dewarp?.mode === "quad", JSON.stringify(cams[keys.quad]?.dewarp));
   check("panorama view active", cams[keys.pano]?.dewarp?.active && cams[keys.pano]?.dewarp?.mode === "panorama");
   const qd = config.windows[keys.quad]?.dewarp;
@@ -549,7 +550,7 @@ async function streamsSuite() {
     version: 1,
     consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby", "Dock", "Broken", "Rewind"], mockDropout: { camera: "Dock", offMs: 10000, onMs: 16000 } }],
     windows: { [keys.lobby]: win(0, 0), [keys.dock]: win(500, 0), [keys.broken]: win(0, 300), [keys.rewind]: win(500, 300, { clock: true }) },
-    settings: { startHidden: true },
+    settings: { startHidden: true, showStreamInfo: true },
   }, null, 2));
   // The hourly load line every 15 s instead, so this run writes two of them (at 15 s and 30 s).
   const { result } = await runApp({ userData, results: path.join(userData, "results"), seconds: 34, extraArgs: ["--mock"], env: { PANES_LOAD_LOG_MS: "15000" } });
@@ -604,6 +605,14 @@ async function streamsSuite() {
   const counted = loads.reduce((n, l) => n + Number(/page restarts (\d+)/.exec(l)?.[1] ?? 0), 0);
   check("its restart counts add up to the restarts logged, by reason", logged >= 3 && counted === logged && loads.some((l) => /no new frames \d/.test(l)),
     `logged ${logged}, counted ${counted}: ${loads.map((l) => l.replace(/^.*; (page restarts|no page)/, "$1")).join(" | ")}`);
+  // Each mock camera is 640x360 at 15 fps, ultrafast x264: a few hundred kbit/s to a few Mbit/s.
+  const videoIn = /video in (\d+) MB, (\d+\.\d) Mbps from (\d) cameras \(most: …\S{6} \d+\.\d, …\S{6} \d+\.\d, …\S{6} \d+\.\d\)/.exec(loads.at(-1) ?? "");
+  check("and the video that came in: total, rate and the busiest cameras", videoIn && Number(videoIn[2]) > 0.1 && Number(videoIn[3]) >= 3, loads.at(-1));
+
+  // Show stream info: quality, size, fps and bitrate in the corner of a healthy camera.
+  const info = last(result)[keys.lobby]?.info;
+  check("Show stream info puts quality, size, fps and bitrate on the camera",
+    info?.shown && /^Low · 640×360 · \d+ fps · \d+\.\d Mbps$/.test(info.text) && Math.abs(info.fps - 15) < 5 && info.mbps > 0.05, JSON.stringify(info));
   console.log(`  results: ${userData}`);
 
   // 2. Pages and the GPU. Stair's window and a grid tile of Lobby have their renderers crashed 8 s in.

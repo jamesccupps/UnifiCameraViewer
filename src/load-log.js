@@ -2,7 +2,8 @@ import os from "node:os";
 
 /*
  * One line in the log each hour with what the app cost over that hour: CPU and RAM by process kind,
- * the streams playing, the PC's free RAM, and the camera pages' stream restarts by reason.
+ * the streams playing, the video that came in (total, rate and the busiest cameras), the PC's free
+ * RAM, and the camera pages' stream restarts by reason.
  *
  * Why: a wall PC that slowed down over days (Camera Desktop, 2026-11: 14 windows, 10 of them 360°
  * Quad views, on a 35 W i3) left only a one-off snapshot of its processes and thousands of single
@@ -27,6 +28,7 @@ export class LoadLog {
   #cpuSeen = new Map(); // "<pid>/<creationTime>" -> cumulative CPU seconds at the last line
   #since;
   #restarts = new Map();
+  #bytes = new Map(); // camera key -> video bytes sent to its pages since the last line
 
   /**
    * @param {object} opts
@@ -57,6 +59,11 @@ export class LoadLog {
     let key = String(reason).slice(0, 40);
     if (!this.#restarts.has(key) && this.#restarts.size >= MAX_REASONS) key = "other";
     this.#restarts.set(key, (this.#restarts.get(key) ?? 0) + 1);
+  }
+
+  /** A video fragment went to a camera page. */
+  media(key, bytes) {
+    this.#bytes.set(key, (this.#bytes.get(key) ?? 0) + bytes);
   }
 
   /** The line for the time since the last one (or start()); the counts start over. */
@@ -93,6 +100,16 @@ export class LoadLog {
     const channelText = Object.entries(byChannel).map(([c, n]) => `${c} ${n}`).join(", ");
     const streamText = `${live} of ${streams.length} streams live${channelText ? ` (${channelText})` : ""}${views ? `, ${views} in a 360° view` : ""}`;
 
+    // Video in: the total and the three busiest cameras. A window and a grid tile of the same camera
+    // at the same quality share one socket (the library pools them) but count twice here.
+    const mbps = (b) => ((b * 8) / seconds / 1e6).toFixed(1);
+    const perCamera = [...this.#bytes].sort((a, b) => b[1] - a[1]);
+    const videoBytes = perCamera.reduce((n, [, b]) => n + b, 0);
+    this.#bytes.clear();
+    const amount = videoBytes >= 2 ** 30 ? `${(videoBytes / 2 ** 30).toFixed(1)} GB` : `${Math.round(videoBytes / 2 ** 20)} MB`;
+    const busiest = perCamera.slice(0, 3).map(([k, b]) => `…${k.slice(-6)} ${mbps(b)}`).join(", ");
+    const videoText = `video in ${amount}, ${mbps(videoBytes)} Mbps${perCamera.length ? ` from ${perCamera.length} cameras (most: ${busiest})` : ""}`;
+
     const { free, total } = this.#memory();
     const gb = (b) => (b / 2 ** 30).toFixed(1);
 
@@ -102,7 +119,7 @@ export class LoadLog {
     const restartText = restartCount ? `page restarts ${restartCount} (${restarts.map(([r, c]) => `${r} ${c}`).join(", ")})` : "no page restarts";
 
     const span = seconds < 120 ? `${Math.round(seconds)} s` : `${Math.round(seconds / 60)} min`;
-    return `last ${span}: CPU (% of one core) ${cpu.join(", ")}; RAM ${ram.join(", ")}; ${streamText}; PC RAM free ${gb(free)} of ${gb(total)} GB; ${restartText}`;
+    return `last ${span}: CPU (% of one core) ${cpu.join(", ")}; RAM ${ram.join(", ")}; ${streamText}; ${videoText}; PC RAM free ${gb(free)} of ${gb(total)} GB; ${restartText}`;
   }
 
   #cpuTotals(metrics) {

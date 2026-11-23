@@ -405,7 +405,10 @@ function openCameraWindow(key, { flash = true, raise = false } = {}) {
     cameraId,
     resolveChannel: (cam) => resolveChannel(cam, store.data.windows[key]?.channel),
     getRange: () => store.data.windows[key]?.range ?? "auto",
-    send: (channel, payload) => { if (!win.isDestroyed()) win.webContents.send(channel, payload); },
+    send: (channel, payload) => {
+      if (!win.isDestroyed()) win.webContents.send(channel, payload);
+      if (channel === "cam:media") loadLog.media(key, payload.byteLength);
+    },
     log: log.child(`cam ${cameraId.slice(-6)}`),
   });
 
@@ -960,6 +963,7 @@ function makeTilePlayer({ gw, index, tile, wc, like = null, autoChannel }) {
     getRange: () => tile.range ?? "auto",
     send: (channel, payload) => {
       if (!wc.isDestroyed()) wc.send(channel, payload);
+      if (channel === "cam:media") loadLog.media(cw.key, payload.byteLength);
       // A page loading under a tile's (grid-window.js) whose stream gave up takes over at once: the
       // tile should say the camera is offline, not keep showing the one before it.
       if (channel === "cam:status" && (payload.state === "offline" || payload.state === "error")) gw.ready(cw, payload.state);
@@ -1181,6 +1185,7 @@ function cameraMeta(cw) {
     consoleName: multi ? consoleName(cw.consoleId) : "",
     // The global setting is the master switch; hideName turns the label off for one window.
     showNames: !!store.settings.showNames && !entry.hideName,
+    streamInfo: !!store.settings.showStreamInfo,
     clock: showClock(entry),
     locked: !!store.settings.lockLayout,
     onTop: !!entry.onTop,
