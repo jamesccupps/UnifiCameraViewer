@@ -7,7 +7,7 @@ Hard requirements, all deliberate:
 - **Direct login by IP** with a local account. No ui.com/cloud, no MFA.
 - **Low resource use.** Medium channel by default, GPU decode via MSE, minimized windows stop streaming, WebGL only for 360° windows.
 
-Current version: **1.4.15**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
+Current version: **1.4.16**, released through the GitHub Actions release workflow. Each version's additions (ROADMAP.md has the detail):
 - **1.2.0:** color-range fix for crushed shadows, name label collapse and per-window hide, clock on 360° views, Apply to all, Hide / Show cameras, named layouts with Protect liveview import, signed in-place updates.
 - **1.3.0:** the Setup.exe installer, Arrange and Close all, the layout editor, the tabbed camera list with hover tips, 360° Single view, and undici patched for security.
 - **1.3.1:** portable copies' in-app update fixed (the helper's working folder blocked the swap); Arrange / "Use what's on screen" missing just-shown windows.
@@ -52,6 +52,7 @@ Current version: **1.4.15**, released through the GitHub Actions release workflo
   - An hourly `[load]` line in the log: CPU and RAM by process kind, streams by quality, video in (total, Mbps, busiest cameras), the PC's free RAM, and stream restarts by reason (`load-log.js`).
   - Settings → **Show stream info**: quality · size · fps · Mbps at the top right of each camera.
   - A small update for 1.4.13 and 1.4.14 copies (Electron 45.4.1).
+- **1.4.16:** the timed refresh (How video flows step 7). 1.4.15's load lines and per-process readings showed each camera page's CPU growing with its player's age, about 9 % of a core per hour. Every live stream now starts over 30 to 37.5 minutes after its last start, behind the held frame. The load line counts these as `timed refreshes`. A small update for 1.4.13 to 1.4.15 copies (Electron 45.4.1).
 
 The owner ran 1.0 to 1.2 on the real consoles, and their installed copy updated itself from 1.3.1 to 1.4.0 in the app (the installer path). Later versions are tested against the real consoles only through runs from source on a copy of the config. For 1.4.3 the owner used such a run themselves before the release: liveview import, enlarge, reconnect and the Access reader.
 

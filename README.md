@@ -66,6 +66,7 @@ Then, in Protect Panes, click **Add console**. Enter a name ("Building"), the co
 - Small windows shrink the name label to just the status dot. **Right-click → Show name** turns the label off for one window; **Show camera names** in settings turns it off everywhere.
 - **Show stream info** in settings puts each camera's quality, picture size, frames per second and bitrate in its top right corner, like a recorder's overlay.
 - **Lock layout** (tray menu, right-click menu, or settings) stops windows from being moved or resized and hides the hover bar. Use it once everything is placed.
+- From 1.4.16 each camera's stream starts over every 30 minutes or so, at a slightly different time for each camera, holding its last picture for the moment that takes. A camera window's CPU use grows the longer its stream runs, and that slowed a 14-window PC to a crawl within a few hours.
 - Closing the camera list doesn't stop anything. The cameras keep running, and the tray icon brings the list back. **Quit** is in the tray menu and the list.
 - **Find** flashes a camera's window. **Reset window positions** pulls every window back onto the main screen if a monitor was unplugged.
 - **Settings → Move to another PC**: **Export settings…** saves your consoles, layouts, grid windows, window places and settings to a .json file. It holds no passwords, since those are locked to your Windows account. On the other PC, **Import settings…** replaces its settings with the file's and restarts the app.
@@ -90,7 +91,7 @@ Dewarping is done by the graphics chip on the one stream that's already being de
 `%APPDATA%\Protect Panes\`
 
 - `config.json`: consoles, window positions and settings. Passwords are encrypted with Windows DPAPI, tied to your Windows user account.
-- `protect-panes.log`: connection log, useful when something won't connect. Once an hour it also notes what the app used: CPU and memory, the video that came in (the total and the busiest cameras), and any streams that had to restart.
+- `protect-panes.log`: connection log, useful when something won't connect. Once an hour it also notes what the app used: CPU and memory, the video that came in (the total and the busiest cameras), any streams that had to restart, and how many were started over on their half-hour timer.
 
 ## Troubleshooting
 
