@@ -11,6 +11,17 @@ const URGENCY_MS = 5_000;
 const UNAVAILABLE_RETRY_MS = [10_000, 30_000, 120_000, 300_000];
 // Before subscribing again after a stream error, or a stream that just ended.
 const RESTART_GAP_MS = 3_000;
+// A live stream starts over this long after its last start, plus up to a quarter more, so a PC's
+// windows don't all go at once. Why: a camera page's CPU grows with the age of its player, not with
+// the PC's load. On Camera Desktop (2026-11-25, 14 windows, a 35 W i3) each page cost about 4 % of
+// a core plus 9 % per hour since its last restart, 360° or not (r = 0.95 over the 14), until the PC
+// was pegged and the oldest players fell behind. A new subscription brings a new init, so the page
+// rebuilds its player; it holds the last frame meanwhile. Where in Chromium or the library the cost
+// builds up isn't known.
+const REFRESH_MS = 30 * 60_000;
+const REFRESH_SPREAD = 0.25;
+// A refresh due while the stream isn't live (reconnecting, a stall) waits for it to be live again.
+const REFRESH_RETRY_MS = 10_000;
 
 /*
  * Pumps one camera's Protect livestream (fMP4 over the console's own websocket - no RTSP/RTSPS)
@@ -40,6 +51,8 @@ export class CameraStream {
    * @param {object} opts.log
    * @param {number[]} [opts.unavailableRetryMs] - replaces UNAVAILABLE_RETRY_MS (unit tests)
    * @param {number} [opts.restartGapMs] - replaces RESTART_GAP_MS (unit tests)
+   * @param {number} [opts.refreshMs] - replaces REFRESH_MS (tests)
+   * @param {() => void} [opts.onRefresh] - a live stream started over on its timer
    */
   constructor(opts) {
     this.#opts = opts;
@@ -151,12 +164,25 @@ export class CameraStream {
         } else if (sub.state === "live" && this.#status.state === "reconnecting") this.#setStatus("live", "");
       }, 1_000);
 
+      // Each init rebuilds the page's player, so the refresh counts from the last one.
+      let refreshing = false;
+      let refreshTimer = null;
+      const armRefresh = (ms) => {
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => {
+          if (this.#status.state !== "live" || sub.state === "recovering") return armRefresh(REFRESH_RETRY_MS);
+          refreshing = true;
+          dropSub.abort();
+        }, ms);
+      };
+
       let sentInit = false;
       const sendInit = (init) => {
         const data = applyRange(init.data, this.#opts.getRange?.() ?? "auto");
         this.#send("cam:init", { codec: init.codec, data: new Uint8Array(data), reset: true });
         sentInit = true;
         this.#setStatus("live", "");
+        armRefresh((this.#opts.refreshMs ?? REFRESH_MS) * (1 + Math.random() * REFRESH_SPREAD));
       };
 
       try {
@@ -183,6 +209,10 @@ export class CameraStream {
           this.#send("cam:media", d.byteOffset === 0 && d.byteLength === d.buffer.byteLength ? d : new Uint8Array(d));
         }
         if (signal.aborted) return;
+        if (refreshing) {
+          this.#refreshed();
+          continue;
+        }
         if (dropped) {
           log.info(`stopped recovering ${cameraId} ch${this.channel}: ${dropped}`);
           continue;
@@ -194,6 +224,10 @@ export class CameraStream {
         await this.#sleep(this.#opts.restartGapMs ?? RESTART_GAP_MS, signal);
       } catch (err) {
         if (signal.aborted) return;
+        if (refreshing) {
+          this.#refreshed();
+          continue;
+        }
         if (dropped) {
           log.info(`stopped recovering ${cameraId} ch${this.channel}: ${dropped}`);
           continue;
@@ -209,9 +243,15 @@ export class CameraStream {
         await this.#sleep(wait, signal);
       } finally {
         clearInterval(monitor);
+        clearTimeout(refreshTimer);
         try { await sub[Symbol.asyncDispose](); } catch { /* already closed */ }
       }
     }
+  }
+
+  #refreshed() {
+    this.#opts.log.debug(`refreshing ${this.#opts.cameraId} ch${this.channel} on its timer`);
+    this.#opts.onRefresh?.();
   }
 
   #send(channel, payload) {

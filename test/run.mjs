@@ -692,6 +692,53 @@ async function streamsSuite() {
   check("the status spinner stops after about 20 s instead of spinning through a whole outage",
     spin?.count === "22" && spin.runningAfterRestart === true, JSON.stringify(spin));
   console.log(`  results: ${userData2}`);
+
+  // 3. Every live stream starts over on a timer (camera-stream.js, REFRESH_MS), because a camera
+  // page's CPU grows with the age of its player. Every 4-5 s here instead of 30-37.5 min. The
+  // picture must stay up through each one with no "Connecting…", the 360° view must keep drawing,
+  // and the load line counts them apart from restarts.
+  const userData3 = tmpDir("streams-refresh");
+  const keys3 = { lobby: `${A}/aaaaaaaa-cam0`, fish: `${A}/aaaaaaaa-cam360` };
+  fs.writeFileSync(path.join(userData3, "config.json"), JSON.stringify({
+    version: 1,
+    consoles: [{ id: A, name: "Building", host: "mock-a", username: "m", password: null, mockCameras: ["Lobby"] }],
+    windows: { [keys3.lobby]: win(0, 0), [keys3.fish]: win(500, 0) },
+    settings: { startHidden: true },
+  }, null, 2));
+  const { result: r3 } = await runApp({
+    userData: userData3, results: path.join(userData3, "results"), seconds: 20, extraArgs: ["--mock"],
+    env: {
+      PANES_MOCK_FISHEYE: path.join(FIXTURES, "fisheye-ceiling.png"),
+      PANES_STREAM_REFRESH_MS: "4000",
+      PANES_LOAD_LOG_MS: "18000",
+      PANES_SELFTEST_ACTIONS: JSON.stringify([...pictureProbes(3000, 17500, { win: 0 }), ...pictureProbes(3000, 17500, { win: 1 }).filter((_, i) => i % 3 === 0)]),
+    },
+  });
+  const subs3 = r3.connections[A]?.subscriptions ?? {};
+  check("each live stream starts over on its timer (a new subscription each time)",
+    subs3["aaaaaaaa-cam0"] >= 3 && subs3["aaaaaaaa-cam360"] >= 3, JSON.stringify(subs3));
+  const end3 = r3.samples.at(-1)?.cams ?? {};
+  for (const [name, k] of [["plain", keys3.lobby], ["360°", keys3.fish]]) {
+    // A sample can land mid-refresh ("connecting"), and each new player counts its frames from 0: so
+    // the last live sample, which must be on the third player or later, with frames decoded.
+    const seen = r3.samples.map((s) => s.cams[k]).filter((c) => c && !c.error);
+    const lastLive = seen.filter((c) => c.status === "live").at(-1);
+    check(`its page rebuilds its player each time, asks for no restart, and plays on (${name})`,
+      end3[k]?.rebuilds >= 3 && end3[k].resetRequests === 0 && lastLive?.rebuilds >= 3 && lastLive.decodedFrames > 0,
+      JSON.stringify(seen.map((c) => [c.status, c.rebuilds, c.decodedFrames, c.resetRequests])));
+  }
+  check("the 360° view still draws after the refreshes", end3[keys3.fish]?.dewarp?.active && end3[keys3.fish].dewarp.hasFrame, JSON.stringify(end3[keys3.fish]?.dewarp));
+  for (const [name, w] of [["plain", 0], ["360°", 1]]) {
+    const ps = probed(r3, (a) => a.win === w);
+    const from = ps.slice(ps.findIndex((p) => p.shown));
+    check(`the picture stays up through every refresh, with no "Connecting…" (${name})`,
+      from.length >= (w === 0 ? 100 : 30) && from.every((p) => p.shown && !p.text), fmtProbes(ps));
+  }
+  const log3 = fs.readFileSync(path.join(userData3, "protect-panes.log"), "utf8");
+  const load3 = /\[load\] last .*/.exec(log3)?.[0] ?? "";
+  check("the load line counts the timed refreshes apart from page restarts",
+    Number(/timed refreshes (\d+)$/.exec(load3)?.[1]) >= 3 && /no page restarts/.test(load3) && !/renderer requested reset/.test(log3), load3);
+  console.log(`  results: ${userData3}`);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1062,6 +1109,12 @@ async function connectionSuite() {
   const ec = out.endsCleanly;
   check("a stream that ends without an error waits before subscribing again, and says it's reconnecting",
     ec?.subs >= 2 && ec.subs <= 6 && ec.reconnecting, JSON.stringify(ec));
+  // 600 ms with a refresh 100-125 ms after each start: about five subscriptions. The 1 s restart gap
+  // would allow one at most, had a refresh been taken for a stream that ended.
+  const rf = out.refreshed;
+  check("a live stream starts over on its timer: a new subscription and init each time, counted, no wait and no \"reconnecting\"",
+    rf?.subs >= 3 && rf.inits === rf.subs && rf.refreshes >= rf.subs - 1 && rf.refreshes <= rf.subs && rf.gaps.every((g) => g >= 90 && g < 400) && !rf.reconnecting,
+    JSON.stringify(rf));
   const np = out.noPassword;
   check("a console with no saved password (imported) asks for it, and doesn't log in with none",
     np?.state === "authfailed" && /No password saved/.test(np.message) && np.calls === 0, JSON.stringify(np));

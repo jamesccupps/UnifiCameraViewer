@@ -70,7 +70,7 @@ npm run test:bounds       # window and grid sizes stay put across launches at a 
 npm run test:connection   # ConsoleConnection and CameraStream unit checks with fake library objects (runs under Electron's Node)
 npm run test:config       # config.json recovery (.bak fallback) and odd shapes that must not stop startup
 npm run test:security     # pages can't navigate, open windows or get permissions; IPC answers only the app's pages
-npm run test:streams      # stream recovery: a camera going offline while viewed, a stream that never decodes, a frozen picture, a crashed camera page, a lost WebGL context, an unplayable codec
+npm run test:streams      # stream recovery: a camera going offline while viewed, a stream that never decodes, a frozen picture, a crashed camera page, a lost WebGL context, an unplayable codec; the timed refresh
 npm run test:range        # SPS color-range rewrite (unit, ffmpeg fixtures) + displayed pixel levels in Chromium, Adjust picture
 npm run test:layouts      # save / apply named layouts, import a Protect liveview, switch from the tray
 npm run test:update       # signed manifest, verified download, the real swap helper (folder, installer, app.asar), camera-list Updates
@@ -152,6 +152,14 @@ site/                       The project page, https://jamesccupps.github.io/Unif
    - A `connecting` status over a picture says nothing for `QUIET_MS` (4 s). After `live` (a quality change) the overlay stays hidden, because the picture is current. After `paused` it shows dimmed, with no words (`.status.quiet`), because the picture is older. After 4 s without video it says "Connecting…" as before. Never after a failed decode (`failedResets`): that says what's happening at once.
    - Before: "Connecting…" for about half a second, then black until the first frame. Measured with the mock: no blank probe at 100 ms on this PC, so the black was short; the words were what showed. The mock suite (a window's Quality change) and the grid suite (tiles coming back after Enlarge) probe the page every 100 ms. Both fail on 1.4.9 because of the words.
 6. 360°: `Dewarper` reads `<video>` frames as a WebGL texture (on `requestVideoFrameCallback`) and draws the views. The video element stays rendered *under* the canvas: rVFC doesn't fire for hidden videos.
+7. **Timed refresh** (`REFRESH_MS` in camera-stream.js). Every live stream starts over 30 to 37.5 minutes after its last init. The random extra quarter keeps a PC's windows from all going at once. It counts from any init, so a stream that was restarted for another reason waits its full time again.
+   - How: the timer aborts the subscription the way a dropped one is, and the loop subscribes again with no gap and no "reconnecting". The new init rebuilds the page's player behind the held frame, as for a quality change. A refresh that comes due while the stream isn't live tries again every 10 s.
+   - It's logged only with `PANES_DEBUG=1`. The hourly load line counts it as `timed refreshes`, apart from page restarts.
+   - Why: on Camera Desktop (2026-11-25, 1.4.15, 14 windows on a 35 W i3), each camera page's CPU followed the age of its player. Lining up each renderer with its camera, and that camera with its last restart in the log, gave about 4 % of a core plus 9 % per hour, r = 0.95 over the 14, 360° or plain alike. Reconnect stream on one window put it at the bottom (8.8 %); 6-hour-old players ran at 59-71 %.
+     - Left alone, the PC pegged within hours. The oldest players then fell behind ("decoder falling behind"), and the reset that followed made them cheap again: the restart storms and the sawtooth in its CPU. The layout growing from about 9 windows to 14 (2026-11-20) brought the storms on, not 1.4.13.
+     - camera.js keeps no per-session state that grows, so the cost builds up inside Chromium's player or in the library's subscription; a refresh renews both. Which one isn't known.
+   - The cost: one stream setup per camera every half hour or so, and a freeze of well under a second on the held frame. The owner saw nothing on screen when they reconnected a window.
+   - `PANES_STREAM_REFRESH_MS` shortens it in self-test runs only. The streams suite's third launch refreshes every 4-5 s: it probes the picture every 100 ms (never blank, never "Connecting…"), checks that each page rebuilt and asked for no restart, and checks the load line's count.
 
 ## IPC
 
@@ -185,6 +193,7 @@ Adding a channel means editing **both** the preload allowlist and `registerIpc()
     - The video that came in: MB or GB, average Mbps, and the three busiest cameras. It's counted per page, so a window and a grid tile sharing one pooled socket count twice.
     - The PC's free RAM.
     - The page-asked stream restarts since the last line, by reason.
+    - The streams started over on their timer (`timed refreshes N`, How video flows step 7). These aren't restarts: nothing failed.
 
     Why: the owner's camera PC (2026-11: 14 windows, 10 of them 360° Quad views, on a 35 W i3) slowed over days, and its log held only thousands of single restart lines. Tests set `PANES_LOAD_LOG_MS` (test runs only), and the streams suite checks the line against the restarts it logged.
 

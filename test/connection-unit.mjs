@@ -209,6 +209,43 @@ const out = {};
   out.endsCleanly = { subs, reconnecting: statuses.includes("reconnecting") };
 }
 
+// CameraStream starts a live stream over on its timer (REFRESH_MS, here 100-125 ms): a new
+// subscription, so a new init and a rebuilt player on the page, counted for the load line, and with
+// no wait and no "reconnecting", since nothing failed.
+{
+  let subs = 0;
+  let inits = 0;
+  let refreshes = 0;
+  const statuses = [];
+  const at = [];
+  const sub = ({ signal }) => {
+    subs++;
+    at.push(performance.now());
+    return {
+      state: "live",
+      initSegment: { codec: "avc1.4d401f", data: new Uint8Array(8) },
+      async *[Symbol.asyncIterator]() {
+        yield { type: "init", codec: "avc1.4d401f", data: new Uint8Array(8) };
+        while (!signal.aborted) {
+          await new Promise((r) => setTimeout(r, 10));
+          yield { type: "media", data: new Uint8Array(8) };
+        }
+      },
+      async [Symbol.asyncDispose]() {},
+    };
+  };
+  const cam = { isOnline: true, config: { channels: [{ id: 1, enabled: true }] }, livestream: sub };
+  const stream = new CameraStream({
+    getConnection: () => ({ state: "connected", name: "C", camera: () => cam }),
+    cameraId: "cam", resolveChannel: () => 1, log: quiet, refreshMs: 100, restartGapMs: 1_000, onRefresh: () => refreshes++,
+    send: (ch, p) => { if (ch === "cam:init") inits++; if (ch === "cam:status") statuses.push(p.state); },
+  });
+  stream.start();
+  await new Promise((r) => setTimeout(r, 600));
+  stream.stop();
+  out.refreshed = { subs, inits, refreshes, gaps: at.slice(1).map((t, i) => Math.round(t - at[i])), reconnecting: statuses.includes("reconnecting") };
+}
+
 // UniFi Access readers (bare-livestream.js). ffmpeg makes 2 s of real fragmented MP4 with an AAC
 // track; it goes into bareLivestream through a fake socket the way each kind of camera sends it.
 {

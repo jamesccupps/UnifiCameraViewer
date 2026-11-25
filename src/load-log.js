@@ -3,7 +3,7 @@ import os from "node:os";
 /*
  * One line in the log each hour with what the app cost over that hour: CPU and RAM by process kind,
  * the streams playing, the video that came in (total, rate and the busiest cameras), the PC's free
- * RAM, and the camera pages' stream restarts by reason.
+ * RAM, the camera pages' stream restarts by reason, and the streams started over on their timer.
  *
  * Why: a wall PC that slowed down over days (Camera Desktop, 2026-11: 14 windows, 10 of them 360°
  * Quad views, on a 35 W i3) left only a one-off snapshot of its processes and thousands of single
@@ -28,6 +28,7 @@ export class LoadLog {
   #cpuSeen = new Map(); // "<pid>/<creationTime>" -> cumulative CPU seconds at the last line
   #since;
   #restarts = new Map();
+  #refreshes = 0;
   #bytes = new Map(); // camera key -> video bytes sent to its pages since the last line
 
   /**
@@ -59,6 +60,11 @@ export class LoadLog {
     let key = String(reason).slice(0, 40);
     if (!this.#restarts.has(key) && this.#restarts.size >= MAX_REASONS) key = "other";
     this.#restarts.set(key, (this.#restarts.get(key) ?? 0) + 1);
+  }
+
+  /** A live stream started over on its timer (camera-stream.js, REFRESH_MS). Not a restart: nothing failed. */
+  refresh() {
+    this.#refreshes++;
   }
 
   /** A video fragment went to a camera page. */
@@ -117,9 +123,11 @@ export class LoadLog {
     const restartCount = restarts.reduce((n, [, c]) => n + c, 0);
     this.#restarts.clear();
     const restartText = restartCount ? `page restarts ${restartCount} (${restarts.map(([r, c]) => `${r} ${c}`).join(", ")})` : "no page restarts";
+    const refreshText = `timed refreshes ${this.#refreshes}`;
+    this.#refreshes = 0;
 
     const span = seconds < 120 ? `${Math.round(seconds)} s` : `${Math.round(seconds / 60)} min`;
-    return `last ${span}: CPU (% of one core) ${cpu.join(", ")}; RAM ${ram.join(", ")}; ${streamText}; ${videoText}; PC RAM free ${gb(free)} of ${gb(total)} GB; ${restartText}`;
+    return `last ${span}: CPU (% of one core) ${cpu.join(", ")}; RAM ${ram.join(", ")}; ${streamText}; ${videoText}; PC RAM free ${gb(free)} of ${gb(total)} GB; ${restartText}; ${refreshText}`;
   }
 
   #cpuTotals(metrics) {

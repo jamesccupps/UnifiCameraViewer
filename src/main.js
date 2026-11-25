@@ -21,6 +21,9 @@ const ASSETS = path.join(__dirname, "..", "assets");
 const MOCK = process.argv.includes("--mock");
 const PROJECT_URL = "https://github.com/jamesccupps/UnifiCameraViewer";
 const IS_WIN = process.platform === "win32";
+// How often each live stream starts over (camera-stream.js says why). PANES_STREAM_REFRESH_MS is for
+// test runs only; unset, CameraStream's own 30 minutes.
+const STREAM_REFRESH_MS = (process.env.PANES_SELFTEST_DIR && Number(process.env.PANES_STREAM_REFRESH_MS)) || undefined;
 
 if (process.env.PANES_USER_DATA) app.setPath("userData", process.env.PANES_USER_DATA);
 else if (MOCK) app.setPath("userData", path.join(app.getPath("appData"), "Protect Panes (mock)"));
@@ -409,6 +412,8 @@ function openCameraWindow(key, { flash = true, raise = false } = {}) {
       if (!win.isDestroyed()) win.webContents.send(channel, payload);
       if (channel === "cam:media") loadLog.media(key, payload.byteLength);
     },
+    refreshMs: STREAM_REFRESH_MS,
+    onRefresh: () => loadLog.refresh(),
     log: log.child(`cam ${cameraId.slice(-6)}`),
   });
 
@@ -968,6 +973,8 @@ function makeTilePlayer({ gw, index, tile, wc, like = null, autoChannel }) {
       // tile should say the camera is offline, not keep showing the one before it.
       if (channel === "cam:status" && (payload.state === "offline" || payload.state === "error")) gw.ready(cw, payload.state);
     },
+    refreshMs: STREAM_REFRESH_MS,
+    onRefresh: () => loadLog.refresh(),
     log: log.child(`grid ${cameraId.slice(-6)}`),
   });
   senders.set(wc.id, cw);
